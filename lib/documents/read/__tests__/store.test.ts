@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../router', () => ({ readDocumentBytes: vi.fn() }))
 vi.mock('@/lib/core/documents/document-service', () => ({ downloadDocumentObject: vi.fn() }))
+vi.mock('@/lib/ai', () => ({ getAiStatus: vi.fn(() => ({ configured: true })) }))
 
 import { readAndStoreDocument, readUnreadDocuments } from '../store'
 import { readDocumentBytes } from '../router'
@@ -11,7 +12,7 @@ type Call = { table: string; op: string; payload?: unknown; filters: Record<stri
 
 // A minimal chainable Supabase double that records every write and answers
 // the unread-batch select with the rows given.
-function makeSupabase(unread: Array<Record<string, unknown>> = []) {
+function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<Record<string, unknown>> = []) {
   const calls: Call[] = []
   const chain = (table: string) => {
     const state: Call = { table, op: '', filters: {} }
@@ -26,8 +27,9 @@ function makeSupabase(unread: Array<Record<string, unknown>> = []) {
       return api
     }
     api.is = () => api
+    api.in = () => { state.op = 'select-retry'; return api }
     api.order = () => api
-    api.limit = () => { calls.push(state); return Promise.resolve({ data: unread, error: null }) }
+    api.limit = () => { calls.push(state); return Promise.resolve({ data: state.op === 'select-retry' ? retry : unread, error: null }) }
     return api
   }
   return { supabase: { from: (t: string) => chain(t) } as never, calls }
@@ -37,7 +39,7 @@ const doc = { id: 'doc-1', company_id: 'co-1', storage_path: 'documents/co-1/u/1
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>
 
 describe('readAndStoreDocument', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.clearAllMocks(); process.env.ARKIV_COMPANY_IDS = 'co-1' })
 
   it('replaces the pages and stamps the document with the page count', async () => {
     asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('%PDF-')]), error: null, resolvedPath: doc.storage_path })
@@ -70,12 +72,23 @@ describe('readAndStoreDocument', () => {
     expect(calls[0].payload).toMatchObject({ read_error: 'structured', page_count: null })
   })
 
-  it('leaves the row unstamped when the model is unconfigured so a later run retries', async () => {
+  it('stamps ai_unconfigured so the backfill retry pass can find the row later', async () => {
     asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('jpg')]), error: null, resolvedPath: 'p' })
     asMock(readDocumentBytes).mockResolvedValue({ ok: false, skipped: 'ai_unconfigured' })
     const { supabase, calls } = makeSupabase()
     expect(await readAndStoreDocument(supabase, { ...doc, mime_type: 'image/jpeg' })).toEqual({ status: 'skipped', reason: 'ai_unconfigured' })
-    expect(calls).toEqual([])
+    expect(calls[0].payload).toMatchObject({ read_error: 'ai_unconfigured', page_count: 0 })
+  })
+
+  it('reads text layers for a company outside the rollout but never calls the model', async () => {
+    process.env.ARKIV_COMPANY_IDS = 'someone-else'
+    asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('%PDF-')]), error: null, resolvedPath: 'p' })
+    asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'pdf_text', pageCount: 2, partial: 'ai_gated', pages: [{ pageNo: 1, text: 'a', reader: 'pdf_text', hasTextLayer: true }] })
+    const { supabase, calls } = makeSupabase()
+    const out = await readAndStoreDocument(supabase, doc)
+    expect(readDocumentBytes).toHaveBeenCalledWith(expect.any(Buffer), 'application/pdf', { allowModel: false })
+    expect(out).toEqual({ status: 'read', pages: 1, reader: 'pdf_text', partial: 'partial:ai_gated' })
+    expect(calls.at(-1)!.payload).toMatchObject({ read_error: 'partial:ai_gated', page_count: 2 })
   })
 
   it('records a download failure as a read error and stamps the row', async () => {
@@ -88,6 +101,17 @@ describe('readAndStoreDocument', () => {
 })
 
 describe('readUnreadDocuments', () => {
+  beforeEach(() => { vi.clearAllMocks(); process.env.ARKIV_COMPANY_IDS = 'co-1' })
+
+  it('retries gated rows only for companies now in the rollout, after the unread batch', async () => {
+    asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
+    asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'claude_vision', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'claude_vision', hasTextLayer: false }] })
+    const { supabase } = makeSupabase([], [{ ...doc, id: 'r1', mime_type: 'image/jpeg' }, { ...doc, id: 'r2', company_id: 'other', mime_type: 'image/jpeg' }])
+    expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 1, read: 1, skipped: 0, errors: 0 })
+    expect(readDocumentBytes).toHaveBeenCalledTimes(1)
+    expect(readDocumentBytes).toHaveBeenCalledWith(expect.any(Buffer), 'image/jpeg', { allowModel: true })
+  })
+
   it('walks the unread batch and counts outcomes', async () => {
     asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
     asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'office', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'office', hasTextLayer: true }] })

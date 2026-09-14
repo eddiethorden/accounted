@@ -3,13 +3,13 @@ import { extractSinglePagePdf, readPdfTextLayer } from './pdf'
 import { readOfficeDocument } from './office'
 import { readTextDocument } from './text'
 import { readImageWithModel, transcribeWithModel } from './vision'
-import { readerForMime, type ReadOutcome, type ReadPage } from './types'
+import { readerForMime, type ModelSkipReason, type ReadOptions, type ReadOutcome, type ReadPage } from './types'
 
 /**
  * Decide how a document is read and read it. Text layers first (local, free,
  * with word boxes), the model only for scanned pages and photos.
  */
-export async function readDocumentBytes(bytes: Buffer, mimeType: string | null | undefined): Promise<ReadOutcome> {
+export async function readDocumentBytes(bytes: Buffer, mimeType: string | null | undefined, opts: ReadOptions = { allowModel: true }): Promise<ReadOutcome> {
   const reader = readerForMime(mimeType)
   if (reader === null) return { ok: false, skipped: 'unsupported_mime' }
   if (reader === 'structured') return { ok: false, skipped: 'structured' }
@@ -18,23 +18,23 @@ export async function readDocumentBytes(bytes: Buffer, mimeType: string | null |
   if (reader === 'pdf_text') {
     const local = await readPdfTextLayer(bytes)
     const pages: ReadPage[] = [...local.pages]
+    let partial: ModelSkipReason | undefined
     for (const pageNo of local.pagesNeedingVision) {
+      if (!opts.allowModel) { partial = 'ai_gated'; break }
       const single = await extractSinglePagePdf(bytes, pageNo)
       const out = await transcribeWithModel({ kind: 'pdf', data: single, fileName: `page-${pageNo}.pdf` })
-      if (!out.ok) {
-        // Text pages are still worth keeping; the scanned ones wait for a configured model.
-        if (pages.length === 0) return { ok: false, skipped: 'ai_unconfigured' }
-        break
-      }
+      if (!out.ok) { partial = 'ai_unconfigured'; break }
       if (out.text) pages.push({ pageNo, text: out.text, reader: 'claude_vision', hasTextLayer: false })
     }
     pages.sort((a, b) => a.pageNo - b.pageNo)
-    if (pages.length === 0) return { ok: false, skipped: 'empty' }
+    // Text pages are worth keeping on their own; the scanned ones wait for the model.
+    if (pages.length === 0) return { ok: false, skipped: partial ?? 'empty' }
     const readerUsed = local.pages.length > 0 ? 'pdf_text' : 'claude_vision'
-    return { ok: true, pages, reader: readerUsed, pageCount: local.pageCount }
+    return { ok: true, pages, reader: readerUsed, pageCount: local.pageCount, ...(partial ? { partial } : {}) }
   }
 
   if (reader === 'claude_vision') {
+    if (!opts.allowModel) return { ok: false, skipped: 'ai_gated' }
     const out = await readImageWithModel(bytes, mimeType as AiImageMediaType)
     if (!out.ok) return { ok: false, skipped: 'ai_unconfigured' }
     if (out.pages.length === 0) return { ok: false, skipped: 'empty' }

@@ -67,6 +67,7 @@ describe('readDocumentBytes', () => {
     mock(transcribeWithModel).mockResolvedValue({ ok: false, skipped: 'ai_unconfigured' })
     const out = await readDocumentBytes(Buffer.from('%PDF-'), 'application/pdf')
     expect(out.ok && out.pages.length).toBe(1)
+    expect(out).toMatchObject({ partial: 'ai_unconfigured' })
   })
 
   it('reports ai_unconfigured for a fully scanned PDF and for a photo when no model is configured', async () => {
@@ -87,6 +88,21 @@ describe('readDocumentBytes', () => {
     mock(readOfficeDocument).mockResolvedValue([{ pageNo: 1, text: '# Avtal', reader: 'office', hasTextLayer: true }])
     expect(await readDocumentBytes(Buffer.from('PK'), DOCX)).toMatchObject({ ok: true, reader: 'office' })
     expect(readImageWithModel).toHaveBeenCalledTimes(1)
+  })
+
+  it('never calls the model when the company is outside the rollout, and says so', async () => {
+    mock(readPdfTextLayer).mockResolvedValue({
+      pages: [{ pageNo: 1, text: 'Sida 1', reader: 'pdf_text', hasTextLayer: true }],
+      pagesNeedingVision: [2],
+      pageCount: 2,
+      pdfType: 'Mixed',
+    })
+    const mixed = await readDocumentBytes(Buffer.from('%PDF-'), 'application/pdf', { allowModel: false })
+    expect(mixed).toMatchObject({ ok: true, partial: 'ai_gated' })
+    expect(mixed.ok && mixed.pages.length).toBe(1)
+    expect(await readDocumentBytes(Buffer.from('jpg'), 'image/jpeg', { allowModel: false })).toEqual({ ok: false, skipped: 'ai_gated' })
+    expect(transcribeWithModel).not.toHaveBeenCalled()
+    expect(readImageWithModel).not.toHaveBeenCalled()
   })
 
   it('reads HTML mail bodies as text without any reader', async () => {

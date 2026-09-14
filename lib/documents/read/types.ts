@@ -25,10 +25,24 @@ export interface ReadPage {
   pageHeight?: number
 }
 
+export type ModelSkipReason = 'ai_unconfigured' | 'ai_gated'
+
 export type ReadOutcome =
-  | { ok: true; pages: ReadPage[]; reader: PageReader; pageCount: number }
-  /** Nothing to read and never will be: structured archives (XML, JSON), unknown binaries. */
-  | { ok: false; skipped: 'structured' | 'unsupported_mime' | 'ai_unconfigured' | 'empty' }
+  | {
+      ok: true
+      pages: ReadPage[]
+      reader: PageReader
+      pageCount: number
+      /** Set when some pages needed the model and it was gated or unconfigured: the text pages are stored, the rest waits. */
+      partial?: ModelSkipReason
+    }
+  /** Nothing to read: structured archives (XML, JSON), unknown binaries, an empty file, or a scan whose model is gated or unconfigured. */
+  | { ok: false; skipped: 'structured' | 'unsupported_mime' | 'empty' | ModelSkipReason }
+
+export interface ReadOptions {
+  /** False for companies outside the Arkiv rollout: text layers are still read, the model is never called. */
+  allowModel: boolean
+}
 
 /** MIME types the reading layer understands. Kept in one place so the upload allowlist and the router agree. */
 export const OFFICE_MIME_TYPES = [
