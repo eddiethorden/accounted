@@ -202,7 +202,9 @@ const KNOWN_STALE_ON_CONFLICT: Record<string, string> = {}
 // provenance upsert names its conflict target from the row's own keys. The
 // columns are literal inside each callback; the scanner reads only object
 // and array literals. 408 -> 412.
-const UNRESOLVED_CEILING = 412
+// Phase 4 links and agreements: lib/arkiv/agreements/store.ts syncObligations
+// inserts one row per due date built by a map, same shape as above. 412 -> 413.
+const UNRESOLVED_CEILING = 413
 
 /**
  * Floor on statically resolved column references. Guards the guard: if a change
