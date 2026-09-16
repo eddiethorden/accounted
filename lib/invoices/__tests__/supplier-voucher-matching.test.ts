@@ -792,7 +792,7 @@ describe('findMatchingVouchersForSupplierInvoice', () => {
         remaining_amount: 1000,
         currency: 'SEK',
         due_date: '2026-03-12',
-        supplier_invoice_number: null,
+        supplier_invoice_number: '',
         arrival_number: 14,
       })
       const partial = await search([apRow(400, 'Levbet faktura 14')], inv14)
