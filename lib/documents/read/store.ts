@@ -3,7 +3,9 @@ import { downloadDocumentObject } from '@/lib/core/documents/document-service'
 import { getAiStatus } from '@/lib/ai'
 import { arkivRollout, isArkivEnabled } from '@/lib/arkiv/flag'
 import { createLogger } from '@/lib/logger'
+import { recordArkivUsage } from '@/lib/arkiv/usage'
 import { readDocumentBytes } from './router'
+import { readLaneFor, readPlanFor, isActingType, type ReadPlan } from './lanes'
 import { READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
 
 const log = createLogger('documents/read')
@@ -13,7 +15,17 @@ export interface ReadableDocumentRow {
   company_id: string | null
   storage_path: string
   mime_type: string | null
+  /** The lane fields (phase 9f); a row without them reads as live. */
+  created_at?: string | null
+  journal_entry_id?: string | null
+  journal_entry_line_id?: string | null
+  doc_type?: string | null
+  pages_read_at?: string | null
+  read_error?: string | null
 }
+
+/** Everything the lanes need to decide, in one select. */
+export const LANE_COLUMNS = 'id, company_id, storage_path, mime_type, created_at, journal_entry_id, journal_entry_line_id, doc_type, pages_read_at, read_error'
 
 export type StoreOutcome =
   | { status: 'read'; pages: number; reader: string; partial?: string }
@@ -23,7 +35,7 @@ export type StoreOutcome =
 export const isReaderUnavailable = (out: StoreOutcome) => out.status === 'error' && out.reason.startsWith(READER_UNAVAILABLE)
 
 /** Reasons the backfill retries later: the model was gated or unconfigured when the row was read. */
-const RETRY_REASONS = ['ai_gated', 'ai_unconfigured', 'partial:ai_gated', 'partial:ai_unconfigured']
+const RETRY_REASONS = ['ai_gated', 'ai_unconfigured', 'partial:ai_gated', 'partial:ai_unconfigured', 'partial:budget']
 
 /**
  * Read one document and store its pages. Idempotent: pages for the document
@@ -37,7 +49,7 @@ const RETRY_REASONS = ['ai_gated', 'ai_unconfigured', 'partial:ai_gated', 'parti
 export async function readAndStoreDocument(
   supabase: SupabaseClient,
   doc: ReadableDocumentRow,
-  opts: { allowModel?: boolean } = {},
+  opts: { allowModel?: boolean; maxModelPages?: number | null } = {},
 ): Promise<StoreOutcome> {
   const allowModel = opts.allowModel ?? isArkivEnabled(doc.company_id)
   if (!doc.company_id) return stamp(supabase, doc.id, { status: 'skipped', reason: 'no_company' }, null)
@@ -53,7 +65,7 @@ export async function readAndStoreDocument(
 
   let outcome: ReadOutcome
   try {
-    outcome = await readDocumentBytes(bytes, doc.mime_type, { allowModel })
+    outcome = await readDocumentBytes(bytes, doc.mime_type, { allowModel, maxModelPages: opts.maxModelPages ?? null })
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
     if (err instanceof ReaderUnavailableError) {
@@ -85,6 +97,10 @@ export async function readAndStoreDocument(
   if (delError) return stamp(supabase, doc.id, { status: 'error', reason: `pages_delete_failed: ${delError.message}` }, null)
   const { error: insError } = await supabase.from('document_pages').insert(rows)
   if (insError) return stamp(supabase, doc.id, { status: 'error', reason: `pages_insert_failed: ${insError.message}` }, null)
+  // The meter (phase 9e): every page read, and the model's pages once more as the costly kind. Every read path passes here.
+  await recordArkivUsage(supabase, doc.company_id, 'pages_read', rows.length)
+  const visionPages = rows.filter((r) => r.reader === 'claude_vision').length
+  if (visionPages > 0) await recordArkivUsage(supabase, doc.company_id, 'pages_vision', visionPages)
   return stamp(
     supabase,
     doc.id,
@@ -105,6 +121,18 @@ export function storableText(s: string): string {
     .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
 }
 
+/** The lane's plan for this document now: null when nothing more is read up front. */
+export function planForDocument(doc: ReadableDocumentRow, now = new Date()): ReadPlan | null {
+  return readPlanFor({ lane: readLaneFor(doc, now), inRollout: isArkivEnabled(doc.company_id), docType: doc.doc_type ?? null, pagesRead: !!doc.pages_read_at })
+}
+
+/** Read what the lane says to read. The runner and the backfill both come through here. */
+export async function readDocumentByPlan(supabase: SupabaseClient, doc: ReadableDocumentRow, now = new Date()): Promise<{ plan: ReadPlan | null; outcome: StoreOutcome | null }> {
+  const plan = planForDocument(doc, now)
+  if (!plan) return { plan: null, outcome: null }
+  return { plan, outcome: await readAndStoreDocument(supabase, doc, { allowModel: plan.allowModel, maxModelPages: plan.maxModelPages }) }
+}
+
 async function stamp(supabase: SupabaseClient, documentId: string, outcome: StoreOutcome, pageCount: number | null): Promise<StoreOutcome> {
   const readError = outcome.status === 'read' ? (outcome.partial ?? null) : outcome.reason
   const { error } = await supabase
@@ -116,30 +144,47 @@ async function stamp(supabase: SupabaseClient, documentId: string, outcome: Stor
 }
 
 /**
- * Backfill, in the order someone is waiting: unread documents of the companies
- * in the rollout, then their documents whose model pages were gated or
- * unconfigured last time (only when a model is configured), then the newest
- * unread documents of everyone else. The platform holds far more unread files
- * than one run reads, so without that order a company switched on today waits
- * behind every other archive. budgetMs stops the batch between documents.
+ * Backfill, in the order someone is waiting and each document read by its
+ * lane (phase 9f): unread documents of the companies in the rollout, then
+ * their documents whose model pages were gated, unconfigured or over budget
+ * last time (only when a model is configured, and for voucher-tied history
+ * only while the company's daily page budget, ARKIV_BACKFILL_PAGES_PER_DAY,
+ * has room), then the newest unread documents of everyone else, text layers
+ * only. The platform holds far more unread files than one run reads, so
+ * without that order a company switched on today waits behind every other
+ * archive. budgetMs stops the batch between documents.
  */
 export async function readUnreadDocuments(
   supabase: SupabaseClient,
   limit: number,
-  opts: { budgetMs?: number } = {},
+  opts: {
+    budgetMs?: number
+    budgetPagesPerDay?: number
+    now?: Date
+    onRead?: (doc: ReadableDocumentRow, outcome: Extract<StoreOutcome, { status: 'read' }>) => Promise<void>
+  } = {},
 ): Promise<{ processed: number; read: number; skipped: number; errors: number }> {
+  const now = opts.now ?? new Date()
+  const budget = Math.max(0, Math.floor(opts.budgetPagesPerDay ?? 0))
   const counts = { processed: 0, read: 0, skipped: 0, errors: 0 }
   const startedAt = Date.now()
-  const spent = () => counts.processed >= limit || (opts.budgetMs !== undefined && Date.now() - startedAt >= opts.budgetMs)
+  const spentTime = () => counts.processed >= limit || (opts.budgetMs !== undefined && Date.now() - startedAt >= opts.budgetMs)
+  const tally = async (doc: ReadableDocumentRow, out: StoreOutcome) => {
+    counts.processed++
+    if (out.status === 'read') {
+      counts.read++
+      // The caller queues what follows a read (the classification); the store stays free of the queue.
+      if (opts.onRead) await opts.onRead(doc, out)
+    } else if (out.status === 'skipped') counts.skipped++
+    else counts.errors++
+  }
   // False when the reader is missing: that fails every document the same way, so stop and try again next run.
-  const walk = async (docs: ReadableDocumentRow[], readOpts?: { allowModel?: boolean }): Promise<boolean> => {
+  const walkByPlan = async (docs: ReadableDocumentRow[]): Promise<boolean> => {
     for (const doc of docs) {
-      if (spent()) return true
-      const out = await readAndStoreDocument(supabase, doc, readOpts)
-      counts.processed++
-      if (out.status === 'read') counts.read++
-      else if (out.status === 'skipped') counts.skipped++
-      else counts.errors++
+      if (spentTime()) return true
+      const { outcome } = await readDocumentByPlan(supabase, doc, now)
+      const out = outcome ?? { status: 'skipped' as const, reason: 'lane_done' }
+      await tally(doc, out)
       if (isReaderUnavailable(out)) return false
     }
     return true
@@ -150,34 +195,63 @@ export async function readUnreadDocuments(
   if (companies && companies.length > 0) {
     const { data, error } = await supabase
       .from('document_attachments')
-      .select('id, company_id, storage_path, mime_type')
+      .select(LANE_COLUMNS)
       .is('pages_read_at', null)
       .in('company_id', companies)
       .order('created_at', { ascending: false })
       .limit(limit)
     if (error) throw new Error(`fetch rollout documents failed: ${error.message}`)
-    if (!(await walk((data ?? []) as ReadableDocumentRow[]))) return counts
+    if (!(await walkByPlan((data ?? []) as ReadableDocumentRow[]))) return counts
   }
 
-  if (!spent() && getAiStatus().configured && (companies === null || companies.length > 0)) {
-    let retry = supabase
-      .from('document_attachments')
-      .select('id, company_id, storage_path, mime_type')
-      .in('read_error', RETRY_REASONS)
+  if (!spentTime() && getAiStatus().configured && (companies === null || companies.length > 0)) {
+    const room = limit - counts.processed
+    let retry = supabase.from('document_attachments').select(LANE_COLUMNS).in('read_error', RETRY_REASONS)
     if (companies) retry = retry.in('company_id', companies)
-    const { data, error } = await retry.order('pages_read_at', { ascending: true }).limit(limit - counts.processed)
+    const { data, error } = await retry.order('pages_read_at', { ascending: true }).limit(room * 4)
     if (error) throw new Error(`fetch retry documents failed: ${error.message}`)
-    if (!(await walk((data ?? []) as ReadableDocumentRow[], { allowModel: true }))) return counts
+    // Vision pages already spent today per company, read once and kept as the pass spends more.
+    const spent = new Map<string, number>()
+    const roomToday = async (companyId: string): Promise<number> => {
+      if (budget <= 0) return 0
+      if (!spent.has(companyId)) {
+        const { data: rows } = await supabase
+          .from('arkiv_usage_daily')
+          .select('units')
+          .eq('company_id', companyId)
+          .eq('activity', 'pages_vision')
+          .eq('day', now.toISOString().slice(0, 10))
+          .maybeSingle()
+        spent.set(companyId, Number((rows as { units?: number } | null)?.units ?? 0))
+      }
+      return budget - (spent.get(companyId) ?? 0)
+    }
+    let taken = 0
+    for (const doc of (data ?? []) as ReadableDocumentRow[]) {
+      if (taken >= room || spentTime()) break
+      if (!doc.company_id || !isArkivEnabled(doc.company_id)) continue
+      const lane = readLaneFor(doc, now)
+      let plan: { allowModel: boolean; maxModelPages: number | null } | null = null
+      if (lane === 'live') plan = { allowModel: true, maxModelPages: null }
+      else if (lane === 'history_loose') plan = !doc.doc_type ? { allowModel: true, maxModelPages: 1 } : isActingType(doc.doc_type) ? { allowModel: true, maxModelPages: null } : null
+      else if ((await roomToday(doc.company_id)) > 0) plan = { allowModel: true, maxModelPages: null }
+      if (!plan) continue
+      taken++
+      const out = await readAndStoreDocument(supabase, doc, plan)
+      await tally(doc, out)
+      if (isReaderUnavailable(out)) return counts
+      if (lane === 'history_tied' && out.status === 'read') spent.set(doc.company_id, (spent.get(doc.company_id) ?? 0) + out.pages)
+    }
   }
 
-  if (spent()) return counts
+  if (spentTime()) return counts
   const { data, error } = await supabase
     .from('document_attachments')
-    .select('id, company_id, storage_path, mime_type')
+    .select(LANE_COLUMNS)
     .is('pages_read_at', null)
     .order('created_at', { ascending: false })
     .limit(limit - counts.processed)
   if (error) throw new Error(`fetch unread documents failed: ${error.message}`)
-  await walk((data ?? []) as ReadableDocumentRow[])
+  await walkByPlan((data ?? []) as ReadableDocumentRow[])
   return counts
 }
