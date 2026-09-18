@@ -29,10 +29,12 @@ export interface MigrationChunk {
   receipt: { link?: Omit<MigratedInvoiceLinkInput, 'invoiceId'> }
 }
 
-export async function migrationRpc<T>(supabase: SupabaseClient, job: ProviderMigrationJob, name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await supabase.rpc(name, {
+export async function migrationRpc<T>(supabase: SupabaseClient, job: ProviderMigrationJob, name: string, args: Record<string, unknown> = {}, deadline?: number): Promise<T> {
+  if (deadline !== undefined && Date.now() >= deadline) throw new Error('MIGRATION_DEADLINE')
+  const request = supabase.rpc(name, {
     p_job_id: job.id, p_worker_id: job.worker_id, p_attempt: job.attempt, ...args,
   })
+  const { data, error } = await (deadline === undefined ? request : withinMigrationDeadline(request, deadline))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return data as T
 }
@@ -40,9 +42,16 @@ export async function migrationRpc<T>(supabase: SupabaseClient, job: ProviderMig
 /** The clock bounds the entire phase, including listing and database reads. */
 export async function withinMigrationDeadline<T>(promise: PromiseLike<T>, deadline: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  const controller = new AbortController()
+  // PostgREST builders expose abortSignal. Cancel the HTTP request as well
+  // as returning control; an uncertain transaction is safe to replay.
+  if ('abortSignal' in promise && typeof promise.abortSignal === 'function') promise.abortSignal(controller.signal)
   try {
     return await Promise.race([Promise.resolve(promise), new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('MIGRATION_DEADLINE')), Math.max(0, deadline - Date.now()))
+      timer = setTimeout(() => {
+        reject(new Error('MIGRATION_DEADLINE'))
+        controller.abort()
+      }, Math.max(0, deadline - Date.now()))
     })])
   } finally { if (timer) clearTimeout(timer) }
 }
@@ -131,7 +140,7 @@ async function importBatch(supabase: SupabaseClient, job: ProviderMigrationJob, 
   let bytes = 0
   const commit = async () => {
     if (!batch.length) return
-    await migrationRpc(supabase, job, 'commit_provider_migration_records', { p_records: batch })
+    await migrationRpc(supabase, job, 'commit_provider_migration_records', { p_records: batch }, deadline)
     batch = []; bytes = 0
   }
   try {
@@ -157,7 +166,7 @@ async function importBatch(supabase: SupabaseClient, job: ProviderMigrationJob, 
   }
 }
 
-async function followupBatch(supabase: SupabaseClient, job: ProviderMigrationJob, chunks: MigrationChunk[]): Promise<void> {
+async function followupBatch(supabase: SupabaseClient, job: ProviderMigrationJob, chunks: MigrationChunk[], deadline: number): Promise<void> {
   let records: Record<string, unknown>[]
   if (job.phase === 'link') {
     const inputs = chunks.map(c => ({ ...c.receipt.link!, invoiceId: c.target_id! }))
@@ -175,7 +184,7 @@ async function followupBatch(supabase: SupabaseClient, job: ProviderMigrationJob
     records = chunks.map(c => ({ id: c.id, payment: result.links.find(link => link.supplier_invoice_id === c.target_id) ?? null,
       ...(result.review.some(review => review.supplier_invoice_id === c.target_id) ? { error: 'MIGRATION_PAYMENT_REVIEW' } : {}) }))
   } else records = chunks.map(c => ({ id: c.id }))
-  await migrationRpc(supabase, job, 'commit_provider_migration_followup', { p_records: records })
+  await migrationRpc(supabase, job, 'commit_provider_migration_followup', { p_records: records }, deadline)
 }
 
 export function failureCode(error: unknown): string {
@@ -200,7 +209,12 @@ export async function runProviderMigrationWorker(options: {
   const worker = randomUUID()
   let jobs = 0; let batches = 0
   while (Date.now() < deadline - 10_000) {
-    const { data, error } = await supabase.rpc('claim_provider_migration_job', { p_worker_id: worker, p_job_id: options.jobId ?? null })
+    const claim = await withinMigrationDeadline(supabase.rpc('claim_provider_migration_job',
+      { p_worker_id: worker, p_job_id: options.jobId ?? null }), deadline - 5000).catch(error => {
+        if (failureCode(error) !== 'MIGRATION_DEADLINE') throw error
+        return { data: null, error: null }
+      })
+    const { data, error } = claim
     if (error) throw new Error(error.message)
     if (!data?.id) break
     let job = data as ProviderMigrationJob
@@ -230,34 +244,34 @@ export async function runProviderMigrationWorker(options: {
             if (segment.length >= 250 || bytes + size > MAX_BATCH_BYTES) {
               if (Date.now() >= deadline - 5000) throw new Error('MIGRATION_DEADLINE')
               await migrationRpc(supabase, job, 'save_provider_migration_page', { p_resource: resource, p_page: job.next_page,
-                p_records: segment, p_next_page: 0 })
+                p_records: segment, p_next_page: 0 }, deadline - 5000)
               segment = []; bytes = 0
             }
             segment.push(record); bytes += size
           }
           if (Date.now() >= deadline - 5000) throw new Error('MIGRATION_DEADLINE')
           await migrationRpc(supabase, job, 'save_provider_migration_page', { p_resource: resource, p_page: job.next_page,
-            p_records: segment, p_next_page: page.nextPage })
+            p_records: segment, p_next_page: page.nextPage }, deadline - 5000)
           log.info('migration page persisted', { jobId: job.id, resource, page: job.next_page, rows: records.length, total: page.total })
         } else {
           const state = { import: 'pending', link: 'imported', reconcile: 'linked', settle: 'planned', completed: 'done' }[job.phase]
-          const { data: rows, error: readError } = await supabase.from('migration_job_chunks')
+          const { data: rows, error: readError } = await withinMigrationDeadline(supabase.from('migration_job_chunks')
             .select('id,resource,source_id,payload,target_id,receipt').eq('company_id', job.company_id).eq('job_id', job.id)
-            .eq('state', state).order('resource_order').order('id').limit(BATCH_SIZE)
+            .eq('state', state).order('resource_order').order('id').limit(BATCH_SIZE), deadline - 5000)
           if (readError) throw new Error(readError.message)
           const chunks = (rows ?? []) as MigrationChunk[]
-          if (!chunks.length) await migrationRpc(supabase, job, 'advance_provider_migration_job')
+          if (!chunks.length) await migrationRpc(supabase, job, 'advance_provider_migration_job', {}, deadline - 5000)
           else if (job.phase === 'import') await importBatch(supabase, job, chunks, connection, deadline - 5000)
-          else await withinMigrationDeadline(followupBatch(supabase, job, chunks), deadline - 5000)
+          else await withinMigrationDeadline(followupBatch(supabase, job, chunks, deadline - 5000), deadline - 5000)
         }
         batches++
         log.info('migration phase checkpointed', { jobId: job.id, phase: job.phase, elapsedMs: Date.now() - started })
-        const { data: current, error: currentError } = await supabase.from('migration_jobs').select('*')
-          .eq('id', job.id).eq('company_id', job.company_id).single()
+        const { data: current, error: currentError } = await withinMigrationDeadline(supabase.from('migration_jobs').select('*')
+          .eq('id', job.id).eq('company_id', job.company_id).single(), deadline - 5000)
         if (currentError) throw new Error(currentError.message)
         job = current as ProviderMigrationJob
       }
-      if (job.state === 'running') await migrationRpc(supabase, job, 'release_provider_migration_job')
+      if (job.state === 'running') await migrationRpc(supabase, job, 'release_provider_migration_job', {}, deadline)
     } catch (error) {
       const code = failureCode(error)
       const attention = ['PROVIDER_AUTH_EXPIRED','PROVIDER_LICENSE_MISSING','PROVIDER_API_MODULE_INACTIVE',
@@ -265,6 +279,10 @@ export async function runProviderMigrationWorker(options: {
       await migrationRpc(supabase, job, 'release_provider_migration_job', {
         p_error_code: code === 'MIGRATION_DEADLINE' ? null : code,
         p_retry_seconds: attention ? -1 : migrationRetrySeconds(job.failures + 1),
+      }, deadline).catch(releaseError => {
+        // An unreachable database must not hold the invocation open. The
+        // lease expires and the next worker replays any uncertain commit.
+        log.warn('migration release deferred to lease expiry', { jobId: job.id, code: failureCode(releaseError) })
       })
       log.warn('migration yielded', { jobId: job.id, code, needsAttention: attention })
       break

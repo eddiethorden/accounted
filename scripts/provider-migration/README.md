@@ -1,0 +1,142 @@
+# Provider invoice load and recovery test
+
+Run from the `fix/2690-resumable-provider-import` worktree with Node 22 or newer.
+No Docker or local database is used. The scripts refuse the production URL and
+never load `.env.local`. They create clearly named synthetic companies in the
+`erp-base` staging branch (`metjnjrhvujscngnpzdv`). Fixtures remain there for inspection.
+
+## Results recorded on 2026-09-18
+
+The database-only benchmark passed for both providers:
+
+| Provider | Invoices | Invoice lines | Failed / pending | Slowest commit plus replay |
+| --- | ---: | ---: | ---: | ---: |
+| Visma | 25,000 | 75,000 | 0 / 0 | 121.927 ms |
+| Bokio | 25,000 | 75,000 | 0 / 0 | 185.774 ms |
+
+Every ten-invoice batch was replayed. Both runs finished with 250 customers,
+25,000 unique row-completion events, and exactly SEK 9,375,000 in invoice totals.
+Synthetic fixture IDs and assertions are recorded in
+[`results-2026-09-18.json`](./results-2026-09-18.json).
+
+Separate automated pagination tests passed 25,000 invoices per provider through
+the real provider HTTP clients and mappers, with simulated responses and
+throttling disabled. Worker deadline regressions passed with stalled database
+claims, reads, commits and releases, plus an oversized 2,001-line invoice.
+
+The full worker-over-HTTP load run has **not run yet**: this workspace needs
+staging CLI credentials. No hosted scheduler, real provider API, deployed
+function timeout, or large-ledger matching result is claimed by these numbers.
+The timeout fix and harness are on the feature worktree and are not deployed.
+
+## Worker test over HTTP
+
+Create an ignored `.env.provider-load.local` file with the staging values:
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://metjnjrhvujscngnpzdv.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<staging service-role key>
+```
+
+A Supabase CLI `branches get staging --project-ref pwxtzglxptnnvjrpixpg -o env`
+file also works via `--env /path/to/file`, using its `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`/`SERVICE_ROLE_KEY` fields. Keep this file private.
+
+Start with a smoke run:
+
+```bash
+node --import tsx --conditions react-server scripts/provider-migration/load-staging.ts --count 30 --budget 15000
+```
+
+Then run 25,000 invoices per provider:
+
+```bash
+node --import tsx --conditions react-server scripts/provider-migration/load-staging.ts
+```
+
+Use `--provider visma` or `--provider bokio` to run one provider. Increase volume
+with `--count 50000`. `--budget 60000` is the default invocation budget; use
+`--budget 210000` to exercise the production worker ceiling. The harness asserts
+that each invocation returns within its budget plus 1.5 seconds of scheduling
+allowance. A separate process watchdog fails a stuck run.
+
+The transport returns synthetic Visma/Bokio HTTP payloads. Provider clients,
+pagination, local rate limiters, mappers, encryption, consent resolution,
+worker code, PostgREST and database RPCs are real. Unexpected outbound hosts
+are rejected in worker processes. No real provider account is contacted.
+
+Each provider run tests:
+
+- 25,000 invoices with three lines each, three fiscal years, 250 shared customers,
+  and paid/unpaid states.
+- Provider HTTP 429 followed by successful retry.
+- An actual process kill immediately after a database commit, then a new worker.
+- A lost commit acknowledgement and safe replay.
+- A competing claim while a worker holds the lease.
+- Invoice and line counts, exact header totals, completed receipts, and bounded
+  request sizes and worker runtimes.
+
+Only the synthetic job's lease/backoff timestamps are accelerated after injected
+failures, so recovery does not wait five minutes. The same claim/fencing RPCs
+still control ownership. The SIE prerequisite is a synthetic completed intake
+record, with no ledger entries. This test does not validate SIE import, matching
+to a large existing ledger, or real provider payload fidelity.
+
+The default list payloads contain complete invoice lines. To include detail
+requests and latency:
+
+```bash
+node --import tsx --conditions react-server scripts/provider-migration/load-staging.ts --count 25000 --detail-every 10 --delay-ms 100
+```
+
+For a Visma-style register requiring detail for every invoice, use
+`--provider visma --detail-every 1`. Real client throttling stays enabled, so
+25,000 details at ten requests per second require at least about 42 minutes,
+before database work. Total job duration can exceed an invocation limit safely;
+each invocation must checkpoint and return. The simulated delay does not model
+all provider outages or distributed Redis rate-limit contention.
+
+Results are written after every invocation to `.env.provider-load-report.json`.
+The report includes synthetic company/job IDs, elapsed time per invocation,
+request counts, maximum database HTTP time and process memory. No credentials
+are included. Use a separate `--report` path for each run you want to retain.
+
+## Database-only benchmark through the Supabase app
+
+When HTTP credentials are unavailable:
+
+```bash
+node --import tsx --conditions react-server scripts/provider-migration/write-sql-load.ts 25000
+```
+
+This only generates `.env.provider-sql-load-plan.json`. Execute each provider's
+`seed`, then every `batches` statement in order, then `finish`, using the connected
+Supabase app's SQL tool with project ID `metjnjrhvujscngnpzdv`. Do not execute it
+on another project. These statements contain no schema changes.
+
+The SQL plan uses the production Visma/Bokio and invoice mappers. It persists
+25,000 source receipts, calls the real commit RPC with ten invoices per batch,
+replays every batch, finishes follow-up receipts, and asserts invoices, lines,
+customers, totals and exactly one row-completion event per invoice. It reports
+maximum database time for a commit plus its replay. The database plan does not
+execute the worker, HTTP transport, encryption or provider pagination and must
+not be presented as an end-to-end timeout test.
+
+## Targeted regressions and other data
+
+```bash
+node node_modules/vitest/vitest.mjs run extensions/general/arcim-migration/lib/__tests__ lib/providers/__tests__ lib/providers/visma/__tests__ lib/providers/bokio/__tests__
+```
+
+These cover stalled provider/database operations, oversized invoices, failed
+individual details, reconnect/account changes, credit notes, invoice numbers,
+VAT, payment states and fiscal-year scope. Deadline tests use a controlled clock;
+they are separate from measured staging invocation times.
+
+Before release, also run a scrubbed representative source payload from the
+original incident, invoice lists that always require detail, a large existing
+SIE ledger with registration references, supplier invoices and settlement,
+foreign currencies, mixed VAT rates, missing fields, and reconnect after token
+expiry. These are additional integration datasets, not claims about the default
+25,000-invoice fixture. Finally verify the deployed cron resumes a job with the
+browser closed; a CLI loop cannot prove the hosted scheduler is enabled.

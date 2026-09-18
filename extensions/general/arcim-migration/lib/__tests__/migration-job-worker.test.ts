@@ -15,7 +15,7 @@ vi.mock('../entity-mapper', () => ({
   mapSalesInvoice: () => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] }),
   mapSupplierInvoice: () => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] }),
 }))
-import { runProviderMigrationWorker, withinMigrationDeadline } from '../migration-job-worker'
+import { migrationRpc, runProviderMigrationWorker, withinMigrationDeadline } from '../migration-job-worker'
 
 function database(overrides: Partial<ProviderMigrationJob> = {}) {
   const job = { id: 'job', company_id: 'company', user_id: 'user', consent_id: 'consent', provider: 'visma',
@@ -123,6 +123,58 @@ describe('bounded durable worker', () => {
     const assertion = expect(promise).rejects.toThrow('MIGRATION_DEADLINE')
     await vi.advanceTimersByTimeAsync(25)
     await assertion
+  })
+  it.each(['claim', 'read', 'commit', 'release'])('returns within budget when the database hangs during %s', async (phase) => {
+    vi.useFakeTimers()
+    const db = database({ phase: phase === 'read' ? 'import' : 'discover' })
+    mocks.page.mockResolvedValue({ items: [customer(1)], nextPage: null, total: 1 })
+    const originalRpc = db.rpc.getMockImplementation()!
+    db.rpc.mockImplementation((name, args) => {
+      const hang = phase === 'claim' && name === 'claim_provider_migration_job'
+        || phase === 'commit' && name === 'save_provider_migration_page'
+        || phase === 'release' && name === 'release_provider_migration_job'
+      return hang ? new Promise(() => {}) : originalRpc(name, args)
+    })
+    if (phase === 'read') vi.spyOn(db.supabase, 'from').mockImplementation(() => {
+      const chain = { select: () => chain, eq: () => chain, order: () => chain, limit: () => chain,
+        then: () => new Promise(() => {}) }
+      return chain as unknown as ReturnType<SupabaseClient['from']>
+    })
+    if (phase === 'release') mocks.page.mockRejectedValue(new Error('provider unavailable'))
+    let returned = false
+    const run = runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id, budgetMs: 20_000 })
+      .then(() => { returned = true })
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(returned).toBe(true)
+    await run
+  })
+  it('does not start a late write after a timed-out follow-up finishes', async () => {
+    const db = database()
+    await expect(migrationRpc(db.supabase, db.job, 'commit_provider_migration_followup', {}, Date.now() - 1))
+      .rejects.toThrow('MIGRATION_DEADLINE')
+    expect(db.rpc).not.toHaveBeenCalled()
+  })
+  it('aborts a stalled PostgREST request at the deadline', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | undefined
+    const query = Object.assign(new Promise(() => {}), { abortSignal: (value: AbortSignal) => { signal = value } })
+    const assertion = expect(withinMigrationDeadline(query, Date.now() + 100)).rejects.toThrow('MIGRATION_DEADLINE')
+    await vi.advanceTimersByTimeAsync(100)
+    await assertion
+    expect(signal?.aborted).toBe(true)
+  })
+  it('isolates a 2001-line invoice and keeps the next healthy invoice', async () => {
+    const db = database({ phase: 'import', resources: ['salesInvoices'] })
+    for (const [id, lineCount] of [['huge', 2001], ['healthy', 3]] as const) {
+      const dto = { id, issueDate: '2026-01-01', currencyCode: 'SEK', _raw: { CustomerId: 'customer' },
+        customer: { name: 'Customer', identifications: [] }, lines: Array.from({ length: lineCount }, () => ({})) }
+      db.rows.push({ id, source_id: id, resource: 'salesInvoices', state: 'pending', ...sealMigrationPayload(dto) })
+      mocks.hydrate.mockResolvedValueOnce({ invoices: [dto], unhydratedIds: new Set(), hydration: {} })
+    }
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.rows.map(row => row.state)).toEqual(['needs_attention', 'done'])
+    expect(db.rpc.mock.calls.find(([name]) => name === 'commit_provider_migration_records')?.[1].p_records)
+      .toEqual(expect.arrayContaining([{ id: 'huge', error: 'MIGRATION_INVOICE_TOO_LARGE' }]))
   })
 })
 
