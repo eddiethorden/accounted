@@ -84,7 +84,7 @@ curl -X PUT "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLO
   }'
 \`\`\`
 
-\`karens_periods_adjustment\` is the number of sjuklöneperioder in the 12 months before cutover that the previous system handled, so the högriskskydd cap (10 karensavdrag per rolling 12 months) carries over. A pågående sjukfall is registered as ordinary absence days on their real dates (step 5): the engine merges them into the running sjuklöneperiod. \`PUT /employees/opening-balances\` takes the whole roster in one call. The balances lock when the first run books.
+\`karens_periods_adjustment\` is the number of sjuklöneperioder in the 12 months before cutover that the previous system handled, so the högriskskydd cap (10 karensavdrag per rolling 12 months) carries over. A pågående sjukfall is registered as ordinary absence days on their real dates (step 5): the engine merges them into the running sjuklöneperiod. \`PUT /employees/{employeeId}/opening-balances\` sets one employee; \`PUT /employees/opening-balances\` (no employee id) takes the whole roster in one call. The balances lock when the first run books.
 
 ## 5. Monthly inputs
 

@@ -698,6 +698,48 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
     })
   })
 
+  it('applies the changes as an update when the insert races a concurrent create (23505)', async () => {
+    const winnerRow = {
+      salary_pay_day: 25,
+      salary_deviation_period: 'same_month',
+      preferred_payment_format: 'pain001',
+      salary_default_bank: null,
+      salary_net_rounding: false,
+      default_voucher_series_per_source_type: { ...STANDARD_VOUCHER_SERIES_MAP, salary_payment: 'L' },
+    }
+    const updatedRow = { ...winnerRow, salary_pay_day: 27, salary_deviation_period: 'previous_month' }
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: MEMBER,
+      company_settings: [
+        // 1. first read: no row yet
+        { data: null, error: null },
+        // 2. insert: the other request won the unique index
+        { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "company_settings_company_id_key"' } },
+        // 3. re-read: the winner's row
+        { data: winnerRow, error: null },
+        // 4. update on that row
+        { data: updatedRow, error: null },
+      ],
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await updateSalarySettings(
+      makePatchRequest(URL, { salary_pay_day: 27, salary_deviation_period: 'previous_month' }),
+      companyParams(COMPANY_ID),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data).toMatchObject({
+      salary_pay_day: 27,
+      salary_deviation_period: 'previous_month',
+      // The winner's series map is kept, not the fresh-company default.
+      salary_voucher_series: 'L',
+    })
+    expect(supabaseMock.settingsInserts()).toHaveLength(1)
+    expect(supabaseMock.settingsUpdates()).toHaveLength(1)
+  })
+
   it('inserts the standard series set with the requested salary letter when provisioning with a series', async () => {
     const supabaseMock = makeFlexibleSupabase({
       company_members: MEMBER,

@@ -349,14 +349,14 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
       )
     }
 
-    const seriesMap = nextVoucherSeriesMap(currentRow, changes.salary_voucher_series)
-
     // Literal payloads (not the parsed object) so the schema guard can
     // statically verify every column name. Fields the caller did not supply
     // are `undefined` and dropped by supabase-js JSON serialization, so only
     // supplied columns are written; explicit null (salary_default_bank)
-    // still clears.
-    if (currentRow) {
+    // still clears. Shared by the normal update path and the insert-race
+    // retry below, so the series map is always merged into the row that is
+    // actually there.
+    const updateExisting = async (existing: SalarySettingsRow) => {
       const { data, error } = await ctx.supabase
         .from('company_settings')
         .update({
@@ -365,7 +365,7 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
           preferred_payment_format: changes.preferred_payment_format,
           salary_default_bank: changes.salary_default_bank,
           salary_net_rounding: changes.salary_net_rounding,
-          default_voucher_series_per_source_type: seriesMap,
+          default_voucher_series_per_source_type: nextVoucherSeriesMap(existing, changes.salary_voucher_series),
         })
         .eq('company_id', ctx.companyId!)
         .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
@@ -391,6 +391,12 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
       })
     }
 
+    if (currentRow) {
+      return updateExisting(currentRow)
+    }
+
+    const seriesMap = nextVoucherSeriesMap(currentRow, changes.salary_voucher_series)
+
     // No row yet (fresh company): create it. Unspecified columns take the DB
     // defaults, the same values GET reported before this call, except the
     // voucher series map, which the column default sets to the standard
@@ -411,6 +417,26 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
       .maybeSingle()
 
     if (error) {
+      // company_id is unique on company_settings. Two concurrent PATCHes on
+      // a fresh company both see no row; the loser's insert lands on 23505.
+      // Its changes are still valid: re-read the winner's row and apply them
+      // as an update instead of answering 400 to a correct request.
+      if ((error as { code?: string }).code === '23505') {
+        const { data: raced, error: racedErr } = await ctx.supabase
+          .from('company_settings')
+          .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+          .eq('company_id', ctx.companyId!)
+          .maybeSingle()
+        if (racedErr) {
+          return v1ErrorResponse(racedErr, ctx.log, { requestId: ctx.requestId })
+        }
+        if (raced) {
+          ctx.log.info('salary.settings.update: insert raced an existing row, applying as update', {
+            companyId: ctx.companyId,
+          })
+          return updateExisting(raced as SalarySettingsRow)
+        }
+      }
       return v1ErrorResponse(error, ctx.log, { requestId: ctx.requestId })
     }
 

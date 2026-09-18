@@ -1259,7 +1259,7 @@ Response `204`.
 Advances a salary run from `approved` to `paid` and stamps `paid_at`. This is the state-change verb after the bank transfer (or autogiro file) has been processed; it does NOT initiate payment, and does NOT post journal entries (use `:book` after this for that).
 
 **Use when:** You've confirmed the salary payment hit employee bank accounts and want to advance the run's lifecycle so `:book` can post the verifikation.
-**Do not use for:** Initiating the actual bank transfer (the v1 API does not yet expose payment-file generation; use the dashboard's payment-file endpoints). Posting journal entries (use `:book`). Reverting a paid run (no `:unpaid` exists: call `:correct` once booked if you need to undo).
+**Do not use for:** Initiating the actual bank transfer (generate the bank file with POST /salary-runs/{id}/payment-file and upload it through the bank channel; this verb only records that it happened). Posting journal entries (use `:book`). Reverting a paid run (no `:unpaid` exists: call `:correct` once booked if you need to undo).
 
 **Pitfalls:**
 - Run must be in `approved`: non-`approved` runs return 400 SALARY_RUN_MARK_PAID_NOT_APPROVED.
