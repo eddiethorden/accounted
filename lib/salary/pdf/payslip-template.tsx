@@ -211,6 +211,8 @@ export interface PayslipData {
   periodYear: number
   periodMonth: number
   paymentDate: string
+  /** Avvikelseperiod "YYYY-MM-DD - YYYY-MM-DD" when it is not the pay month itself. */
+  deviationPeriodLabel?: string | null
 
   // Line items
   lineItems: PayslipLineItem[]
@@ -293,6 +295,12 @@ export function PayslipPDF({ data }: { data: PayslipData }) {
           <View style={styles.infoColumn}>
             <Text style={styles.infoLabel}>Period</Text>
             <Text style={styles.infoValue}>{periodLabel}</Text>
+            {data.deviationPeriodLabel ? (
+              <>
+                <Text style={styles.infoLabel}>Avvikelseperiod</Text>
+                <Text style={styles.infoValue}>{data.deviationPeriodLabel}</Text>
+              </>
+            ) : null}
             <Text style={styles.infoLabel}>Utbetalningsdag</Text>
             <Text style={styles.infoValue}>{data.paymentDate}</Text>
           </View>

@@ -95,6 +95,9 @@ export const POST = withRouteContext<{ params: Promise<{ id: string }> }>(
         period_year: originalRun.period_year,
         period_month: originalRun.period_month,
         payment_date: originalRun.payment_date,
+        // A correction re-reads the same calendar as the run it replaces.
+        deviation_period_start: originalRun.deviation_period_start ?? null,
+        deviation_period_end: originalRun.deviation_period_end ?? null,
         voucher_series: originalRun.voucher_series,
         is_correction: true,
         corrects_run_id: originalRun.id,

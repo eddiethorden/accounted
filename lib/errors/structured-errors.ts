@@ -3554,6 +3554,24 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     message_sv: 'En lönekörning för perioden finns redan.',
     message_en: 'A salary run for that period already exists.',
   },
+  SALARY_RUN_DEVIATION_PERIOD_INVALID: {
+    httpStatus: 400,
+    message_sv:
+      'Ogiltig avvikelseperiod: ange både start- och slutdatum (ÅÅÅÅ-MM-DD), start före slut, högst två månader.',
+    message_en:
+      'Invalid deviation period: give both start and end (YYYY-MM-DD), start before end, at most two months.',
+  },
+  SALARY_RUN_DEVIATION_PERIOD_OVERLAP: {
+    httpStatus: 409,
+    message_sv:
+      'Avvikelseperioden överlappar en annan lönekörning: samma frånvarodagar skulle dras två gånger. Ange en avvikelseperiod som inte överlappar, eller byt inställning först inför nästa nya månad.',
+    message_en:
+      'The deviation period overlaps another salary run: the same absence days would be deducted twice. Pass a non-overlapping deviation period, or change the setting before the next new month.',
+    remediation: {
+      description:
+        'details.conflicting_run_id names the run that already reads these days. Pass deviation_period_start/deviation_period_end that start after its window, or leave the company setting unchanged.',
+    },
+  },
   SALARY_RUN_PATCH_NOT_DRAFT: {
     httpStatus: 400,
     message_sv: 'Endast utkast (draft) kan uppdateras.',

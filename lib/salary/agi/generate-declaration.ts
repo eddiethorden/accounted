@@ -31,6 +31,7 @@ import {
 } from './xml-generator'
 import type { AGIEmployeeData, AGICompanyData, AGITotals } from './xml-generator'
 import { agiReportingPeriod, formatAgiPeriodDashed } from './reporting-period'
+import { runDeviationWindow } from '../deviation-period'
 import { eventBus } from '@/lib/events'
 import { truncateToWholeKronor } from '@/lib/money'
 import {
@@ -227,9 +228,10 @@ export async function generateAgiDeclaration(
   }
 
   // Load per-day absence (VAB + parental only: sick days go to FK separately).
-  const periodStart = `${run.period_year}-${String(run.period_month).padStart(2, '0')}-01`
-  const periodEndDate = new Date(Date.UTC(run.period_year, run.period_month, 0))
-  const periodEnd = periodEndDate.toISOString().slice(0, 10)
+  // Read from the run's avvikelseperiod, the same window the calculation
+  // deducted from, so the frånvarouppgifter match the payslip: a company on
+  // "föregående månads avvikelser" reports August's VAB on the September run.
+  const { start: periodStart, end: periodEnd } = runDeviationWindow(run)
   const employeeIds = (runEmployees as Array<{ employee_id: string }>)
     .map((sre) => sre.employee_id)
     .filter(Boolean)

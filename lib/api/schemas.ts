@@ -2781,6 +2781,9 @@ export const UpdateSettingsSchema = z.object({
   // Öresavrundning: round each net payout up to whole kronor (banks that
   // reject öre in salary payment files). Diff books on 3740.
   salary_net_rounding: z.boolean().optional(),
+  // Avvikelseperiod (migration 20260918120000): which month's absence and
+  // worked days a new run reads. Snapshotted onto each run at creation.
+  salary_deviation_period: z.enum(['same_month', 'previous_month']).optional(),
   // Vacation year basis (payroll gap-closure 3.1): sammanfallande calendar
   // year (default) or the statutory Apr 1 - Mar 31 split. The settings route
   // blocks changing this while open vacation-ledger rows exist.
@@ -3704,6 +3707,13 @@ export const CreateSalaryRunSchema = z.object({
   payment_date: isoDate,
   voucher_series: z.string().regex(/^[A-Z]$/, 'Verifikationsserie måste vara en bokstav A-Z').default('A'),
   notes: z.string().max(2000).optional(),
+  // Avvikelseperiod: the calendar window absence + worked days are read
+  // from. Both or neither; omitted = company_settings.salary_deviation_period
+  // (same_month | previous_month). Pairing, ordering and the two-month cap
+  // are enforced in lib/salary/deviation-period.ts so every creation path
+  // (dashboard, v1, MCP) gets identical errors.
+  deviation_period_start: isoDate.optional(),
+  deviation_period_end: isoDate.optional(),
 })
 
 // One-click variant for the dashboard route: all fields optional — the route
@@ -3718,6 +3728,8 @@ export const CreateSalaryRunWithDefaultsSchema = z.object({
   payment_date: isoDate.optional(),
   voucher_series: z.string().regex(/^[A-Z]$/, 'Verifikationsserie måste vara en bokstav A–Z').optional(),
   notes: z.string().max(2000).optional(),
+  deviation_period_start: isoDate.optional(),
+  deviation_period_end: isoDate.optional(),
 })
 
 export const AddEmployeeToRunSchema = z.object({

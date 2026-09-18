@@ -54,12 +54,15 @@ export function SalarySettingsContent() {
     const paymentFormat = (formData.get('preferred_payment_format') as string) || 'pain001'
     const bank = (formData.get('salary_default_bank') as string) || 'none'
     const series = (formData.get('salary_voucher_series') as string) || 'A'
+    const deviationRaw = formData.get('salary_deviation_period') as string | null
+    const deviationPeriod = deviationRaw === 'previous_month' ? 'previous_month' : 'same_month'
 
     const updates: Record<string, unknown> = {
       salary_pay_day: payDay,
       preferred_payment_format: paymentFormat,
       salary_default_bank: bank === 'none' ? null : bank,
       salary_net_rounding: effectiveNetRounding,
+      salary_deviation_period: deviationPeriod,
     }
 
     // The booking engine resolves the series from the per-source-type map;
@@ -136,6 +139,20 @@ export function SalarySettingsContent() {
                 <option key={key} value={key}>{BANK_LABEL[key]}</option>
               ))}
               <option value="other">{t('bank_other')}</option>
+            </SettingsSelect>
+          </SettingsRow>
+          <SettingsRow
+            label={t('deviation_period_label')}
+            htmlFor="salary_deviation_period"
+            help={t('deviation_period_help')}
+          >
+            <SettingsSelect
+              id="salary_deviation_period"
+              name="salary_deviation_period"
+              defaultValue={settings.salary_deviation_period ?? 'same_month'}
+            >
+              <option value="same_month">{t('deviation_period_same_month')}</option>
+              <option value="previous_month">{t('deviation_period_previous_month')}</option>
             </SettingsSelect>
           </SettingsRow>
           <SettingsRow label={t('net_rounding_label')} help={t('net_rounding_help')}>

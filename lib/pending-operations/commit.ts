@@ -6087,6 +6087,10 @@ async function commitCreateSalaryRun(
   const periodYear = params.period_year as number
   const periodMonth = params.period_month as number
   const paymentDate = params.payment_date as string
+  // Staged by the tool after resolving the avvikelseperiod; absent on
+  // operations staged before the columns existed (falls back to the setting).
+  const deviationPeriodStart = (params.deviation_period_start as string | null | undefined) ?? undefined
+  const deviationPeriodEnd = (params.deviation_period_end as string | null | undefined) ?? undefined
   if (
     !Number.isInteger(periodYear) ||
     !Number.isInteger(periodMonth) ||
@@ -6097,18 +6101,31 @@ async function commitCreateSalaryRun(
 
   try {
     const { createSalaryRunWithEmployees } = await import('@/lib/salary/create-run')
-    const { run, employeeCount } = await createSalaryRunWithEmployees(
-      supabase,
-      companyId,
-      userId,
-      { periodYear, periodMonth, paymentDate },
-    )
-    return {
-      data: {
-        salary_run_id: (run as { id?: string }).id,
-        employee_count: employeeCount,
-        period: `${periodYear}-${String(periodMonth).padStart(2, '0')}`,
-      },
+    const { SalaryDeviationPeriodError } = await import('@/lib/salary/deviation-period')
+    try {
+      const { run, employeeCount, deviationWindow } = await createSalaryRunWithEmployees(
+        supabase,
+        companyId,
+        userId,
+        { periodYear, periodMonth, paymentDate, deviationPeriodStart, deviationPeriodEnd },
+      )
+      return {
+        data: {
+          salary_run_id: (run as { id?: string }).id,
+          employee_count: employeeCount,
+          period: `${periodYear}-${String(periodMonth).padStart(2, '0')}`,
+          deviation_period_start: deviationWindow.start,
+          deviation_period_end: deviationWindow.end,
+        },
+      }
+    } catch (err) {
+      if (err instanceof SalaryDeviationPeriodError) {
+        return {
+          error: err.message,
+          status: err.code === 'SALARY_RUN_DEVIATION_PERIOD_OVERLAP' ? 409 : 400,
+        }
+      }
+      throw err
     }
   } catch (err) {
     return {

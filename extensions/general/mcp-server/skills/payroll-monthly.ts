@@ -39,6 +39,7 @@ If anything is missing, the user fixes it in the web UI before running payroll.
 - Adds **all active employees** with their base salary line (item_type \`monthly_salary\` or \`hourly_salary\`)
 - Returns the run ID + employee count
 - Idempotent on \`(company_id, period_year, period_month)\`: re-calling errors with "Salary run already exists for this period"
+- **Avvikelseperiod**: absence (sick, VAB, parental, tjänstledighet) and worked days are read from the run's deviation window, not necessarily the pay month. Default = the company setting \`salary_deviation_period\` (\`same_month\`, or \`previous_month\` for "innevarande månads lön, föregående månads avvikelser", the common Swedish setup). Pass \`deviation_period_start\` + \`deviation_period_end\` (both, YYYY-MM-DD) to override for one run. The staged preview shows the resolved window; a window that overlaps another live run is refused (the same sick day would be deducted twice), so change the setting before the first run of a new month, not mid-stream.
 
 ### Step 3: Set this month's salary (if it differs from the fixed pay)
 

@@ -33,7 +33,7 @@ Returns salary runs in created-first order with their lifecycle status (draft|re
 Response `200`:
 ```ts
 {
-  data: { id: string, period_year: number, period_month: number, payment_date: string, status: "draft" | "review" | "approved" | "paid" | "booked" | "corrected", voucher_series: string, total_gross: number, total_tax: number, total_net: number, total_avgifter: number, total_employer_cost: number, agi_generated_at: string | null, agi_submitted_at: string | null, approved_at: string | null, paid_at: string | null, booked_at: string | null, created_at: string }[],
+  data: { id: string, period_year: number, period_month: number, payment_date: string, deviation_period_start: string | null, deviation_period_end: string | null, status: "draft" | "review" | "approved" | "paid" | "booked" | "corrected", voucher_series: string, total_gross: number, total_tax: number, total_net: number, total_avgifter: number, total_employer_cost: number, agi_generated_at: string | null, agi_submitted_at: string | null, approved_at: string | null, paid_at: string | null, booked_at: string | null, created_at: string }[],
   meta: {
     request_id: string,
     api_version: string,
@@ -86,6 +86,7 @@ Creates a draft salary run for the given period (period_year, period_month). The
 **Pitfalls:**
 - Idempotency-Key is mandatory.
 - Duplicate (period_year, period_month) for the same company returns 409 SALARY_RUN_DUPLICATE_PERIOD.
+- Avvikelseperiod: absence and worked days are read from deviation_period_start..deviation_period_end, NOT necessarily from the pay month. Omit both to use the company setting (salary_deviation_period: same_month by default, previous_month for "innevarande månads lön, föregående månads avvikelser"), or pass both explicitly. A window that overlaps another live run returns 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (the same day would be deducted twice); one date without the other, or a span over 62 days, returns 400 SALARY_RUN_DEVIATION_PERIOD_INVALID.
 - period_month is 1-12. The DB CHECK enforces this: a 0 or 13 returns 400 VALIDATION_ERROR before reaching the DB.
 - voucher_series defaults to "A". If the company uses a dedicated salary voucher series, set it explicitly.
 - A newly-created run has no employees: :calculate without employees returns 400 SALARY_RUN_NO_EMPLOYEES.
@@ -102,7 +103,9 @@ Request body:
   period_month: number,
   payment_date: string,
   voucher_series?: string,
-  notes?: string
+  notes?: string,
+  deviation_period_start?: string,
+  deviation_period_end?: string
 }
 ```
 
@@ -112,7 +115,9 @@ Example request:
   "period_year": 2026,
   "period_month": 5,
   "payment_date": "2026-05-25",
-  "voucher_series": "L"
+  "voucher_series": "L",
+  "deviation_period_start": "2026-04-01",
+  "deviation_period_end": "2026-04-30"
 }
 ```
 
@@ -124,6 +129,8 @@ Response `200`:
     period_year: number,
     period_month: number,
     payment_date: string,
+    deviation_period_start: string | null,
+    deviation_period_end: string | null,
     status: "draft" | "review" | "approved" | "paid" | "booked" | "corrected",
     voucher_series: string,
     total_gross: number,
@@ -160,6 +167,8 @@ Example response `200`:
     "period_year": 2026,
     "period_month": 5,
     "payment_date": "2026-05-25",
+    "deviation_period_start": "2026-04-01",
+    "deviation_period_end": "2026-04-30",
     "status": "draft",
     "voucher_series": "L"
   },
@@ -199,6 +208,8 @@ Response `200`:
     period_year: number,
     period_month: number,
     payment_date: string,
+    deviation_period_start: string | null,
+    deviation_period_end: string | null,
     status: "draft" | "review" | "approved" | "paid" | "booked" | "corrected",
     voucher_series: string,
     total_gross: number,
@@ -299,6 +310,8 @@ Response `200`:
     period_year: number,
     period_month: number,
     payment_date: string,
+    deviation_period_start: string | null,
+    deviation_period_end: string | null,
     status: "draft" | "review" | "approved" | "paid" | "booked" | "corrected",
     voucher_series: string,
     total_gross: number,

@@ -6,6 +6,7 @@
  * here so the logic can't drift between callers.
  */
 import type { PayslipData, PayslipLineItem } from '@/lib/salary/pdf/payslip-template'
+import { hasCustomDeviationWindow, runDeviationWindow } from '@/lib/salary/deviation-period'
 import { decryptPersonnummer, maskPersonnummer } from '@/lib/salary/personnummer'
 
 const EMPLOYMENT_LABELS: Record<string, string> = {
@@ -18,6 +19,8 @@ export interface PayslipRunSource {
   period_year: number
   period_month: number
   payment_date: string
+  deviation_period_start?: string | null
+  deviation_period_end?: string | null
 }
 
 export interface PayslipEmployeeSource {
@@ -118,6 +121,12 @@ export function buildPayslipData(params: {
     periodYear: run.period_year,
     periodMonth: run.period_month,
     paymentDate: run.payment_date,
+    // Only printed when the deductions come from another month than the
+    // salary: the employee otherwise cannot tell why August's sick day sits
+    // on the September payslip.
+    deviationPeriodLabel: hasCustomDeviationWindow(run)
+      ? `${runDeviationWindow(run).start} - ${runDeviationWindow(run).end}`
+      : null,
     lineItems,
     grossSalary,
     taxWithheld: effectiveTax,

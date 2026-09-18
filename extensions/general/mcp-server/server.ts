@@ -50,6 +50,10 @@ import { createLogger } from '@/lib/logger'
 import { roundOre, sumOre } from '@/lib/money'
 import { addDaysIso } from '@/lib/dates/iso'
 import { currentAppVersion } from '@/lib/reports/app-version'
+import {
+  assertNoDeviationOverlap,
+  resolveDeviationWindowForNewRun,
+} from '@/lib/salary/deviation-period'
 import type { DayValueEmployee } from '@/lib/salary/semesterberedning'
 import {
   getVatDeadlineForPeriod,
@@ -15374,21 +15378,29 @@ export const tools: McpTool[] = [
     name: 'gnubok_create_salary_run',
     keywords: ['lön', 'lönekörning', 'ny lönekörning', 'löner'],
     title: 'Create Salary Run',
-    description: 'Stage creation of a draft salary run for a period + base lines for all active employees. Commit via gnubok_approve_pending_operation; then run gnubok_calculate_salary_run and book via gnubok_book_salary_run.',
+    description: 'Stage a draft salary run for a period with base lines for all active employees; absence and worked days follow the avvikelseperiod (setting, or deviation_period_start/end). Then gnubok_calculate_salary_run and gnubok_book_salary_run.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        period_year: { type: 'number', description: 'Year' },
-        period_month: { type: 'number', description: 'Month (1-12)' },
-        payment_date: { type: 'string', description: 'Payment date (YYYY-MM-DD)' },
+        period_year: { type: 'number' },
+        period_month: { type: 'number', description: '1-12' },
+        payment_date: { type: 'string', description: 'YYYY-MM-DD' },
+        deviation_period_start: { type: 'string', description: 'YYYY-MM-DD; with end, else company setting' },
+        deviation_period_end: { type: 'string', description: 'YYYY-MM-DD inclusive' },
       },
       required: ['period_year', 'period_month', 'payment_date'],
     },
     outputSchema: STAGED_OPERATION_SCHEMA,
     annotations: ANNOTATIONS_STAGED_WRITE,
     async execute(args, companyId, userId, supabase, actor) {
-      const { period_year, period_month, payment_date } = args as { period_year: number; period_month: number; payment_date: string }
+      const { period_year, period_month, payment_date, deviation_period_start, deviation_period_end } = args as {
+        period_year: number
+        period_month: number
+        payment_date: string
+        deviation_period_start?: string
+        deviation_period_end?: string
+      }
       if (!Number.isInteger(period_year) || period_year < 1900 || period_year > 9999) {
         throw new Error('period_year must be a 4-digit year')
       }
@@ -15398,6 +15410,17 @@ export const tools: McpTool[] = [
       if (typeof payment_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
         throw new Error('payment_date must be YYYY-MM-DD')
       }
+      // Resolve the avvikelseperiod at stage time so the approver sees which
+      // month's absence the run will read, and an overlap fails before approval.
+      const { window: deviationWindow, source: deviationSource } = await resolveDeviationWindowForNewRun(
+        supabase, companyId, {
+          periodYear: period_year,
+          periodMonth: period_month,
+          explicitStart: deviation_period_start,
+          explicitEnd: deviation_period_end,
+        },
+      )
+      await assertNoDeviationOverlap(supabase, companyId, deviationWindow)
 
       // Preview: count active employees and surface base monthly salaries so
       // the approver knows what would be seeded. No writes here: the commit
@@ -15412,10 +15435,19 @@ export const tools: McpTool[] = [
       return stagePendingOperation(
         supabase, companyId, userId, 'create_salary_run',
         `Skapa löneutbetalning: ${period} (${employeeCount ?? 0} anställda)`,
-        { period_year, period_month, payment_date },
+        {
+          period_year,
+          period_month,
+          payment_date,
+          deviation_period_start: deviationWindow.start,
+          deviation_period_end: deviationWindow.end,
+        },
         {
           period,
           payment_date,
+          deviation_period_start: deviationWindow.start,
+          deviation_period_end: deviationWindow.end,
+          deviation_period_source: deviationSource,
           employee_count: employeeCount ?? 0,
         },
         actor,
@@ -16175,14 +16207,14 @@ export const tools: McpTool[] = [
     catalogVisibility: 'search',
     keywords: ['frånvaro', 'sjukfrånvaro', 'semester', 'vab'],
     title: 'List Absence (Frånvaro)',
-    description: 'List an employee\'s registered absence days (sick, vab, parental, ...) in a date range, max 92 days. These per-day rows drive karensavdrag and sjuklön at calculation time. Use before gnubok_register_absence to see what is already registered.',
+    description: 'List an employee\'s registered absence days (sick, vab, parental, ...) in a date range, max 92 days. These per-day rows drive karensavdrag and sjuklön at calculation time.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        employee_id: { type: 'string', description: 'UUID of the employee' },
-        from: { type: 'string', description: 'Range start (YYYY-MM-DD, inclusive)' },
-        to: { type: 'string', description: 'Range end (YYYY-MM-DD, inclusive, max 92 days)' },
+        employee_id: { type: 'string' },
+        from: { type: 'string', description: 'YYYY-MM-DD' },
+        to: { type: 'string', description: 'YYYY-MM-DD inclusive, max 92 days' },
         absence_type: {
           type: 'string',
           enum: ['sick', 'vab', 'parental', 'pregnancy', 'care_relative', 'study', 'unpaid_leave', 'other_leave'],
@@ -16490,9 +16522,9 @@ export const tools: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        employee_id: { type: 'string', description: 'UUID of the employee' },
-        from: { type: 'string', description: 'Range start (YYYY-MM-DD, inclusive)' },
-        to: { type: 'string', description: 'Range end (YYYY-MM-DD, inclusive; single day = same as from)' },
+        employee_id: { type: 'string' },
+        from: { type: 'string', description: 'YYYY-MM-DD' },
+        to: { type: 'string', description: 'YYYY-MM-DD inclusive; single day = same as from' },
         absence_type: {
           type: 'string',
           enum: ['sick', 'vab', 'parental', 'pregnancy', 'care_relative', 'study', 'unpaid_leave', 'other_leave'],
@@ -16576,9 +16608,9 @@ export const tools: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        employee_id: { type: 'string', description: 'UUID of the employee' },
-        from: { type: 'string', description: 'Range start (YYYY-MM-DD)' },
-        to: { type: 'string', description: 'Range end (YYYY-MM-DD, inclusive)' },
+        employee_id: { type: 'string' },
+        from: { type: 'string', description: 'YYYY-MM-DD' },
+        to: { type: 'string', description: 'YYYY-MM-DD inclusive' },
         absence_type: {
           type: 'string',
           enum: ['sick', 'vab', 'parental', 'pregnancy', 'care_relative', 'study', 'unpaid_leave', 'other_leave'],

@@ -619,6 +619,10 @@ export interface CompanySettings {
   // Öresavrundning (migration 20260813143000): round each net payout up to
   // whole kronor; the 0-99 öre diff books on 3740 via a derived line item.
   salary_net_rounding: boolean
+  // Avvikelseperiod (migration 20260918120000): the month a new salary run
+  // reads absence and worked days from. 'previous_month' is the common
+  // Swedish setup (innevarande månads lön, föregående månads avvikelser).
+  salary_deviation_period: 'same_month' | 'previous_month'
 
   // Sandbox
   is_sandbox: boolean
@@ -4258,6 +4262,9 @@ export interface SalaryRun {
   period_year: number
   period_month: number
   payment_date: string
+  // Avvikelseperiod snapshotted at creation; null on both = the pay month.
+  deviation_period_start: string | null
+  deviation_period_end: string | null
   status: SalaryRunStatus
   voucher_series: string
   total_gross: number

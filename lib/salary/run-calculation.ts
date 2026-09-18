@@ -30,6 +30,7 @@ import { calculateSalary } from './calculation-engine'
 import { loadPayrollConfig, serializePayrollConfig } from './payroll-config'
 import { fetchAllTaxTableRatesForRun, TaxTableUnavailableError } from './tax-tables'
 import { loadAndDeriveAbsence } from './derive-absence-line-items'
+import { monthWindow, runDeviationWindow } from './deviation-period'
 import { getLineItemAccount } from './account-mapping'
 import { recurringLineFlags, type RecurringLineItemType } from './recurring-lines'
 import { computePremiumLines } from './shift-premium-engine'
@@ -301,12 +302,23 @@ export async function runSalaryCalculation(
     }
   }
 
-  // 7. Pay period bounds: used to load per-day absence + worked-day records.
+  // 7. Two windows. The pay month (periodStart..periodEnd) prorates the fixed
+  //    salary for employments that start or end mid-month. The avvikelseperiod
+  //    (deviation.start..deviation.end) is where per-day absence and worked-day
+  //    records are read from: the same month by default, the previous month
+  //    for companies that run "föregående månads avvikelser". It is snapshotted
+  //    on the run at creation; older runs without it fall back to the pay month.
   const periodYear = run.period_year as number
   const periodMonth = run.period_month as number
-  const periodStart = `${periodYear}-${String(periodMonth).padStart(2, '0')}-01`
-  const periodEndDate = new Date(Date.UTC(periodYear, periodMonth, 0)) // last day of month
-  const periodEnd = periodEndDate.toISOString().slice(0, 10)
+  const payMonth = monthWindow(periodYear, periodMonth)
+  const periodStart = payMonth.start
+  const periodEnd = payMonth.end
+  const deviation = runDeviationWindow({
+    period_year: periodYear,
+    period_month: periodMonth,
+    deviation_period_start: run.deviation_period_start as string | null | undefined,
+    deviation_period_end: run.deviation_period_end as string | null | undefined,
+  })
 
   // 7b. Load active shift_premium_rules once per run. Filtered by company.
   // Inactive rules excluded: the engine also re-checks, but this saves
@@ -344,7 +356,7 @@ export async function runSalaryCalculation(
     //     still reaches into pre-cutover time; past that horizon the
     //     adjustment is stale and imported day rows carry the truth.
     const opening = openingByEmployee.get(emp.id)
-    const lookbackStartMs = Date.parse(`${periodStart}T00:00:00Z`) - 365 * 86_400_000
+    const lookbackStartMs = Date.parse(`${deviation.start}T00:00:00Z`) - 365 * 86_400_000
     const karensAdjustmentApplies =
       opening !== undefined &&
       opening.karensPeriodsAdjustment > 0 &&
@@ -355,8 +367,8 @@ export async function runSalaryCalculation(
       employeeId: emp.id,
       monthlySalary: sre.monthly_salary || 0,
       payrollConfig: config,
-      periodStart,
-      periodEnd,
+      periodStart: deviation.start,
+      periodEnd: deviation.end,
       karensPeriodsAdjustment: karensAdjustmentApplies ? opening.karensPeriodsAdjustment : 0,
       dailyDivisor: dailyDivisor(emp.workdays_per_week),
     })
@@ -372,8 +384,8 @@ export async function runSalaryCalculation(
         .select('hours, work_date, start_time, end_time')
         .eq('company_id', companyId)
         .eq('employee_id', emp.id)
-        .gte('work_date', periodStart)
-        .lte('work_date', periodEnd)
+        .gte('work_date', deviation.start)
+        .lte('work_date', deviation.end)
       if (workedError) {
         return { ok: false, code: 'DATABASE_ERROR', details: workedError }
       }
@@ -386,8 +398,8 @@ export async function runSalaryCalculation(
       )
       opLog.info('Derived hours_worked from calendar', {
         employeeId: emp.id,
-        periodStart,
-        periodEnd,
+        periodStart: deviation.start,
+        periodEnd: deviation.end,
         rowCount: workedDayRows.length,
         derivedHoursWorked,
       })

@@ -470,6 +470,13 @@ describe('tools/list payload size guard', () => {
     //     update" on the update tool, and its description said "Stages for
     //     approval" after opening with "Stage an edit". Ceiling unchanged, no
     //     read demoted.
+    //   * 2026-09-18, avvikelseperiod on gnubok_create_salary_run: two optional
+    //     date properties and one clause in the description measured 60 613.
+    //     Paid for inside the payroll cluster: create_salary_run's own
+    //     property notes shrank to the date format, and list/register/
+    //     delete_absence lost 'UUID of the employee' (restates employee_id),
+    //     'Range start/end (...)' wrappers around a date format, and the
+    //     'use before register' sentence. Ceiling unchanged, no read demoted.
     expect(approxTokens).toBeLessThan(60_500)
   })
 
