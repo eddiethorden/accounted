@@ -35,7 +35,10 @@ ALTER TABLE public.salary_runs
 ALTER TABLE public.salary_runs
   DROP CONSTRAINT IF EXISTS salary_runs_deviation_period_check;
 
--- Both bounds or neither, and never inverted.
+-- Both bounds or neither, never inverted, and at most two months (62 days
+-- inclusive): the same cap lib/salary/deviation-period.ts enforces, so a
+-- support script or a direct SQL fix cannot feed sjuklön and AGI a window
+-- the application would have refused.
 ALTER TABLE public.salary_runs
   ADD CONSTRAINT salary_runs_deviation_period_check
   CHECK (
@@ -44,6 +47,7 @@ ALTER TABLE public.salary_runs
       deviation_period_start IS NOT NULL
       AND deviation_period_end IS NOT NULL
       AND deviation_period_start <= deviation_period_end
+      AND deviation_period_end - deviation_period_start <= 61
     )
   );
 

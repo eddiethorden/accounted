@@ -131,7 +131,14 @@ export function validateExplicitWindow(start: unknown, end: unknown): DateWindow
   }
   const startMs = Date.parse(`${start}T00:00:00Z`)
   const endMs = Date.parse(`${end}T00:00:00Z`)
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+  // Date.parse normalises an overflowed day (2026-02-30 becomes March 2), so
+  // the parsed value has to round-trip to the same string to count as real.
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    new Date(startMs).toISOString().slice(0, 10) !== start ||
+    new Date(endMs).toISOString().slice(0, 10) !== end
+  ) {
     throw invalid('dates must be real calendar dates')
   }
   if (startMs > endMs) {
@@ -199,8 +206,10 @@ function windowsOverlap(a: DateWindow, b: DateWindow): boolean {
 /**
  * Refuse a window that overlaps another live run of the same company. Two
  * runs reading the same calendar day would deduct the same sick day twice
- * (or pay the same worked hours twice). Corrected originals and correction
- * runs are skipped: a correction legitimately re-reads its original's window.
+ * (or pay the same worked hours twice). A corrected original is skipped, its
+ * correction run is not: the correction is the live reader of that window
+ * and must keep blocking a third, unrelated run. (Correction runs are created
+ * by the correct route, which inherits the window and never calls this.)
  *
  * The typical trigger is a mid-stream switch of the company setting: the
  * August run already read August, so a September run under 'previous_month'
@@ -216,11 +225,7 @@ export async function assertNoDeviationOverlap(
     .from('salary_runs')
     .select('id, period_year, period_month, deviation_period_start, deviation_period_end')
     .eq('company_id', companyId)
-    .eq('is_correction', false)
     .neq('status', 'corrected')
-    // A window never reaches more than two months back from the pay month
-    // and never forward past it, so two years of runs is a generous bound.
-    .gte('period_year', Number(window.start.slice(0, 4)) - 1)
   if (error) {
     throw new Error(`Failed to check deviation period overlap: ${error.message}`)
   }

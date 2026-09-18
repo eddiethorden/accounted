@@ -104,6 +104,8 @@ describe('validateExplicitWindow', () => {
     ['inverted', '2026-08-31', '2026-08-01'],
     ['over two months', '2026-06-01', '2026-08-31'],
     ['not a real date', '2026-02-30', '2026-03-01'],
+    ['an overflowed day that Date.parse would normalise', '2026-02-30', '2026-03-31'],
+    ['an overflowed end day', '2026-04-01', '2026-04-31'],
   ])('rejects %s with SALARY_RUN_DEVIATION_PERIOD_INVALID', (_label, start, end) => {
     let caught: unknown
     try {
@@ -199,6 +201,31 @@ describe('assertNoDeviationOverlap', () => {
       conflicting_run_id: 'run-aug',
       conflicting_window_start: '2026-08-01',
       conflicting_window_end: '2026-08-31',
+    })
+  })
+
+  it('a correction run keeps blocking a third run; only the corrected original is skipped', async () => {
+    // After August is corrected: the original is status 'corrected' (the
+    // query excludes it), the correction run is what the guard must see.
+    const db = mockDb({
+      salary_runs: {
+        data: [
+          {
+            id: 'run-aug-correction',
+            period_year: 2026,
+            period_month: 8,
+            deviation_period_start: null,
+            deviation_period_end: null,
+            is_correction: true,
+          },
+        ],
+      },
+    })
+    await expect(
+      assertNoDeviationOverlap(db, 'c1', { start: '2026-08-01', end: '2026-08-31' }),
+    ).rejects.toMatchObject({
+      code: 'SALARY_RUN_DEVIATION_PERIOD_OVERLAP',
+      details: { conflicting_run_id: 'run-aug-correction' },
     })
   })
 

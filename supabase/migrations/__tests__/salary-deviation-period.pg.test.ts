@@ -103,4 +103,14 @@ describe('salary_runs deviation window', () => {
       insertRun({ userId, companyId, month: 9, start: '2026-08-31', end: '2026-08-01' }),
     ).rejects.toMatchObject({ code: '23514' })
   })
+
+  it('caps the window at two months (62 days inclusive), same as the application', async () => {
+    const { userId, companyId } = await seed()
+    await expect(
+      insertRun({ userId, companyId, month: 9, start: '2026-07-01', end: '2026-08-31' }),
+    ).resolves.toBeDefined()
+    await expect(
+      insertRun({ userId, companyId, month: 10, start: '2026-06-30', end: '2026-08-31' }),
+    ).rejects.toMatchObject({ code: '23514' })
+  })
 })
