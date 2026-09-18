@@ -24,7 +24,7 @@ export async function readDocumentBytes(bytes: Buffer, mimeType: string | null |
       if (!opts.allowModel) { partial = 'ai_gated'; break }
       if (opts.maxModelPages != null && modelPages >= opts.maxModelPages) { partial = 'budget'; break }
       const single = await extractSinglePagePdf(bytes, pageNo)
-      const out = await transcribeWithModel({ kind: 'pdf', data: single, fileName: `page-${pageNo}.pdf` })
+      const out = await transcribeWithModel({ kind: 'pdf', data: single, fileName: `page-${pageNo}.pdf` }, { tier: opts.tier })
       if (!out.ok) { partial = 'ai_unconfigured'; break }
       modelPages++
       if (out.text) pages.push({ pageNo, text: out.text, reader: 'claude_vision', hasTextLayer: false })
@@ -40,7 +40,7 @@ export async function readDocumentBytes(bytes: Buffer, mimeType: string | null |
     if (!opts.allowModel) return { ok: false, skipped: 'ai_gated' }
     const fitted = await fitImageForModel(bytes, mimeType!)
     if (!fitted) return { ok: false, skipped: 'unsupported_mime' }
-    const out = await readImageWithModel(fitted.bytes, fitted.mediaType)
+    const out = await readImageWithModel(fitted.bytes, fitted.mediaType, { tier: opts.tier })
     if (!out.ok) return { ok: false, skipped: 'ai_unconfigured' }
     if (out.pages.length === 0) return { ok: false, skipped: 'empty' }
     return { ok: true, pages: out.pages, reader: 'claude_vision', pageCount: 1 }
