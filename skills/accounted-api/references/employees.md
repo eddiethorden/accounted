@@ -2,7 +2,7 @@
 
 # Employees endpoints
 
-The employee register plus absence (frånvaro), vacation balances and year close, and payroll cutover opening balances. Running payroll itself: salary-runs.md.
+The employee register plus absence (frånvaro), worked days (tidrapport for hourly staff and OB), vacation balances and year close, payroll cutover opening balances, and the company salary settings (pay day, avvikelseperiod, payment file format). Running payroll itself: salary-runs.md.
 
 Conventions (auth, envelope, pagination, dry-run, idempotency, standard errors)
 are in SKILL.md and are not repeated per endpoint.
@@ -923,6 +923,209 @@ Example response `200`:
 
 ---
 
+### `GET /api/v1/companies/{companyId}/employees/{id}/worked-days`
+
+**List worked days (hours per date) for an employee in a date range.**
+`scope:payroll:read · risk:low · idempotent`
+
+Returns the per-day worked-hours rows (tidrapport) between ?from and ?to (inclusive, max 92 days): hours, optional shift window (start_time/end_time) and notes. No cursor pagination: the bounded range is the page.
+
+**Use when:** You need what is registered for an hourly employee before running payroll, to reconcile with an external time-tracking system, or to verify the hours the salary engine will pick up.
+**Do not use for:** Absence (sick, vab, parental): GET /employees/{id}/absence. The derived pay (hourly gross, OB lines): that lives on the run after POST /salary-runs/{id}/calculate.
+
+**Pitfalls:**
+- Ranges over 92 days return 400 VALIDATION_ERROR with details.max_days = 92: iterate quarters instead.
+- POST /salary-runs/{id}/calculate reads these rows by the run's deviation window (deviation_period_start..deviation_period_end), not the pay month: register hours on the dates they were worked and check the run's window.
+- One row per date: an hourly employee with two shifts on the same day has ONE row with the combined hours (and the shift window of the OB-relevant one).
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `from` | query | `string` | yes | YYYY-MM-DD. First day of the range (inclusive). Required. |
+| `to` | query | `string` | yes | YYYY-MM-DD. Last day of the range (inclusive), not before from. Required. |
+
+Response `200`:
+```ts
+{
+  data: { salary_worked_day_id: string, work_date: string, hours: number, start_time: string | null, end_time: string | null, notes: string | null, created_at: string, updated_at: string }[],
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": [
+    {
+      "salary_worked_day_id": "wd_91d2…",
+      "work_date": "2026-03-02",
+      "hours": 8,
+      "start_time": "22:00:00",
+      "end_time": "06:00:00",
+      "notes": null
+    }
+  ],
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `PUT /api/v1/companies/{companyId}/employees/{id}/worked-days`
+
+**Register worked hours per day for an employee (bulk upsert).**
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
+
+Upserts 1..92 explicit per-day rows on the natural key (employee, work_date) in one atomic statement. A date already registered is overwritten with the new hours, shift window and notes (omitted optional fields are cleared, not carried forward). Idempotent by construction: replaying the same PUT converges on the same rows. Each work_date may appear once per request.
+
+**Use when:** An external time-tracking or payroll system pushes an hourly employee's tidrapport for a period, including shift start/end times for OB (obekväm arbetstid) premiums, before the salary run is calculated.
+**Do not use for:** Absence: PUT /employees/{id}/absence. Monthly-salaried staff without OB rules: their gross comes from the employee profile, not from this register.
+
+**Pitfalls:**
+- POST /salary-runs/{id}/calculate reads these rows by the run's deviation window (deviation_period_start..deviation_period_end), not the pay month: register the hours on the dates they were actually worked, and check the run's window before calculating.
+- For hourly employees the run's gross is derived from these rows (hourly_rate x sum(hours)): PATCH /salary-runs/{id}/employees/{employeeId} monthly_salary is irrelevant for them.
+- start_time/end_time feed the OB/shift-premium rules: a row without them is priced as an assumed 08:00-17:00 day, so a night or weekend shift earns no premium. Times are HH:MM or HH:MM:SS; end_time before start_time means the shift crosses midnight.
+- Worked hours plus absence hours on one date may not exceed 24 (DB trigger, shared with absence): the whole PUT is rejected with 409 ABSENCE_HOURS_CONFLICT, nothing is written.
+- Registering hours does not recompute an open salary run: call POST /salary-runs/{id}/calculate afterwards.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  days: { work_date: string, hours: number, start_time?: string, end_time?: string, notes?: string }[]
+}
+```
+
+Example request:
+```json
+{
+  "days": [
+    {
+      "work_date": "2026-03-02",
+      "hours": 8,
+      "start_time": "22:00",
+      "end_time": "06:00"
+    },
+    {
+      "work_date": "2026-03-03",
+      "hours": 4,
+      "notes": "Halvdag"
+    }
+  ]
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    count: number,
+    days: { salary_worked_day_id?: string, work_date: string, hours: number, start_time: string | null, end_time: string | null, notes: string | null, created_at?: string, updated_at?: string }[]
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "count": 2,
+    "days": [
+      {
+        "salary_worked_day_id": "wd_91d2…",
+        "work_date": "2026-03-02",
+        "hours": 8,
+        "start_time": "22:00:00",
+        "end_time": "06:00:00",
+        "notes": null
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `DELETE /api/v1/companies/{companyId}/employees/{id}/worked-days`
+
+**Delete worked days for an employee in a date range.**
+`scope:payroll:write · risk:low · idempotent · dry-run`
+
+Deletes the per-day worked-hours rows between ?from and ?to (inclusive). Returns deleted_count (200, not 204) so callers can verify how many rows went. Single day = from == to.
+
+**Use when:** Hours were pushed for the wrong employee or the wrong dates, or a time-tracking re-sync needs a clean period before a fresh PUT.
+**Do not use for:** Correcting hours on a day: PUT the day again instead. Rows already consumed by a BOOKED run: deleting them does not un-book the run; use the run correction flow.
+
+**Pitfalls:**
+- deleted_count: 0 with a 200 means nothing matched: not an error.
+- Hours a calculated (not yet booked) run has already summed stay in the run until POST /salary-runs/{id}/calculate is called again.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `from` | query | `string` | yes | YYYY-MM-DD. First day of the range (inclusive). Required. |
+| `to` | query | `string` | yes | YYYY-MM-DD. Last day of the range (inclusive), not before from. Required. |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Response `200`:
+```ts
+{
+  data: { deleted_count: number },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "deleted_count": 2
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
 ### `PUT /api/v1/companies/{companyId}/employees/opening-balances`
 
 **Bulk-set payroll cutover opening balances (atomic).**
@@ -998,6 +1201,162 @@ Example response `200`:
   },
   "meta": {
     "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `GET /api/v1/companies/{companyId}/salary/settings`
+
+**Get the company payroll settings.**
+`scope:payroll:read · risk:low · idempotent`
+
+Returns the payroll settings that drive new salary runs: pay day (salary_pay_day), avvikelseperiod (salary_deviation_period: which month a run reads absence and worked days from), salary payment file format (preferred_payment_format), the bank whose upload instructions are pre-selected (salary_default_bank), öresavrundning of net pay (salary_net_rounding) and the voucher series salary runs book into (salary_voucher_series). A company that has no settings row yet answers with the defaults the engine would apply (pay day 25, same_month, pain001, no bank, no rounding, series A).
+
+**Use when:** You are provisioning or auditing a customer for payroll and need to know how new salary runs will be dated, which month their deviations are read from, which payment file the bank expects, or which voucher series the salary vouchers land in.
+**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Per-run values such as payment_date or deviation window (GET /salary-runs/{id}: they are snapshotted on the run). Employee-level pay settings (GET /employees/{id}).
+
+**Pitfalls:**
+- salary_deviation_period is snapshotted onto each salary run at creation: changing it never moves a run that already exists. Set it before the first run of a new month. Switching later makes the next run's deviation window overlap the previous run's window, and that run is refused with 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (pass explicit deviation_period_start/end on that one run to bridge the switch).
+- salary_pay_day only drives the default payment_date of NEW runs (the day of the pay month, 1-28 so it exists in every month). Existing runs keep their payment_date; override per run on POST /salary-runs.
+- salary_voucher_series is an alias for company_settings.default_voucher_series_per_source_type.salary_payment. Writes MERGE that one key into the per-source-type map; the other source types keep their letters. The default company layout books salaries on K.
+- preferred_payment_format: pain001 (ISO 20022) is the default; bg_lb (Bankgirot Leverantörsbetalningar / Lön) is being retired by the banks during 2026, so only pick it for a customer whose bank still accepts LB files.
+- A company without a settings row reports series A (the engine fallback). The first PATCH creates the row with the standard series set, where salary_payment is K, unless salary_voucher_series is supplied in that same call: send it explicitly when provisioning so the letter never changes under you.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+
+Response `200`:
+```ts
+{
+  data: {
+    company_id: string,
+    salary_pay_day: number,
+    salary_deviation_period: "same_month" | "previous_month",
+    preferred_payment_format: "pain001" | "bg_lb",
+    salary_default_bank: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
+    salary_net_rounding: boolean,
+    salary_voucher_series: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "company_id": "aaaa1111-2222-4333-8444-555566667777",
+    "salary_pay_day": 25,
+    "salary_deviation_period": "previous_month",
+    "preferred_payment_format": "pain001",
+    "salary_default_bank": "swedbank",
+    "salary_net_rounding": true,
+    "salary_voucher_series": "K"
+  },
+  "meta": {
+    "request_id": "req_...",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `PATCH /api/v1/companies/{companyId}/salary/settings`
+
+**Partially update the company payroll settings.**
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
+
+Patches the payroll settings: salary_pay_day (1-28), salary_deviation_period (same_month | previous_month), preferred_payment_format (pain001 | bg_lb), salary_default_bank (swedbank | seb | handelsbanken | nordea | other | null), salary_net_rounding (boolean) and salary_voucher_series (one letter A-Z). All fields optional; at least one must be supplied; unknown fields are rejected. Upserts: a company without a settings row gets one created with the supplied values and DB defaults for the rest. Returns the full resource after the write. Idempotent (mandatory Idempotency-Key). Dry-runnable: ?dry_run=true returns the merged resource without writing.
+
+**Use when:** You are onboarding a customer for payroll over the API (set the pay day, avvikelseperiod, payment file format, bank and voucher series before the first run), or a customer changes bank or pay day.
+**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Changing the payment date or deviation window of an existing run (PATCH /salary-runs/{id}, or explicit deviation_period_start/end on POST). Tax and legal profile changes (not on the public API).
+
+**Pitfalls:**
+- Idempotency-Key is mandatory; calls without it return 400.
+- At least one field must be supplied; an empty body returns 400. Unknown fields return 400 (strict body).
+- salary_deviation_period is snapshotted onto each salary run at creation: changing it never moves a run that already exists. Set it before the first run of a new month. Switching later makes the next run's deviation window overlap the previous run's window, and that run is refused with 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (pass explicit deviation_period_start/end on that one run to bridge the switch).
+- salary_pay_day only drives the default payment_date of NEW runs (the day of the pay month, 1-28 so it exists in every month). Existing runs keep their payment_date; override per run on POST /salary-runs.
+- salary_voucher_series is an alias for company_settings.default_voucher_series_per_source_type.salary_payment. Writes MERGE that one key into the per-source-type map; the other source types keep their letters. The default company layout books salaries on K.
+- preferred_payment_format: pain001 (ISO 20022) is the default; bg_lb (Bankgirot Leverantörsbetalningar / Lön) is being retired by the banks during 2026, so only pick it for a customer whose bank still accepts LB files.
+- salary_default_bank: null clears the bank; omitting the field leaves it unchanged. The bank only pre-selects upload instructions, it does not change the payment file format.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  salary_pay_day?: number,
+  salary_deviation_period?: "same_month" | "previous_month",
+  preferred_payment_format?: "bg_lb" | "pain001",
+  salary_default_bank?: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
+  salary_net_rounding?: boolean,
+  salary_voucher_series?: string
+}
+```
+
+Example request:
+```json
+{
+  "salary_pay_day": 25,
+  "salary_deviation_period": "previous_month",
+  "salary_default_bank": "swedbank",
+  "salary_net_rounding": true,
+  "salary_voucher_series": "K"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    company_id: string,
+    salary_pay_day: number,
+    salary_deviation_period: "same_month" | "previous_month",
+    preferred_payment_format: "pain001" | "bg_lb",
+    salary_default_bank: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
+    salary_net_rounding: boolean,
+    salary_voucher_series: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "company_id": "aaaa1111-2222-4333-8444-555566667777",
+    "salary_pay_day": 25,
+    "salary_deviation_period": "previous_month",
+    "preferred_payment_format": "pain001",
+    "salary_default_bank": "swedbank",
+    "salary_net_rounding": true,
+    "salary_voucher_series": "K"
+  },
+  "meta": {
+    "request_id": "req_...",
     "api_version": "2026-05-12"
   }
 }

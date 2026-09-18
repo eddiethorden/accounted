@@ -8,7 +8,7 @@ description: >-
   transactions and reconciliation, payroll (lön), VAT/moms and financial
   reports, SIE import/export, documents, webhooks. Covers auth with
   gnubok_sk_ API keys, conventions (dry-run, idempotency, cursor
-  pagination, scopes), and all 148 endpoints.
+  pagination, scopes), and all 154 endpoints.
 ---
 
 <!-- GENERATED FILE, do not edit. Source: lib/api/v1 registry + scripts/api-skill/overlays. Regenerate with `npm run apiskill:generate`. -->
@@ -142,7 +142,7 @@ call can undo it, e.g. invoice credit).
 
 ## Endpoint index
 
-API version `2026-05-12`, 148 operations. Paths are shown without
+API version `2026-05-12`, 154 operations. Paths are shown without
 their `/api/v1` prefix (full base URL: `https://app.gnubok.se/api/v1`).
 
 ### Core (5)
@@ -292,7 +292,7 @@ POST /companies/{companyId}/transactions/batch-categorize : Categorize up to 100
 POST /companies/{companyId}/transactions/ingest : Bulk-ingest transactions (up to 500 per call) [scope:transactions:write risk:medium idempotent dry-run]
 ```
 
-### Employees (13)
+### Employees (18)
 
 Full detail: [references/employees.md](references/employees.md)
 
@@ -308,11 +308,16 @@ DELETE /companies/{companyId}/employees/{id}/absence : Delete absence days for a
 GET /companies/{companyId}/employees/{id}/opening-balances : Get an employee's payroll cutover opening balances [scope:payroll:read risk:low idempotent]
 PUT /companies/{companyId}/employees/{id}/opening-balances : Set an employee's payroll cutover opening balances [scope:payroll:write risk:medium idempotent dry-run reversible]
 GET /companies/{companyId}/employees/{id}/vacation-balance : Get an employee's current vacation balance [scope:payroll:read risk:low idempotent]
+GET /companies/{companyId}/employees/{id}/worked-days : List worked days (hours per date) for an employee in a date range [scope:payroll:read risk:low idempotent]
+PUT /companies/{companyId}/employees/{id}/worked-days : Register worked hours per day for an employee (bulk upsert) [scope:payroll:write risk:low idempotent dry-run reversible]
+DELETE /companies/{companyId}/employees/{id}/worked-days : Delete worked days for an employee in a date range [scope:payroll:write risk:low idempotent dry-run]
 PUT /companies/{companyId}/employees/opening-balances : Bulk-set payroll cutover opening balances (atomic) [scope:payroll:write risk:medium idempotent dry-run reversible]
+GET /companies/{companyId}/salary/settings : Get the company payroll settings [scope:payroll:read risk:low idempotent]
+PATCH /companies/{companyId}/salary/settings : Partially update the company payroll settings [scope:payroll:write risk:low idempotent dry-run reversible]
 POST /companies/{companyId}/salary/vacation-year-close : Close a vacation year (semesterberedning + arsavslut) [scope:payroll:write risk:high idempotent dry-run]
 ```
 
-### Salary runs (19)
+### Salary runs (20)
 
 Full detail: [references/salary-runs.md](references/salary-runs.md)
 
@@ -335,6 +340,7 @@ POST /companies/{companyId}/salary-runs/{id}/generate-agi : Generate the Skattev
 PATCH /companies/{companyId}/salary-runs/{id}/lines/{lineId} : Update a payslip line in a draft salary run [scope:payroll:write risk:low idempotent dry-run reversible]
 DELETE /companies/{companyId}/salary-runs/{id}/lines/{lineId} : Delete a payslip line from a draft salary run [scope:payroll:write risk:low idempotent dry-run]
 POST /companies/{companyId}/salary-runs/{id}/mark-paid : Mark an approved salary run as paid [scope:payroll:write risk:low idempotent dry-run]
+POST /companies/{companyId}/salary-runs/{id}/payment-file : Generate the bank payment file (pain.001 or Bankgirot LB) for a salary run [scope:payroll:write risk:medium idempotent dry-run reversible]
 GET /companies/{companyId}/salary-runs/{id}/payslips/{employeeId}/pdf : Download one employee's payslip as PDF [scope:payroll:read risk:low idempotent]
 ```
 

@@ -2,7 +2,7 @@
 
 # Salary runs endpoints
 
-Swedish payroll runs: create -> calculate -> approve -> book/mark-paid -> generate-agi (arbetsgivardeklaration), with per-employee payslips and draft-only line edits.
+Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips and draft-only line edits.
 
 Conventions (auth, envelope, pagination, dry-run, idempotency, standard errors)
 are in SKILL.md and are not repeated per endpoint.
@@ -1293,6 +1293,96 @@ Example response `200`:
     "id": "run_a8f1…",
     "status": "paid",
     "paid_at": "2026-05-25T08:00:00Z"
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `POST /api/v1/companies/{companyId}/salary-runs/{id}/payment-file`
+
+**Generate the bank payment file (pain.001 or Bankgirot LB) for a salary run.**
+`scope:payroll:write · risk:medium · idempotent · dry-run · reversible`
+
+Builds the salary batch payment file for an approved (or paid / booked) run and returns it inline as a string: ISO 20022 pain.001.001.03 XML (`pain001`, default) or the legacy Bankgirot LB text file (`bg_lb`). One credit transfer per employee with a positive net payout, dated on the run's payment_date, category purpose SALA. Stamps salary_runs.payment_file_format and payment_file_generated_at. Same preconditions and output as the dashboard's payment-file download.
+
+**Use when:** The salary run is approved and you (or an external payroll operator) need the file to upload in the bank's corporate file channel to pay the salaries.
+**Do not use for:** Marking the run paid (use :mark-paid after the bank has executed the batch), posting the verifikationer (use :book), paying supplier invoices (use the supplier-invoice payment batch), or sending anything to the bank: this call only produces the file.
+
+**Pitfalls:**
+- Run status must be one of approved, paid, booked: a draft or review run returns 409 SALARY_RUN_PAYMENT_FILE_NOT_READY. Approve the run first (:approve).
+- pain001 needs the company IBAN and a BIC (saved, or derived from the company clearing number / bank name) in company settings, plus clearing number and account number on every employee with a net payout. bg_lb needs a valid company bankgiro number. Missing company details return 422 SALARY_RUN_PAYMENT_FILE_MISSING_BANK_DETAILS (details.problem names the field); missing employee accounts return 422 SALARY_RUN_PAYMENT_FILE_EMPLOYEE_BANK_MISSING with details.employees.
+- The file comes back inline as `content` (a string). Write it to disk under `filename` (pain001 as UTF-8, bg_lb as ISO 8859-1 with CRLF line endings, exactly as returned) and upload it in the bank's file channel. Nothing is transmitted to the bank by this call.
+- Generating the file does NOT mark the run paid and moves no money. Call :mark-paid once the bank has executed the batch, then :book to post the verifikationer.
+- Bankgirot LB is being retired by the banks during 2026: prefer pain001. `format` defaults to company_settings.preferred_payment_format, which is pain001 unless the company changed it.
+- Employees with a zero net payout (nollkörning, or net consumed by a nettolöneavdrag) are left out of the file and need no bank account; employee_count and total_amount cover only the paid lines. Regenerating is harmless: each call rebuilds the file and re-stamps payment_file_generated_at.
+- The file always uses the run's payment_date as the requested execution date; the body accepts no execution date (unknown fields return 400). Change the run's payment_date (PATCH while draft) if the transfer day must move.
+- Dry run (?dry_run=true) validates every precondition and returns format, filename, payment_date, employee_count, total_amount and warnings without the content and without stamping the run.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{ format?: "pain001" | "bg_lb" }
+```
+
+Example request:
+```json
+{
+  "format": "pain001"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    salary_run_id: string,
+    format: "pain001" | "bg_lb",
+    filename: string,
+    content_type: "application/xml" | "text/plain",
+    content: string,
+    payment_date: string,
+    employee_count: number,
+    total_amount: number,
+    currency: "SEK",
+    warnings: string[],
+    generated_at: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "salary_run_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "format": "pain001",
+    "filename": "pain001_lon_2026-05.xml",
+    "content_type": "application/xml",
+    "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.03\"><CstmrCdtTrfInitn>…</CstmrCdtTrfInitn></Document>",
+    "payment_date": "2026-05-25",
+    "employee_count": 3,
+    "total_amount": 76500,
+    "currency": "SEK",
+    "warnings": [],
+    "generated_at": "2026-05-20T08:00:00.000Z"
   },
   "meta": {
     "request_id": "req_…",

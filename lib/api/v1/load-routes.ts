@@ -125,6 +125,13 @@ import '@/app/api/v1/companies/[companyId]/employees/opening-balances/route'
 import '@/app/api/v1/companies/[companyId]/employees/[id]/vacation-balance/route'
 import '@/app/api/v1/companies/[companyId]/salary/vacation-year-close/route'
 
+// Payroll gap-closure 4: operator onboarding. Salary settings (customer
+// provisioning), worked days (tidrapport for hourly staff and OB) and the
+// salary payment file (pain.001 / Bankgirot LB) for a run.
+import '@/app/api/v1/companies/[companyId]/salary/settings/route'
+import '@/app/api/v1/companies/[companyId]/employees/[id]/worked-days/route'
+import '@/app/api/v1/companies/[companyId]/salary-runs/[id]/payment-file/route'
+
 // Phase 5 PR-3: Reports + import async. All reports wrap existing
 // lib/reports/* generators. Imports run inline today but record their
 // progress on the `operations` table for consistent polling-shape. KPI,

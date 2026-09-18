@@ -4,6 +4,7 @@ import { withRouteContext } from '@/lib/api/with-route-context'
 import { validateBody } from '@/lib/api/validate'
 import { BatchUpsertWorkedDaysSchema } from '@/lib/api/schemas'
 import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-message'
+import { assertWorkedDaysEmployee, mapWorkedDaysWriteError } from '@/lib/salary/worked-days'
 
 ensureInitialized()
 
@@ -32,13 +33,8 @@ export const POST = withRouteContext<{ params: Promise<{ id: string }> }>(
   async (request, { supabase, companyId, log }, { params }) => {
     const { id: employeeId } = await params
 
-    const { data: employee } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('id', employeeId)
-      .eq('company_id', companyId)
-      .maybeSingle()
-    if (!employee) {
+    const employee = await assertWorkedDaysEmployee(supabase, companyId, employeeId)
+    if (!employee.ok) {
       return NextResponse.json({ error: 'Anställd hittades inte' }, { status: 404 })
     }
 
@@ -162,8 +158,12 @@ export const POST = withRouteContext<{ params: Promise<{ id: string }> }>(
         })
       if (error) {
         // 24h cap trigger uses ERRCODE check_violation (23514) and a Swedish
-        // message starting with "Total tid". Other failures are unexpected.
-        if (error.message?.includes('Total tid') || error.code === '23514') {
+        // message starting with "Total tid"; the shared classifier maps that
+        // to WORKED_HOURS_CONFLICT and any other CHECK violation to
+        // VALIDATION_ERROR. Both are per-date conflicts here; other failures
+        // are unexpected.
+        const classified = mapWorkedDaysWriteError(error).code
+        if (classified === 'WORKED_HOURS_CONFLICT' || classified === 'VALIDATION_ERROR') {
           // The conflict report says "nothing changed for this date": make
           // that true by reinserting the pre-existing row the bulk delete
           // destroyed. A date with no prior row has nothing to restore.

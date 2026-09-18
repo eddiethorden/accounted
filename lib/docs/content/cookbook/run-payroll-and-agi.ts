@@ -98,7 +98,9 @@ Response shows \`status: 'approved'\` plus a \`warnings\` array. The endpoint va
 
 Missing email is a **non-blocking warning** (lönebesked can't be sent automatically) and does not fail approval. Validation failures return \`SALARY_RUN_APPROVE_VALIDATION_FAILED\` with the full \`issues\` list (and any \`warnings\`) in \`details\`. A non-\`review\` run returns \`SALARY_RUN_APPROVE_NOT_REVIEW\`.
 
-## 4. Mark paid (approved → paid)
+## 4. Pay, then mark paid (approved → paid)
+
+The bank file comes from the API too. \`POST /salary-runs/{id}/payment-file\` with \`{ "format": "pain001" }\` (or \`"bg_lb"\`; omitted = the company's \`preferred_payment_format\`) returns the ISO 20022 pain.001 XML inline as \`data.content\` with a \`data.filename\`, plus the employee count, the total and any warnings. It needs the company's IBAN and BIC (bankgiro for LB) and each employee's clearing and account number, and the run must be approved. Write the content to disk and upload it in the bank's file channel; generating it does not change the run's state. Dry-run it first to see the preview without stamping the run.
 
 After the bank transfer settles (or you mark it on the same day for cash-method shops), tell Accounted:
 
@@ -237,5 +239,6 @@ When an employee has bilförmån / fri kost / friskvård, the förmånsvärde is
 
 - **[Set up webhooks](/docs/api/cookbook/webhooks)**: subscribe to \`salary_run.booked\` and \`agi.generated\` events to drive downstream payroll integrations.
 - **[Year-end closing](/docs/api/cookbook/year-end-closing)**: payroll's annual cap is the kontrolluppgift season (january of the following year).
+- **[Onboard a payroll customer](/docs/api/cookbook/onboard-payroll-customer)**: the operator-side setup (payroll settings, employees, cutover balances) and the monthly input loop (absence, worked days).
 - **[Salary-runs reference](/docs/api/reference/salary-runs)**: every parameter, every error code.
 `

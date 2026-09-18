@@ -260,6 +260,18 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   // Payroll gap-closure 3.4: vacation ledger + year close.
   'GET /api/v1/companies/:companyId/employees/:id/vacation-balance': 'payroll:read',
   'POST /api/v1/companies/:companyId/salary/vacation-year-close': 'payroll:write',
+  // Payroll gap-closure 4 (operator onboarding, 2026-09-18): the three pieces
+  // an external payroll operator still had to do in the app. Salary settings
+  // (pay day, avvikelseperiod, payment format, bank, öre rounding, voucher
+  // series) for customer provisioning; worked days (tidrapport) so hourly
+  // staff and OB can be driven over the API; the pain.001 / Bankgirot LB
+  // salary payment file for a run.
+  'GET /api/v1/companies/:companyId/salary/settings': 'payroll:read',
+  'PATCH /api/v1/companies/:companyId/salary/settings': 'payroll:write',
+  'GET /api/v1/companies/:companyId/employees/:id/worked-days': 'payroll:read',
+  'PUT /api/v1/companies/:companyId/employees/:id/worked-days': 'payroll:write',
+  'DELETE /api/v1/companies/:companyId/employees/:id/worked-days': 'payroll:write',
+  'POST /api/v1/companies/:companyId/salary-runs/:id/payment-file': 'payroll:write',
 
   // Dimensions (kostnadsställe/projekt): dimensions PR2. Reads ride
   // reports:read (registry data feeds report filters/pickers); value creation

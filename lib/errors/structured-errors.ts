@@ -3694,6 +3694,34 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     message_sv: 'Ett utlägg på lönebeskedet är inte längre öppet (utbetalt eller borttaget). Ta bort raden och beräkna om innan bokföring.',
     message_en: 'An expense claim on the payslip is no longer open (paid or removed). Remove the line and recalculate before booking.',
   },
+  // Salary payment file (ISO 20022 pain.001 / Bankgirot LB) on the v1 API.
+  // The dashboard routes keep their legacy messages; both surfaces share
+  // lib/salary/payment/build-payment-file.ts. `details.problem` names the
+  // field that is missing or invalid.
+  SALARY_RUN_PAYMENT_FILE_NOT_READY: {
+    httpStatus: 409,
+    message_sv: 'Betalfil kan bara genereras efter godkännande (status approved, paid eller booked).',
+    message_en: 'A payment file can only be generated after approval (status approved, paid or booked).',
+  },
+  SALARY_RUN_PAYMENT_FILE_MISSING_BANK_DETAILS: {
+    httpStatus: 422,
+    message_sv:
+      'Företagets bankuppgifter för betalfilen saknas eller är ogiltiga: IBAN och BIC för ISO 20022 (pain.001), bankgironummer för Bankgirot LB. Fyll i dem under Inställningar → Fakturering.',
+    message_en:
+      'The company bank details the payment file needs are missing or invalid: IBAN and BIC for ISO 20022 (pain.001), bankgiro number for Bankgirot LB. Fill them in under Settings → Invoicing.',
+  },
+  SALARY_RUN_PAYMENT_FILE_EMPLOYEE_BANK_MISSING: {
+    httpStatus: 422,
+    message_sv:
+      'En eller flera anställda med nettoutbetalning saknar clearingnummer eller kontonummer. Komplettera bankuppgifterna under Anställda.',
+    message_en:
+      'One or more employees with a net payout lack a clearing number or account number. Complete their bank details under Employees.',
+  },
+  SALARY_RUN_PAYMENT_FILE_GENERATION_FAILED: {
+    httpStatus: 400,
+    message_sv: 'Betalfilen kunde inte skapas: kontrollera bankuppgifterna för företaget och de anställda.',
+    message_en: 'The payment file could not be generated: check the bank details of the company and its employees.',
+  },
   // Phase 5 PR-3: additional import error codes.
   SIE_IMPORT_DUPLICATE: {
     httpStatus: 409,
