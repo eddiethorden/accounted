@@ -1,3 +1,4 @@
+import { migrationJobRoutes } from './lib/migration-job-routes'
 import { readSIEIntakeFile } from '@/lib/import/sie-intake'
 import { submitSIEJob } from '@/lib/import/sie-jobs'
 import { runSIEWorker } from '@/lib/import/sie-job-worker'
@@ -308,6 +309,7 @@ export const arcimMigrationExtension: Extension = {
   version: '2.0.0',
 
   apiRoutes: [
+    ...migrationJobRoutes,
     // ── List available providers ───────────────────────────────────
     {
       method: 'GET',

@@ -90,6 +90,8 @@ const RETAINED = new Set([
   'sie_account_mappings.user_id',
   'sie_imports.user_id',
   'sie_imports.execution_actor_id',
+  'migration_jobs.user_id', // Company import provenance and recovery.
+  'migration_source_records.user_id', // Stable provider identities.
   'sie_import_chunks.user_id', // Import provenance and resumable accounting work.
   'sie_duplicate_repair_items.user_id', // Reviewed corrections and their immutable receipts.
   'skattekonto_file_imports.user_id',

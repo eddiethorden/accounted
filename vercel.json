@@ -111,6 +111,10 @@
       "schedule": "45 5 * * *"
     },
     {
+      "path": "/api/extensions/arcim-migration/worker/cron",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/extensions/arcim-migration/complete-invoice-lines/cron",
       "schedule": "20 * * * *"
     },
