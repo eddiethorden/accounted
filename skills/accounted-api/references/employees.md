@@ -2,7 +2,7 @@
 
 # Employees endpoints
 
-The employee register plus absence (frånvaro), worked days (tidrapport for hourly staff and OB), vacation balances and year close, payroll cutover opening balances, and the company salary settings (pay day, avvikelseperiod, payment file format). Running payroll itself: salary-runs.md.
+The employee register plus absence (frånvaro), worked days (tidrapport for hourly staff and OB), benefits (förmåner), recurring lines (standing monthly rows), vacation balances and year close, payroll cutover opening balances, and the company salary settings (pay day, avvikelseperiod, payment file format). Running payroll itself: salary-runs.md.
 
 Conventions (auth, envelope, pagination, dry-run, idempotency, standard errors)
 are in SKILL.md and are not repeated per endpoint.
@@ -682,6 +682,294 @@ Example response `200`:
 
 ---
 
+### `GET /api/v1/companies/{companyId}/employees/{id}/benefits`
+
+**List the benefits (förmåner) registered on an employee.**
+`scope:payroll:read · risk:low · idempotent`
+
+Returns every benefit row on the employee, active and inactive, newest validity window first (valid_from descending, then created_at). Optional ?active=true|false filter. No cursor pagination: an employee carries a handful of rows.
+
+**Use when:** You need to see which förmåner the salary engine will derive for an employee (bilförmån, kostförmån, cykelförmån, bostad, friskvård, annat), reconcile against an HR system, or find the employee_benefit_id to update or remove.
+**Do not use for:** The derived payslip line and its tax effect: that lives on the salary run after :calculate. Standing deductions (bruttolöneavdrag, fackavgift): the recurring-lines register.
+
+**Pitfalls:**
+- The monthly förmånsvärde is added to the tax and arbetsgivaravgift basis when a run is calculated (POST /salary-runs/{id}/calculate); it is never paid out.
+- A run picks a row up when is_active is true and valid_from <= payment_date <= valid_to (valid_to null = open-ended). Rows outside that window are listed here but derive nothing.
+- annual_market_value is populated for bike benefits only (read from the stored calculation inputs); other types carry null.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `active` | query | `"true" \| "false"` | no | true returns only rows with is_active=true, false only inactive rows. Default: both. |
+
+Response `200`:
+```ts
+{
+  data: { employee_benefit_id: string, benefit_type: "bike" | "car" | "meals" | "housing" | "wellness" | "other", description: string, monthly_value: number, annual_market_value: number | null, valid_from: string, valid_to: string | null, is_active: boolean, metadata: Record<string, unknown>, created_at: string, updated_at: string }[],
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": [
+    {
+      "employee_benefit_id": "ben_4f2a…",
+      "benefit_type": "car",
+      "description": "Bilförmån Volvo XC40",
+      "monthly_value": 4275,
+      "annual_market_value": null,
+      "valid_from": "2026-01-01",
+      "valid_to": null,
+      "is_active": true,
+      "metadata": {},
+      "created_at": "2026-01-05T09:12:00Z",
+      "updated_at": "2026-01-05T09:12:00Z"
+    }
+  ],
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `POST /api/v1/companies/{companyId}/employees/{id}/benefits`
+
+**Register a benefit (förmån) on an employee.**
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
+
+Creates a standing monthly förmånsvärde row. benefit_type is one of bike, car, meals, housing, wellness, other. Every type except bike takes monthly_value: the schablon value you already know. bike takes annual_market_value and the server derives monthly_value = max(0, annual_market_value - 3000) / 12 (Skatteverket schablon, 3 000 kr/year tax-free), storing the inputs in metadata. Mandatory Idempotency-Key. Dry-runnable: the preview is the row that would be inserted, with the derived values.
+
+**Use when:** "Anna gets a company car from January": register the schablon value once and every run inside the window derives the line. Also when migrating an employee register from another payroll system.
+**Do not use for:** Computing a bilförmån from the car (nybilspris, miljöbil, fordonsskatt): do that with Skatteverket's calculator and send the result. Standing deductions such as a bruttolöneavdrag for the same car: the recurring-lines register. One-off taxable additions: edit the payslip lines on the run.
+
+**Pitfalls:**
+- The förmånsvärde is added to the employee's tax and arbetsgivaravgift basis when the run is calculated (POST /salary-runs/{id}/calculate): skatteavdrag and avgifter go up, nothing is paid out. Registering a benefit does not recompute an open run; call :calculate afterwards.
+- car (bilförmån) is supplied as the monthly schablon value you computed (Skatteverket's bilförmånsberäkning, including miljöbil and 30 000 km reductions); the API does not compute it from the car.
+- bike takes annual_market_value, not monthly_value: the server derives the monthly value with the 3 000 kr/year tax-free allowance. A monthly_value sent next to annual_market_value on a bike row is ignored.
+- valid_from / valid_to gate which runs pick the row up: a run derives the line when valid_from <= payment_date <= valid_to (valid_to omitted = open-ended). Both dates are inclusive; valid_to before valid_from is 400 VALIDATION_ERROR.
+- To stop a benefit that already fed a calculated run, PATCH is_active=false or set valid_to rather than DELETE: a hard delete nulls the provenance on the derived payslip line (ON DELETE SET NULL), so recalculating the run keeps that line (#2695).
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  benefit_type: "bike" | "car" | "meals" | "housing" | "wellness" | "other",
+  description: string,
+  monthly_value?: number,
+  annual_market_value?: number,
+  valid_from: string,
+  valid_to?: string,
+  metadata?: Record<string, unknown>,
+  is_active?: boolean
+}
+```
+
+Example request:
+```json
+{
+  "benefit_type": "bike",
+  "description": "Cykelförmån",
+  "annual_market_value": 15000,
+  "valid_from": "2026-03-01"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    employee_benefit_id: string,
+    benefit_type: "bike" | "car" | "meals" | "housing" | "wellness" | "other",
+    description: string,
+    monthly_value: number,
+    annual_market_value: number | null,
+    valid_from: string,
+    valid_to: string | null,
+    is_active: boolean,
+    metadata: Record<string, unknown>,
+    created_at: string,
+    updated_at: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_benefit_id": "ben_91d2…",
+    "benefit_type": "bike",
+    "description": "Cykelförmån",
+    "monthly_value": 1000,
+    "annual_market_value": 15000,
+    "valid_from": "2026-03-01",
+    "valid_to": null,
+    "is_active": true,
+    "metadata": {
+      "annual_market_value": 15000,
+      "annual_taxable": 12000,
+      "tax_free_portion": 3000
+    },
+    "created_at": "2026-02-20T10:00:00Z",
+    "updated_at": "2026-02-20T10:00:00Z"
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `PATCH /api/v1/companies/{companyId}/employees/{id}/benefits/{benefitId}`
+
+**Partially update a benefit (förmån) on an employee.**
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
+
+Patches the supplied fields: description, monthly_value, valid_from, valid_to (null clears it), is_active, metadata, and for bike rows annual_market_value (the server re-derives monthly_value). benefit_type is not patchable: delete and recreate to change the kind. Mandatory Idempotency-Key. Dry-runnable: the preview is the merged row.
+
+**Use when:** The förmånsvärde changes (new schablon for the year, a new bike price), the benefit ends (set valid_to), or you want to pause it without losing the row (is_active=false).
+**Do not use for:** Changing the benefit kind (delete + create). Editing the derived line on one specific run: edit the payslip line on that run instead, the register stays as is.
+
+**Pitfalls:**
+- Idempotency-Key is mandatory; calls without it return 400.
+- valid_from and valid_to are checked against the MERGED stored+patched pair: a valid_to-only patch that predates the stored valid_from is 400 VALIDATION_ERROR (field valid_to).
+- annual_market_value is accepted on bike rows only (400 otherwise) and overrides any monthly_value in the same body.
+- The förmånsvärde is added to the tax and arbetsgivaravgift basis at :calculate; a change here does not recompute an open run. Call POST /salary-runs/{id}/calculate afterwards.
+- To stop a benefit that a calculated run already consumed, set is_active=false or valid_to here rather than DELETE: recalculating the run then drops the derived line, which a hard delete would leave behind (#2695).
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `benefitId` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  description?: string,
+  monthly_value?: number,
+  annual_market_value?: number,
+  valid_from?: string,
+  valid_to?: string | null,
+  metadata?: Record<string, unknown>,
+  is_active?: boolean
+}
+```
+
+Example request:
+```json
+{
+  "valid_to": "2026-06-30"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    employee_benefit_id: string,
+    benefit_type: "bike" | "car" | "meals" | "housing" | "wellness" | "other",
+    description: string,
+    monthly_value: number,
+    annual_market_value: number | null,
+    valid_from: string,
+    valid_to: string | null,
+    is_active: boolean,
+    metadata: Record<string, unknown>,
+    created_at: string,
+    updated_at: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_benefit_id": "ben_4f2a…",
+    "benefit_type": "car",
+    "description": "Bilförmån Volvo XC40",
+    "monthly_value": 4275,
+    "annual_market_value": null,
+    "valid_from": "2026-01-01",
+    "valid_to": "2026-06-30",
+    "is_active": true,
+    "metadata": {},
+    "created_at": "2026-01-05T09:12:00Z",
+    "updated_at": "2026-06-02T14:40:00Z"
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `DELETE /api/v1/companies/{companyId}/employees/{id}/benefits/{benefitId}`
+
+**Remove a benefit (förmån) from an employee.**
+`scope:payroll:write · risk:medium · idempotent · dry-run`
+
+Hard-deletes the benefit row, the same operation the dashboard performs. 204 on success, 404 NOT_FOUND when no such row exists on the employee. Mandatory Idempotency-Key. Dry-runnable: the preview is the row that would be removed.
+
+**Use when:** A benefit was registered by mistake and has not been used by any calculated run yet.
+**Do not use for:** Ending a benefit that a run has already consumed: PATCH is_active=false or set valid_to instead (see pitfalls). Removing the derived line from one run: edit that run's payslip lines.
+
+**Pitfalls:**
+- Idempotency-Key is mandatory.
+- 204 No Content is returned on success: there is no response body to parse. A second DELETE of the same id returns 404 NOT_FOUND.
+- A benefit that already fed a calculated run leaves its derived payslip line behind on recalculate: the provenance column is ON DELETE SET NULL, so the engine no longer recognises the line as derived (#2695). Deactivate (PATCH is_active=false) or close the window (valid_to) instead; recalculating then removes the line.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `benefitId` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Response `204`.
+
+---
+
 ### `GET /api/v1/companies/{companyId}/employees/{id}/opening-balances`
 
 **Get an employee's payroll cutover opening balances.**
@@ -842,6 +1130,319 @@ Example response `200`:
     "employee_id": "emp_77b2…",
     "cutover_date": "2026-07-01",
     "locked": false
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `GET /api/v1/companies/{companyId}/employees/{id}/recurring-lines`
+
+**List recurring payslip lines for an employee.**
+`scope:payroll:read · risk:low · idempotent`
+
+Returns the employee's standing monthly payslip rows (gross and net deductions such as a benefit bike bruttolöneavdrag, a union fee, or a net deduction for a benefit the employee pays for), newest valid_from first. Both active and deactivated lines are returned unless ?active filters them.
+
+**Use when:** You need to see what the salary engine will derive for an employee every month, to reconcile with an HR system, or to find the employee_recurring_line_id to update or delete.
+**Do not use for:** The derived payslip rows of one run: those are on the salary run detail after :calculate. Taxable benefits in kind (bilförmån, kostförmån): use the employee benefits endpoints.
+
+**Pitfalls:**
+- Rows are re-derived on every :calculate for runs whose payment_date falls inside valid_from..valid_to (valid_to null = open-ended). Hand edits to a derived payslip row are overwritten by the next :calculate.
+- The amount sign follows the item type: every supported type is a deduction and must be negative (e.g. -670.17 for a benefit bike bruttolöneavdrag). The API rejects the wrong sign with 400 VALIDATION_ERROR on field amount.
+- account_number overrides the default BAS account for the derived payslip row; null lets the engine use its item-type mapping.
+- Draft-only per-run edits (a one-off change on one payslip) still go through the salary-runs lines endpoints, not through recurring lines.
+- Deactivated lines (is_active=false) are listed too: a line that a booked run derived from cannot be deleted, only deactivated, so history keeps it.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `active` | query | `"true" \| "false"` | no | true returns active lines only, false deactivated lines only. Default: every line. |
+
+Response `200`:
+```ts
+{
+  data: { employee_recurring_line_id: string, item_type: "gross_deduction_pension" | "gross_deduction_other" | "net_deduction_union" | "net_deduction_benefit_payment" | "net_deduction_other", description: string, amount: number, account_number: string | null, valid_from: string, valid_to: string | null, is_active: boolean, metadata: Record<string, unknown>, created_at: string, updated_at: string }[],
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": [
+    {
+      "employee_recurring_line_id": "erl_5b1c…",
+      "item_type": "gross_deduction_other",
+      "description": "Förmånscykel bruttolöneavdrag",
+      "amount": -670.17,
+      "account_number": null,
+      "valid_from": "2026-01-01",
+      "valid_to": null,
+      "is_active": true,
+      "metadata": {}
+    }
+  ],
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `POST /api/v1/companies/{companyId}/employees/{id}/recurring-lines`
+
+**Create a recurring payslip line for an employee.**
+`scope:payroll:write · risk:low · dry-run · reversible`
+
+Adds a standing monthly payslip row. From the next :calculate on, every salary run whose payment_date falls inside valid_from..valid_to derives a payslip line from it, with flags (taxable, avgift basis, gross vs net deduction) fixed by item_type. Amounts are kept to whole öre. Requires an Idempotency-Key header.
+
+**Use when:** An employee starts a benefit bike bruttolöneavdrag, a union fee, a monthly net deduction for a benefit they pay for, or any other deduction that repeats every month until further notice.
+**Do not use for:** One-off deductions on a single payslip: add a line on the salary run instead. Additions (a monthly allowance paid in cash): not supported as recurring lines; add them per run. Taxable benefits in kind: use the employee benefits endpoints.
+
+**Pitfalls:**
+- Rows are re-derived on every :calculate for runs whose payment_date falls inside valid_from..valid_to (valid_to null = open-ended). Hand edits to a derived payslip row are overwritten by the next :calculate.
+- The amount sign follows the item type: every supported type is a deduction and must be negative (e.g. -670.17 for a benefit bike bruttolöneavdrag). The API rejects the wrong sign with 400 VALIDATION_ERROR on field amount.
+- account_number overrides the default BAS account for the derived payslip row; null lets the engine use its item-type mapping.
+- Draft-only per-run edits (a one-off change on one payslip) still go through the salary-runs lines endpoints, not through recurring lines.
+- valid_to must be on or after valid_from (inclusive); omit it for an open-ended line.
+- Creating a line does not recompute an open salary run: call POST /salary-runs/{id}/calculate afterwards.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  item_type: "gross_deduction_pension" | "gross_deduction_other" | "net_deduction_union" | "net_deduction_benefit_payment" | "net_deduction_other",
+  description: string,
+  amount: number,
+  account_number?: string,
+  valid_from: string,
+  valid_to?: string,
+  metadata?: Record<string, unknown>,
+  is_active?: boolean
+}
+```
+
+Example request:
+```json
+{
+  "item_type": "gross_deduction_other",
+  "description": "Förmånscykel bruttolöneavdrag",
+  "amount": -670.17,
+  "valid_from": "2026-01-01"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    employee_recurring_line_id: string,
+    item_type: "gross_deduction_pension" | "gross_deduction_other" | "net_deduction_union" | "net_deduction_benefit_payment" | "net_deduction_other",
+    description: string,
+    amount: number,
+    account_number: string | null,
+    valid_from: string,
+    valid_to: string | null,
+    is_active: boolean,
+    metadata: Record<string, unknown>,
+    created_at: string,
+    updated_at: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_recurring_line_id": "erl_5b1c…",
+    "item_type": "gross_deduction_other",
+    "description": "Förmånscykel bruttolöneavdrag",
+    "amount": -670.17,
+    "account_number": null,
+    "valid_from": "2026-01-01",
+    "valid_to": null,
+    "is_active": true,
+    "metadata": {}
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `PATCH /api/v1/companies/{companyId}/employees/{id}/recurring-lines/{lineId}`
+
+**Update a recurring payslip line.**
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
+
+Patches description, amount, account_number, valid_from, valid_to, is_active or metadata on a recurring line. The amount sign is re-checked against the stored item_type and the validity period against the merged (stored + patched) dates. item_type cannot change: delete and recreate instead. Requires an Idempotency-Key header.
+
+**Use when:** The monthly deduction changed (new bike lease amount), the line ends on a known date (set valid_to), or it should pause without losing history (is_active=false).
+**Do not use for:** Changing the kind of line (gross to net deduction): DELETE and POST a new one. Fixing one payslip only: edit the salary run line instead.
+
+**Pitfalls:**
+- Rows are re-derived on every :calculate for runs whose payment_date falls inside valid_from..valid_to (valid_to null = open-ended). Hand edits to a derived payslip row are overwritten by the next :calculate.
+- The amount sign follows the item type: every supported type is a deduction and must be negative (e.g. -670.17 for a benefit bike bruttolöneavdrag). The API rejects the wrong sign with 400 VALIDATION_ERROR on field amount.
+- account_number overrides the default BAS account for the derived payslip row; null lets the engine use its item-type mapping.
+- Draft-only per-run edits (a one-off change on one payslip) still go through the salary-runs lines endpoints, not through recurring lines.
+- A patch that leaves valid_to before valid_from on the merged row is rejected with 400 VALIDATION_ERROR on field valid_to; send valid_to: null to make the line open-ended again.
+- Runs already calculated keep their derived rows until they are recalculated; booked runs are never touched.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `lineId` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Request body:
+```ts
+{
+  description?: string,
+  amount?: number,
+  account_number?: string | null,
+  valid_from?: string,
+  valid_to?: string | null,
+  metadata?: Record<string, unknown>,
+  is_active?: boolean
+}
+```
+
+Example request:
+```json
+{
+  "amount": -700,
+  "valid_to": "2026-12-31"
+}
+```
+
+Response `200`:
+```ts
+{
+  data: {
+    employee_recurring_line_id: string,
+    item_type: "gross_deduction_pension" | "gross_deduction_other" | "net_deduction_union" | "net_deduction_benefit_payment" | "net_deduction_other",
+    description: string,
+    amount: number,
+    account_number: string | null,
+    valid_from: string,
+    valid_to: string | null,
+    is_active: boolean,
+    metadata: Record<string, unknown>,
+    created_at: string,
+    updated_at: string
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_recurring_line_id": "erl_5b1c…",
+    "item_type": "gross_deduction_other",
+    "description": "Förmånscykel bruttolöneavdrag",
+    "amount": -700,
+    "account_number": null,
+    "valid_from": "2026-01-01",
+    "valid_to": "2026-12-31",
+    "is_active": true,
+    "metadata": {}
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `DELETE /api/v1/companies/{companyId}/employees/{id}/recurring-lines/{lineId}`
+
+**Delete a recurring payslip line, or deactivate it if a run already used it.**
+`scope:payroll:write · risk:low · idempotent · dry-run`
+
+Removes the line when no salary run has derived a payslip row from it. Once a run has (the derived row references the line), the database refuses the delete and the line is deactivated instead (is_active=false): the payslip row keeps its provenance, the next :calculate of a draft run drops the derived row, and nothing is re-derived. Returns 200 with deleted: true or deleted: false + deactivated: true so the caller knows which happened. Requires an Idempotency-Key header.
+
+**Use when:** The deduction ends and there is no end date to keep (a union fee stops, the bike lease is returned), or the line was created by mistake.
+**Do not use for:** Ending a line on a future date: PATCH valid_to instead, so the remaining months still derive. Removing a derived row from one draft payslip: DELETE the salary run line.
+
+**Pitfalls:**
+- Rows are re-derived on every :calculate for runs whose payment_date falls inside valid_from..valid_to (valid_to null = open-ended). Hand edits to a derived payslip row are overwritten by the next :calculate.
+- The amount sign follows the item type: every supported type is a deduction and must be negative (e.g. -670.17 for a benefit bike bruttolöneavdrag). The API rejects the wrong sign with 400 VALIDATION_ERROR on field amount.
+- account_number overrides the default BAS account for the derived payslip row; null lets the engine use its item-type mapping.
+- Draft-only per-run edits (a one-off change on one payslip) still go through the salary-runs lines endpoints, not through recurring lines.
+- deleted: false with deactivated: true is a success, not an error: a run already derived from the line, so it is kept for history and switched off.
+- A lineId under another employee or company answers 404 NOT_FOUND.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `lineId` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Response `200`:
+```ts
+{
+  data: { employee_recurring_line_id: string, deleted: boolean, deactivated?: true },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_recurring_line_id": "erl_5b1c…",
+    "deleted": true
   },
   "meta": {
     "request_id": "req_…",

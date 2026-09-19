@@ -132,6 +132,13 @@ import '@/app/api/v1/companies/[companyId]/salary/settings/route'
 import '@/app/api/v1/companies/[companyId]/employees/[id]/worked-days/route'
 import '@/app/api/v1/companies/[companyId]/salary-runs/[id]/payment-file/route'
 
+// Payroll gap-closure 5: employee benefits, recurring lines, rättelsekörning.
+import '@/app/api/v1/companies/[companyId]/employees/[id]/benefits/route'
+import '@/app/api/v1/companies/[companyId]/employees/[id]/benefits/[benefitId]/route'
+import '@/app/api/v1/companies/[companyId]/employees/[id]/recurring-lines/route'
+import '@/app/api/v1/companies/[companyId]/employees/[id]/recurring-lines/[lineId]/route'
+import '@/app/api/v1/companies/[companyId]/salary-runs/[id]/correct/route'
+
 // Phase 5 PR-3: Reports + import async. All reports wrap existing
 // lib/reports/* generators. Imports run inline today but record their
 // progress on the `operations` table for consistent polling-shape. KPI,

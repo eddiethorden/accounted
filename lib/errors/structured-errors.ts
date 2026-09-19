@@ -3554,6 +3554,16 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     message_sv: 'En lönekörning för perioden finns redan.',
     message_en: 'A salary run for that period already exists.',
   },
+  SALARY_RUN_CORRECT_NOT_BOOKED: {
+    httpStatus: 409,
+    message_sv: 'Bara bokförda lönekörningar kan korrigeras (rättelsekörning).',
+    message_en: 'Only booked salary runs can be corrected (rättelsekörning).',
+  },
+  SALARY_RUN_ALREADY_CORRECTED: {
+    httpStatus: 409,
+    message_sv: 'Lönekörningen är redan korrigerad; arbeta vidare i korrigeringskörningen.',
+    message_en: 'The salary run is already corrected; continue in its correction run.',
+  },
   SALARY_RUN_DEVIATION_PERIOD_INVALID: {
     httpStatus: 400,
     message_sv:

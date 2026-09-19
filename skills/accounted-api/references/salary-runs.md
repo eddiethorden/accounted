@@ -2,7 +2,7 @@
 
 # Salary runs endpoints
 
-Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips and draft-only line edits.
+Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips, draft-only line edits and :correct (rättelsekörning) for a booked run.
 
 Conventions (auth, envelope, pagination, dry-run, idempotency, standard errors)
 are in SKILL.md and are not repeated per endpoint.
@@ -593,6 +593,84 @@ Example response `200`:
     "total_employer_cost": 137991,
     "warnings": [
       "Läkarintyg krävs från och med dag 8: Anna Andersson. Kontrollera att läkarintyg finns innan lönekörningen godkänns."
+    ]
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `POST /api/v1/companies/{companyId}/salary-runs/{id}/correct`
+
+**Correct a booked salary run (rättelsekörning): storno its verifikat and open a new draft for the same period.**
+`scope:payroll:write · risk:high · idempotent · dry-run`
+
+Per Bokföringslagen 5 kap 5 § a booked salary run is never edited: this verb reverses every verifikation the run posted (salary, arbetsgivaravgifter, semesterlöneskuld, pension) with storno entries, marks the original `corrected`, revokes the payslip links that were emailed for it, and inserts a fresh `draft` run for the same period with `is_correction = true` and `corrects_run_id` pointing back. The roster and line items are copied onto the correction run so the operator edits a populated draft. Idempotent. Dry-runnable.
+
+**Use when:** A booked (and usually paid) month turns out wrong: a missing line, a wrong salary, a benefit that was not on the payslip. Call this first, then edit the correction run's lines and walk it through calculate, approve, mark-paid, book and generate-agi.
+**Do not use for:** Runs that are not booked yet (draft, review, approved, paid): delete or edit them instead, nothing is posted. Fixing a single verifikation outside the salary lifecycle (POST /journal-entries/{id}/correct). Re-issuing payslips without changing amounts.
+
+**Pitfalls:**
+- Only `booked` runs can be corrected: any other status returns 409 SALARY_RUN_CORRECT_NOT_BOOKED with `details.current_status`.
+- The original's verifikat are reversed with storno (new reversing entries in the same series); nothing is edited or deleted. All reversed entry IDs are returned in `reversed_entry_ids`.
+- The correction run is a fresh draft for the same period: it must be attached (roster is copied for you), calculated, approved, paid, booked and its AGI regenerated. Nothing is posted by this verb.
+- A second call on the same run returns 409 SALARY_RUN_ALREADY_CORRECTED with `details.correction_run_id`: continue in that run instead.
+- Payslip links of the original are revoked immediately (employees see "ersatt"); fresh links are issued when the correction run's payslips are sent.
+- The arbetsgivardeklaration (AGI) for the period must be re-filed after the correction run books; Skatteverket receives the corrected figures, not a delta.
+- The storno entries land in the original payment_date's period: a locked period returns PERIOD_LOCKED and nothing is written. If the failure happens after the first storno, `valid_alternatives.reversed_entry_ids` names the entries already reversed and `valid_alternatives.remaining_entry_ids` the ones still posted; the run stays `booked` and a retry does not skip the reversed ones (CANNOT_REVERSE_NON_POSTED), so finish the storno of the remaining entries through POST /journal-entries/{id}/reverse.
+- Idempotency-Key is mandatory.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Response `200`:
+```ts
+{
+  data: {
+    original_run_id: string,
+    original_status: "corrected",
+    correction_run: { id: string, period_year: number, period_month: number, payment_date: string, status: "draft", is_correction: true, corrects_run_id: string, deviation_period_start: string | null, deviation_period_end: string | null },
+    reversed_entry_ids: string[]
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "original_run_id": "run_a8f1…",
+    "original_status": "corrected",
+    "correction_run": {
+      "id": "run_c0rr…",
+      "period_year": 2026,
+      "period_month": 5,
+      "payment_date": "2026-05-25",
+      "status": "draft",
+      "is_correction": true,
+      "corrects_run_id": "run_a8f1…",
+      "deviation_period_start": "2026-04-01",
+      "deviation_period_end": "2026-04-30"
+    },
+    "reversed_entry_ids": [
+      "je_salary…",
+      "je_avg…",
+      "je_vac…"
     ]
   },
   "meta": {

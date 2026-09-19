@@ -8,7 +8,7 @@ description: >-
   transactions and reconciliation, payroll (lön), VAT/moms and financial
   reports, SIE import/export, documents, webhooks. Covers auth with
   gnubok_sk_ API keys, conventions (dry-run, idempotency, cursor
-  pagination, scopes), and all 154 endpoints.
+  pagination, scopes), and all 163 endpoints.
 ---
 
 <!-- GENERATED FILE, do not edit. Source: lib/api/v1 registry + scripts/api-skill/overlays. Regenerate with `npm run apiskill:generate`. -->
@@ -142,7 +142,7 @@ call can undo it, e.g. invoice credit).
 
 ## Endpoint index
 
-API version `2026-05-12`, 154 operations. Paths are shown without
+API version `2026-05-12`, 163 operations. Paths are shown without
 their `/api/v1` prefix (full base URL: `https://app.gnubok.se/api/v1`).
 
 ### Core (5)
@@ -292,7 +292,7 @@ POST /companies/{companyId}/transactions/batch-categorize : Categorize up to 100
 POST /companies/{companyId}/transactions/ingest : Bulk-ingest transactions (up to 500 per call) [scope:transactions:write risk:medium idempotent dry-run]
 ```
 
-### Employees (18)
+### Employees (26)
 
 Full detail: [references/employees.md](references/employees.md)
 
@@ -305,8 +305,16 @@ DELETE /companies/{companyId}/employees/{id} : Soft-delete an employee [scope:pa
 GET /companies/{companyId}/employees/{id}/absence : List absence days for an employee in a date range [scope:payroll:read risk:low idempotent]
 PUT /companies/{companyId}/employees/{id}/absence : Register absence for an employee over a date range [scope:payroll:write risk:low idempotent dry-run reversible]
 DELETE /companies/{companyId}/employees/{id}/absence : Delete absence days for an employee in a date range [scope:payroll:write risk:low idempotent dry-run]
+GET /companies/{companyId}/employees/{id}/benefits : List the benefits (förmåner) registered on an employee [scope:payroll:read risk:low idempotent]
+POST /companies/{companyId}/employees/{id}/benefits : Register a benefit (förmån) on an employee [scope:payroll:write risk:low idempotent dry-run reversible]
+PATCH /companies/{companyId}/employees/{id}/benefits/{benefitId} : Partially update a benefit (förmån) on an employee [scope:payroll:write risk:low idempotent dry-run reversible]
+DELETE /companies/{companyId}/employees/{id}/benefits/{benefitId} : Remove a benefit (förmån) from an employee [scope:payroll:write risk:medium idempotent dry-run]
 GET /companies/{companyId}/employees/{id}/opening-balances : Get an employee's payroll cutover opening balances [scope:payroll:read risk:low idempotent]
 PUT /companies/{companyId}/employees/{id}/opening-balances : Set an employee's payroll cutover opening balances [scope:payroll:write risk:medium idempotent dry-run reversible]
+GET /companies/{companyId}/employees/{id}/recurring-lines : List recurring payslip lines for an employee [scope:payroll:read risk:low idempotent]
+POST /companies/{companyId}/employees/{id}/recurring-lines : Create a recurring payslip line for an employee [scope:payroll:write risk:low dry-run reversible]
+PATCH /companies/{companyId}/employees/{id}/recurring-lines/{lineId} : Update a recurring payslip line [scope:payroll:write risk:low idempotent dry-run reversible]
+DELETE /companies/{companyId}/employees/{id}/recurring-lines/{lineId} : Delete a recurring payslip line, or deactivate it if a run already used it [scope:payroll:write risk:low idempotent dry-run]
 GET /companies/{companyId}/employees/{id}/vacation-balance : Get an employee's current vacation balance [scope:payroll:read risk:low idempotent]
 GET /companies/{companyId}/employees/{id}/worked-days : List worked days (hours per date) for an employee in a date range [scope:payroll:read risk:low idempotent]
 PUT /companies/{companyId}/employees/{id}/worked-days : Register worked hours per day for an employee (bulk upsert) [scope:payroll:write risk:low idempotent dry-run reversible]
@@ -317,7 +325,7 @@ PATCH /companies/{companyId}/salary/settings : Partially update the company payr
 POST /companies/{companyId}/salary/vacation-year-close : Close a vacation year (semesterberedning + arsavslut) [scope:payroll:write risk:high idempotent dry-run]
 ```
 
-### Salary runs (20)
+### Salary runs (21)
 
 Full detail: [references/salary-runs.md](references/salary-runs.md)
 
@@ -330,6 +338,7 @@ DELETE /companies/{companyId}/salary-runs/{id} : Delete a draft salary run [scop
 POST /companies/{companyId}/salary-runs/{id}/approve : Approve a reviewed salary run [scope:payroll:write risk:low idempotent dry-run]
 POST /companies/{companyId}/salary-runs/{id}/book : Post the verifikationer for a paid salary run [scope:payroll:write risk:high idempotent dry-run]
 POST /companies/{companyId}/salary-runs/{id}/calculate : Calculate a draft salary run and advance it to review [scope:payroll:write risk:medium idempotent dry-run]
+POST /companies/{companyId}/salary-runs/{id}/correct : Correct a booked salary run (rättelsekörning): storno its verifikat and open a new draft for the same period [scope:payroll:write risk:high idempotent dry-run]
 GET /companies/{companyId}/salary-runs/{id}/employees : List per-employee results of a salary run [scope:payroll:read risk:low idempotent]
 POST /companies/{companyId}/salary-runs/{id}/employees : Add an employee to a draft salary run [scope:payroll:write risk:low idempotent dry-run reversible]
 GET /companies/{companyId}/salary-runs/{id}/employees/{employeeId} : Get one employee's payslip in a salary run [scope:payroll:read risk:low idempotent]

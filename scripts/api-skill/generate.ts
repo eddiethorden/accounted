@@ -121,9 +121,9 @@ const GROUPS: Array<{ file: string; title: string; members: string[]; blurb: str
     members: ['employees', 'salary'],
     blurb:
       'The employee register plus absence (frånvaro), worked days (tidrapport for hourly staff ' +
-      'and OB), vacation balances and year close, payroll cutover opening balances, and the ' +
-      'company salary settings (pay day, avvikelseperiod, payment file format). Running payroll ' +
-      'itself: salary-runs.md.',
+      'and OB), benefits (förmåner), recurring lines (standing monthly rows), vacation balances ' +
+      'and year close, payroll cutover opening balances, and the company salary settings (pay ' +
+      'day, avvikelseperiod, payment file format). Running payroll itself: salary-runs.md.',
   },
   {
     file: 'salary-runs.md',
@@ -131,8 +131,8 @@ const GROUPS: Array<{ file: string; title: string; members: string[]; blurb: str
     members: ['salary-runs'],
     blurb:
       'Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> ' +
-      'mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips ' +
-      'and draft-only line edits.',
+      'mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips, ' +
+      'draft-only line edits and :correct (rättelsekörning) for a booked run.',
   },
   {
     file: 'reports.md',
