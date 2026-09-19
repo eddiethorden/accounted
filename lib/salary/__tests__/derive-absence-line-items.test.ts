@@ -108,7 +108,11 @@ describe('deriveAbsenceLineItems: sick', () => {
     expect(karens).toBeDefined()
     expect(karens!.quantity).toBe(1)
     expect(karens!.amount).toBeLessThan(0)
-    expect(result.lineItems.find(li => li.item_type === 'sick_day2_14')).toBeUndefined()
+    // Day one also receives sjuklön (SjLL 6 § since 2019): the 20 % gap on
+    // that day is deducted next to the karensavdrag.
+    const dayOne = result.lineItems.find(li => li.item_type === 'sick_day2_14')
+    expect(dayOne!.quantity).toBe(1)
+    expect(dayOne!.amount).toBe(-285.71) // 1428.57 lost, 1142.86 sjuklön
     expect(result.aggregated.sickDays).toBe(1)
   })
 
@@ -128,7 +132,7 @@ describe('deriveAbsenceLineItems: sick', () => {
     const day2_14 = result.lineItems.find(li => li.item_type === 'sick_day2_14')
     expect(karens).toBeDefined()
     expect(day2_14).toBeDefined()
-    expect(day2_14!.quantity).toBe(4) // days 2-5 of segment
+    expect(day2_14!.quantity).toBe(5) // days 1-5 of segment, day one included
     expect(result.flagFkReporting).toBe(false)
   })
 
@@ -244,6 +248,81 @@ describe('deriveAbsenceLineItems: cutover karensPeriodsAdjustment', () => {
     expect(withZero.lineItems).toEqual(without.lineItems)
   })
 })
+
+describe('deriveAbsenceLineItems: karens cap, carry and partial days', () => {
+  // 30 000 kr, divisor 21: daily 1428.57, sjuklön/day 1142.86,
+  // karensavdrag 20 % of a week's sjuklön = 1107.69.
+  it('caps the karensavdrag at the sjuklön the period yields (SjLL 6 §)', () => {
+    const result = deriveAbsenceLineItems(
+      baseInput({ periodDays: [{ absence_date: '2026-07-01', absence_type: 'sick', hours: 1 }] }),
+    )
+    const karens = result.lineItems.find(li => li.item_type === 'sick_karens')
+    const dayOne = result.lineItems.find(li => li.item_type === 'sick_day2_14')
+    // One hour of an 8 h day: lost 178.57, sjuklön 142.86. The karens can
+    // only take the 142.86 that exists, so the employee loses exactly the
+    // hour, never more.
+    expect(karens!.amount).toBe(-142.86)
+    expect(dayOne!.quantity).toBe(0.13)
+    expect(result.lineItems.reduce((sum, li) => sum + li.amount, 0)).toBeCloseTo(-178.57, 1)
+  })
+
+  it('carries the unconsumed karens into the next month of the same period', () => {
+    const june = deriveAbsenceLineItems(
+      baseInput({ periodDays: [{ absence_date: '2026-06-30', absence_type: 'sick', hours: 1 }] }),
+    )
+    const july = deriveAbsenceLineItems(
+      baseInput({
+        periodDays: [{ absence_date: '2026-07-01', absence_type: 'sick', hours: 8 }],
+        lookbackSickDates: ['2026-06-30'],
+        lookbackSickDays: [{ absence_date: '2026-06-30', absence_type: 'sick', hours: 1 }],
+      }),
+    )
+    const juneKarens = june.lineItems.find(li => li.item_type === 'sick_karens')!.amount
+    const julyKarens = july.lineItems.find(li => li.item_type === 'sick_karens')!.amount
+    expect(juneKarens).toBe(-142.86)
+    expect(julyKarens).toBe(-964.83)
+    expect(r2(juneKarens + julyKarens)).toBe(-1107.69)
+  })
+
+  it('does not deduct a second karens when the lookback day already absorbed it', () => {
+    const july = deriveAbsenceLineItems(
+      baseInput({
+        periodDays: [{ absence_date: '2026-07-01', absence_type: 'sick', hours: 8 }],
+        lookbackSickDates: ['2026-06-30'],
+      }),
+    )
+    expect(july.lineItems.find(li => li.item_type === 'sick_karens')).toBeUndefined()
+    expect(july.lineItems.find(li => li.item_type === 'sick_day2_14')!.quantity).toBe(1)
+  })
+
+  it.each(['vab', 'parental', 'unpaid_leave'] as const)(
+    'weights a partial %s day by hours but reports it as one day',
+    (absence_type) => {
+      const full = deriveAbsenceLineItems(
+        baseInput({ periodDays: [{ absence_date: '2026-07-01', absence_type, hours: 8 }] }),
+      )
+      const half = deriveAbsenceLineItems(
+        baseInput({ periodDays: [{ absence_date: '2026-07-01', absence_type, hours: 4 }] }),
+      )
+      expect(half.lineItems[0].quantity).toBe(0.5)
+      expect(half.lineItems[0].amount).toBeCloseTo(full.lineItems[0].amount / 2, 1)
+      expect(half.aggregated).toEqual(full.aggregated)
+    },
+  )
+
+  it('uses the employee schedule for the day length and never counts more than a day', () => {
+    const sixHourDay = deriveAbsenceLineItems(
+      baseInput({ hoursPerDay: 6, periodDays: [{ absence_date: '2026-07-01', absence_type: 'vab', hours: 3 }] }),
+    )
+    expect(sixHourDay.lineItems[0].quantity).toBe(0.5)
+    const overbooked = deriveAbsenceLineItems(
+      baseInput({ hoursPerDay: 6, periodDays: [{ absence_date: '2026-07-01', absence_type: 'vab', hours: 8 }] }),
+    )
+    expect(overbooked.lineItems[0].quantity).toBe(1)
+  })
+})
+
+const r2 = (x: number) => Math.round(x * 100) / 100
 
 describe('deriveAbsenceLineItems: VAB', () => {
   it('emits VAB line item with deduction', () => {

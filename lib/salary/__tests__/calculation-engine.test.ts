@@ -104,6 +104,48 @@ function makeBasicInput(overrides = {}) {
 }
 
 describe('calculateSalary', () => {
+  it('deducts a derived absence row once even though it carries is_gross_deduction (Frey, 2026-09-18)', () => {
+    // 31 500 kr monthly, one VAB day at daily rate 1 500: gross must be 30 000,
+    // not 28 500. The derived rows carry is_gross_deduction for the booking
+    // split, and Step 4 must not consume them a second time.
+    const result = calculateSalary(
+      makeBasicInput({
+        monthlySalary: 31500,
+        lineItems: [
+          {
+            itemType: 'vab',
+            amount: -1500,
+            isTaxable: true,
+            isAvgiftBasis: true,
+            isVacationBasis: true,
+            isGrossDeduction: true,
+            isNetDeduction: false,
+          },
+        ],
+      }),
+      config2026,
+      emptyTaxRates,
+    )
+    expect(result.grossSalary).toBe(30000)
+    expect(result.grossDeductions).toBe(0)
+  })
+
+  it('still applies a genuine bruttolöneavdrag next to absence rows', () => {
+    const result = calculateSalary(
+      makeBasicInput({
+        monthlySalary: 31500,
+        lineItems: [
+          { itemType: 'sick_karens', amount: -1163.08, isTaxable: true, isAvgiftBasis: true, isVacationBasis: false, isGrossDeduction: true, isNetDeduction: false },
+          { itemType: 'deduction', amount: -1000, isTaxable: true, isAvgiftBasis: true, isVacationBasis: false, isGrossDeduction: true, isNetDeduction: false },
+        ],
+      }),
+      config2026,
+      emptyTaxRates,
+    )
+    expect(result.grossSalary).toBe(29336.92)
+    expect(result.grossDeductions).toBe(1000)
+  })
+
   it('calculates basic monthly salary correctly', () => {
     const result = calculateSalary(makeBasicInput(), config2026, emptyTaxRates)
 

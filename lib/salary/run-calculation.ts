@@ -371,6 +371,9 @@ export async function runSalaryCalculation(
       periodEnd: deviation.end,
       karensPeriodsAdjustment: karensAdjustmentApplies ? opening.karensPeriodsAdjustment : 0,
       dailyDivisor: dailyDivisor(emp.workdays_per_week),
+      // Scheduled hours per day weight partial absence rows (4 h of an 8 h day
+      // is half a day). hours_per_week already reflects the employment degree.
+      hoursPerDay: (emp.hours_per_week || 40) / (emp.workdays_per_week || 5),
     })
 
     // 8b. For hourly employees, derive worked hours from the calendar.

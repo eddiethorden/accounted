@@ -363,7 +363,14 @@ export function calculateSalary(
   }
 
   // ─── Step 4: Bruttolöneavdrag (MUST be before tax) ───
-  const grossDeductionItems = input.lineItems.filter(li => li.isGrossDeduction)
+  // Absence rows are signed and already consumed in Step 3. The derived
+  // sick/VAB/parental rows also carry is_gross_deduction (it drives the
+  // booking split), so they must be excluded here or the same day is
+  // deducted twice: 31 500 kr with one VAB day gave 28 500 instead of 30 000
+  // (reported by Frey, 2026-09-18).
+  const grossDeductionItems = input.lineItems.filter(
+    li => li.isGrossDeduction && !absenceItems.includes(li),
+  )
   const totalGrossDeductions = r(Math.abs(grossDeductionItems.reduce((sum, li) => sum + li.amount, 0)))
   if (totalGrossDeductions > 0) {
     steps.push({

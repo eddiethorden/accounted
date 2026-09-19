@@ -18,8 +18,16 @@ import {
  *
  * Swedish payroll rules implemented:
  *   - **Sjuklöneperiod** (Sjuklönelagen) = first sick day → calendar-day 14.
- *     Day 1 is karensavdrag (one per period). Days 2-14 are sjuklön at 80%.
- *     Day 15+ is Försäkringskassan; employer pays nothing but must report.
+ *     Days 1-14 are sjuklön at 80 % of the lost pay (SjLL 6 §), less ONE
+ *     karensavdrag per period of 20 % of an average week's sjuklön (SjLL
+ *     6 § since 2019, replacing the old karensdag). The karensavdrag can
+ *     never exceed the sjuklön the period actually yields, so a short first
+ *     day carries the rest of it into the next sick day, also across a
+ *     month boundary. Day 15+ is Försäkringskassan; employer pays nothing
+ *     but must report.
+ *   - **Partial days**: a row's hours against the scheduled hours per day
+ *     weight the deduction (4 h of an 8 h day = half a day); the reported
+ *     day counts stay whole days because AGI reports dates, not hours.
  *   - **Återinsjuknande**: if the next sick day is within 5 calendar days of
  *     the previous sjuklöneperiod's last day, both merge: no new karens.
  *   - **Allmänt högriskskydd**: max 10 karensavdrag per rolling 12-month
@@ -155,6 +163,15 @@ export interface DeriveInput {
    *  previous month already consumed some of the 14-day window) and to
    *  count karensavdrag for högriskskydd. */
   lookbackSickDates: string[]
+  /** The same lookback rows with their hours, when known. A karensavdrag
+   *  that a short first day could not absorb continues on the next sick
+   *  day, so a period straddling a month boundary needs the prior hours to
+   *  know how much is left. Absent (older callers): every lookback day is
+   *  taken as a full scheduled day. */
+  lookbackSickDays?: AbsenceDay[]
+  /** Scheduled hours per working day (hours_per_week / workdays_per_week).
+   *  Defaults to 8. Absence hours above it count as one full day. */
+  hoursPerDay?: number
   /** Year-to-date VAB days for this employee, excluding the current period. */
   vabDaysYtd: number
   /** Parental leave days in the current pregnancy window (best-effort:
@@ -176,10 +193,20 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
   const { monthlySalary, payrollConfig, periodDays } = input
   const lineItems: DerivedLineItem[] = []
   const r = (x: number) => Math.round(x * 100) / 100
+  const hoursPerDay =
+    typeof input.hoursPerDay === 'number' && Number.isFinite(input.hoursPerDay) && input.hoursPerDay > 0
+      ? input.hoursPerDay
+      : 8
+  /** Fraction of a scheduled day one absence row represents, capped at a full day. */
+  const dayShare = (d: AbsenceDay) =>
+    Number.isFinite(d.hours) && d.hours > 0 ? Math.min(1, d.hours / hoursPerDay) : 1
+  // Full precision here; money is rounded where it is computed and
+  // quantities where they are written, so 1/8 of a day does not become 0.13
+  // before it is priced.
+  const sumDays = (rows: AbsenceDay[]) => rows.reduce((sum, d) => sum + dayShare(d), 0)
 
-  const periodSickDates = periodDays
-    .filter(d => d.absence_type === 'sick')
-    .map(d => d.absence_date)
+  const periodSickRows = periodDays.filter(d => d.absence_type === 'sick')
+  const periodSickDates = periodSickRows.map(d => d.absence_date)
   const vabDays = periodDays.filter(d => d.absence_type === 'vab')
   const parentalDays = periodDays.filter(d => d.absence_type === 'parental')
   const unpaidLeaveDays = periodDays.filter(d => d.absence_type === 'unpaid_leave')
@@ -226,6 +253,12 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
     const dailyRate = r(monthlySalary / (input.dailyDivisor ?? 21))
     const weeklyRate = r(monthlySalary * 12 / 52 * payrollConfig.sjuklonRate)
     const karensAmount = r(weeklyRate * payrollConfig.karensavdragFactor)
+    /** Sjuklön (80 %) for a number of scheduled days. */
+    const sickPayFor = (dayCount: number) => r(dailyRate * payrollConfig.sjuklonRate * dayCount)
+    // Lookback rows with hours, or every lookback date as a full day.
+    const lookbackSickRows: AbsenceDay[] =
+      input.lookbackSickDays ??
+      input.lookbackSickDates.map(absence_date => ({ absence_date, absence_type: 'sick' as const, hours: hoursPerDay }))
 
     let day2_14CountTotal = 0
     let day15PlusCountTotal = 0
@@ -238,44 +271,60 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
 
       const segmentStartsInPeriod = seg.startDate >= periodMin
 
-      // Karens for the segment? Day 1 of segment, only if it starts in this
-      // period and the högriskskydd cap isn't hit. (If the segment started
-      // in a prior pay period, the karens was already booked there; nothing
-      // to emit here.)
-      if (segmentStartsInPeriod) {
-        if (karensInWindow < cap) {
-          lineItems.push({
-            item_type: 'sick_karens',
-            description: `Karensavdrag (${seg.startDate})`,
-            quantity: 1,
-            amount: -karensAmount,
-            is_taxable: true,
-            is_avgift_basis: true,
-            is_vacation_basis: false,
-            is_gross_deduction: true,
-          })
-          karensInWindow += 1
-        } else {
-          // Suppressed by allmänt högriskskydd. The employee keeps day-1 pay
-          // (no karens deduction). Day 1 still consumed from the 14-day
-          // window but treated as paid normal: emit nothing for it.
-        }
+      // Karensavdrag for the segment (SjLL 6 §): one per sjuklöneperiod,
+      // never larger than the sjuklön the period yields. The part a short
+      // first day cannot absorb continues on the following sick days, also
+      // when they fall in the next pay period: the prior period's sjuklön
+      // (from the lookback rows) is what has already been consumed.
+      const periodDaysInSjuklon = sumDays(
+        periodSickRows.filter(
+          d => d.absence_date >= seg.startDate && d.absence_date <= seg.endDate &&
+            daysBetweenIso(seg.startDate, d.absence_date) < 14,
+        ),
+      )
+      const priorDaysInSjuklon = sumDays(
+        lookbackSickRows.filter(
+          d => d.absence_date >= seg.startDate && d.absence_date < periodMin &&
+            daysBetweenIso(seg.startDate, d.absence_date) < 14,
+        ),
+      )
+      const karensEligible = segmentStartsInPeriod
+        ? karensInWindow < cap
+        // Continuing a period that started in the lookback: the karens was
+        // eligible then iff the count of periods before it was under the cap.
+        : (() => {
+            const priorIndex = lookbackOnlySegments.findIndex(s => s.startDate === seg.startDate)
+            return priorIndex >= 0 && priorIndex + (input.karensPeriodsAdjustment ?? 0) < cap
+          })()
+      const karensRemaining = r(Math.max(0, karensAmount - sickPayFor(priorDaysInSjuklon)))
+      const karensNow = r(Math.min(karensRemaining, sickPayFor(periodDaysInSjuklon)))
+      if (karensEligible && karensNow > 0) {
+        lineItems.push({
+          item_type: 'sick_karens',
+          description: `Karensavdrag (${seg.startDate})`,
+          quantity: 1,
+          amount: -karensNow,
+          is_taxable: true,
+          is_avgift_basis: true,
+          is_vacation_basis: false,
+          is_gross_deduction: true,
+        })
       }
+      // Suppressed by allmänt högriskskydd: the period still counts toward
+      // the window, the employee just keeps the full sjuklön.
+      if (segmentStartsInPeriod) karensInWindow += 1
 
-      // Classify each *period* sick day in this segment by its segment day
-      // index (calendar days from segment start, 1-based).
-      for (const d of periodSickDates) {
+      // Classify each *period* sick row in this segment by its segment day
+      // index (calendar days from segment start, 1-based), weighted by hours.
+      for (const row of periodSickRows) {
+        const d = row.absence_date
         if (d < seg.startDate || d > seg.endDate) continue
         const segDayIndex = daysBetweenIso(seg.startDate, d) + 1
-        if (segDayIndex === 1 && segmentStartsInPeriod) {
-          // already accounted for as karens (or suppressed); skip
-          continue
-        }
-        if (segDayIndex >= 2 && segDayIndex <= 14) {
-          day2_14CountTotal += 1
+        if (segDayIndex <= 14) {
+          day2_14CountTotal += dayShare(row)
           if (segDayIndex >= 8) flagLakarintyg = true
-        } else if (segDayIndex >= 15) {
-          day15PlusCountTotal += 1
+        } else {
+          day15PlusCountTotal += dayShare(row)
           flagFkReporting = true
         }
       }
@@ -283,13 +332,15 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
 
     if (day2_14CountTotal > 0) {
       const lostPay = r(dailyRate * day2_14CountTotal)
-      const sjuklon = r(dailyRate * payrollConfig.sjuklonRate * day2_14CountTotal)
+      const sjuklon = sickPayFor(day2_14CountTotal)
       lineItems.push({
+        // item_type kept for schema and report compatibility; the row covers
+        // days 1-14 since day one also receives sjuklön.
         item_type: 'sick_day2_14',
-        description: `Sjuklön dag 2-14 (${day2_14CountTotal} dagar)`,
-        quantity: day2_14CountTotal,
+        description: `Sjuklön dag 1-14 (${r(day2_14CountTotal)} dagar)`,
+        quantity: r(day2_14CountTotal),
         // Net deduction vs full pay = lostPay - sjuklon (employer pays 80%).
-        amount: -(lostPay - sjuklon),
+        amount: -r(lostPay - sjuklon),
         is_taxable: true,
         is_avgift_basis: true,
         is_vacation_basis: true,
@@ -301,8 +352,8 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
       const lostPay = r(dailyRate * day15PlusCountTotal)
       lineItems.push({
         item_type: 'sick_day15_plus',
-        description: `Sjukfrånvaro dag 15+ (FK) (${day15PlusCountTotal} dagar)`,
-        quantity: day15PlusCountTotal,
+        description: `Sjukfrånvaro dag 15+ (FK) (${r(day15PlusCountTotal)} dagar)`,
+        quantity: r(day15PlusCountTotal),
         // Employer pays nothing: full daily rate deducted.
         amount: -lostPay,
         is_taxable: true,
@@ -316,11 +367,12 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
   // ── VAB ────────────────────────────────────────────────────────────────
   const vabCount = vabDays.length
   if (vabCount > 0) {
-    const vab = calculateVabDeduction(monthlySalary, vabCount, input.vabDaysYtd, input.dailyDivisor)
+    const vabEquivalentDays = sumDays(vabDays)
+    const vab = calculateVabDeduction(monthlySalary, vabEquivalentDays, input.vabDaysYtd, input.dailyDivisor)
     lineItems.push({
       item_type: 'vab',
       description: `VAB (${vabCount} dagar)`,
-      quantity: vabCount,
+      quantity: r(vabEquivalentDays),
       amount: -vab.deduction,
       is_taxable: true,
       is_avgift_basis: true,
@@ -332,16 +384,17 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
   // ── Parental leave ─────────────────────────────────────────────────────
   const parentalCount = parentalDays.length
   if (parentalCount > 0) {
+    const parentalEquivalentDays = sumDays(parentalDays)
     const parental = calculateParentalLeaveDeduction(
       monthlySalary,
-      parentalCount,
+      parentalEquivalentDays,
       input.parentalDaysPregnancyYtd,
       input.dailyDivisor,
     )
     lineItems.push({
       item_type: 'parental_leave',
       description: `Föräldraledighet (${parentalCount} dagar)`,
-      quantity: parentalCount,
+      quantity: r(parentalEquivalentDays),
       amount: -parental.deduction,
       is_taxable: true,
       is_avgift_basis: true,
@@ -361,11 +414,12 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
   const unpaidLeaveCount = unpaidLeaveDays.length
   if (unpaidLeaveCount > 0) {
     const dailyRate = r(monthlySalary / (input.dailyDivisor ?? 21))
-    const deduction = r(dailyRate * unpaidLeaveCount)
+    const unpaidEquivalentDays = sumDays(unpaidLeaveDays)
+    const deduction = r(dailyRate * unpaidEquivalentDays)
     lineItems.push({
       item_type: 'unpaid_leave',
       description: `Tjänstledighet utan lön (${unpaidLeaveCount} dagar)`,
-      quantity: unpaidLeaveCount,
+      quantity: r(unpaidEquivalentDays),
       amount: -deduction,
       is_taxable: true,
       is_avgift_basis: true,
@@ -403,6 +457,8 @@ export async function loadAndDeriveAbsence(params: {
   karensPeriodsAdjustment?: number
   /** See DeriveInput.dailyDivisor. */
   dailyDivisor?: number
+  /** See DeriveInput.hoursPerDay. */
+  hoursPerDay?: number
 }): Promise<DeriveResult> {
   const { supabase, companyId, employeeId, periodStart, periodEnd } = params
 
@@ -420,14 +476,15 @@ export async function loadAndDeriveAbsence(params: {
   const lookbackStart = addDays(periodStart, -365)
   const { data: lookbackRows, error: lookbackErr } = await supabase
     .from('salary_absence_days')
-    .select('absence_date')
+    .select('absence_date, absence_type, hours')
     .eq('company_id', companyId)
     .eq('employee_id', employeeId)
     .eq('absence_type', 'sick')
     .gte('absence_date', lookbackStart)
     .lt('absence_date', periodStart)
   if (lookbackErr) throw new Error(`Failed to load absence lookback: ${lookbackErr.message}`)
-  const lookbackSickDates = (lookbackRows ?? []).map(r => r.absence_date as string)
+  const lookbackSickDays = (lookbackRows ?? []) as AbsenceDay[]
+  const lookbackSickDates = lookbackSickDays.map(r => r.absence_date)
 
   const yearStart = `${periodStart.slice(0, 4)}-01-01`
   const { data: vabYtd } = await supabase
@@ -455,9 +512,11 @@ export async function loadAndDeriveAbsence(params: {
     payrollConfig: params.payrollConfig,
     periodDays,
     lookbackSickDates,
+    lookbackSickDays,
     vabDaysYtd,
     parentalDaysPregnancyYtd,
     karensPeriodsAdjustment: params.karensPeriodsAdjustment,
     dailyDivisor: params.dailyDivisor,
+    hoursPerDay: params.hoursPerDay,
   })
 }
