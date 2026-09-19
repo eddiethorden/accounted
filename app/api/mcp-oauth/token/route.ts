@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth/api-keys'
 import { builtInRedirectProvider, capScopesForRole, lookupCompanyRole } from '@/lib/auth/oauth-allowlist'
 import { getActiveCompanyId } from '@/lib/company/context'
+import { isUuid } from '@/lib/invariants/uuid'
 
 const ACCESS_TOKEN_TTL_SECONDS = 3600
 
@@ -134,10 +135,23 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
   // companyless consents (signed up from the OAuth popup, issue #1814),
   // resolve the active company here instead; null leaves the key unbound and
   // validateApiKey binds it on the first call after a company exists.
-  const companyId =
+  //
+  // A consent that ticked a strict subset of the user's companies carries
+  // that subset as companyIds; the key is then restricted to exactly those
+  // (api_key_companies rows below) and its default company must be one of
+  // them. /authorize guarantees that; it is re-checked here because the code
+  // is a boundary we treat as hostile, and a default outside the allowlist
+  // would be a key that reaches more than the user consented to.
+  const allowlist = parseCompanyAllowlist(payload.companyIds)
+  const consentedCompanyId =
     typeof payload.companyId === 'string' && payload.companyId.length > 0
       ? payload.companyId
-      : await getActiveCompanyId(supabase, payload.userId)
+      : null
+  const companyId = allowlist
+    ? consentedCompanyId && allowlist.includes(consentedCompanyId)
+      ? consentedCompanyId
+      : allowlist[0]
+    : consentedCompanyId ?? (await getActiveCompanyId(supabase, payload.userId))
 
   const { key, hash, prefix } = generateApiKey()
   const refresh = generateRefreshToken()
@@ -187,7 +201,7 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
   const conflictingScope = findStageApproveConflict(grantedScopes)
   const sodAcknowledgedAt = conflictingScope ? new Date().toISOString() : null
 
-  const { error: insertError } = await supabase
+  const { data: insertedKey, error: insertError } = await supabase
     .from('api_keys')
     .insert({
       user_id: payload.userId,
@@ -207,6 +221,8 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
       sod_acknowledged_at: sodAcknowledgedAt,
       sod_acknowledged_by: sodAcknowledgedAt ? payload.userId : null,
     })
+    .select('id')
+    .single()
 
   if (insertError) {
     // This 500 was silent while api_keys.company_id was NOT NULL and every
@@ -220,6 +236,48 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
       { error: 'server_error', error_description: 'Failed to create API key' },
       { status: 500 }
     )
+  }
+
+  // Company allowlist rows for a restricted consent. A key with no rows
+  // reaches every company its user belongs to, so a failed insert here must
+  // not leave the key alive: it would reach more than the user ticked. The
+  // key is revoked by hash (always known, unlike the id on a driver that
+  // returned no row) and the exchange fails; the client can restart consent.
+  if (allowlist) {
+    const keyId = (insertedKey as { id?: unknown } | null)?.id
+    const allowlistError =
+      typeof keyId === 'string'
+        ? (
+            await supabase.from('api_key_companies').insert(
+              allowlist.map((allowedCompanyId) => ({
+                api_key_id: keyId,
+                company_id: allowedCompanyId,
+              })),
+            )
+          ).error
+        : { code: 'NO_KEY_ID', message: 'api_keys insert returned no id' }
+    if (allowlistError) {
+      console.error('[mcp-oauth/token] api_key_companies insert failed, revoking key', {
+        code: allowlistError.code,
+        message: allowlistError.message,
+        keyPrefix: prefix,
+      })
+      const { error: revokeError } = await supabase
+        .from('api_keys')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('key_hash', hash)
+      if (revokeError) {
+        console.error('[mcp-oauth/token] revoke after allowlist failure also failed', {
+          code: revokeError.code,
+          message: revokeError.message,
+          keyPrefix: prefix,
+        })
+      }
+      return NextResponse.json(
+        { error: 'server_error', error_description: 'Failed to restrict the API key to the selected companies' },
+        { status: 500 }
+      )
+    }
   }
 
   if (conflictingScope) {
@@ -240,6 +298,18 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
     refresh_token: refresh.token,
     scope: grantedScopes.join(' '),
   })
+}
+
+/**
+ * The company allowlist carried in the auth code, or null when the consent
+ * was unrestricted. Only UUID-shaped strings survive and duplicates collapse;
+ * an array that empties out after that is treated as unrestricted rather than
+ * as "no company at all", which is what /authorize would have refused.
+ */
+function parseCompanyAllowlist(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null
+  const ids = Array.from(new Set(raw.filter(isUuid)))
+  return ids.length > 0 ? ids : null
 }
 
 async function handleRefreshTokenGrant(params: URLSearchParams) {

@@ -387,6 +387,128 @@ describe('POST /api/mcp-oauth/token', () => {
     })
   })
 
+  describe('company allowlist (per-key company scoping)', () => {
+    const A = '11111111-1111-4111-8111-111111111111'
+    const B = '22222222-2222-4222-8222-222222222222'
+
+    beforeEach(() => {
+      vi.mocked(verifyPkce).mockReturnValue(true)
+    })
+
+    function codeWith(companyId: string | null, companyIds: unknown) {
+      vi.mocked(decryptAuthCode).mockReturnValue({
+        userId: 'user-1',
+        codeChallenge: 'challenge',
+        redirectUri: 'https://claude.ai/api/cb',
+        scopes: ['reports:read'],
+        companyId,
+        companyIds: companyIds as string[] | null,
+        exp: Date.now() + 60_000,
+      })
+    }
+
+    it('writes one api_key_companies row per consented company after minting the key', async () => {
+      codeWith(A, [A, B])
+      const { supabase, enqueueMany, findCall } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany([
+        { data: null, error: null }, // oauth_used_codes insert
+        { data: null, error: null }, // expired-code cleanup
+        { data: { role: 'owner' }, error: null }, // role lookup in the default company
+        { data: { id: 'key-9' }, error: null }, // api_keys insert returning id
+        { data: null, error: null }, // api_key_companies insert
+      ])
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(200)
+
+      const inserted = findCall('api_keys', 'insert')?.[0] as Record<string, unknown>
+      expect(inserted.company_id).toBe(A)
+      expect(findCall('api_key_companies', 'insert')?.[0]).toEqual([
+        { api_key_id: 'key-9', company_id: A },
+        { api_key_id: 'key-9', company_id: B },
+      ])
+      expect(findCall('api_keys', 'update')).toBeUndefined()
+    })
+
+    it('falls back to the first allowed company as default when the consented one is outside the allowlist', async () => {
+      // /authorize guarantees the default sits inside the selection; the
+      // code is still a hostile boundary, so a default outside it is fixed
+      // here rather than trusted.
+      codeWith('company-elsewhere', [B])
+      const { supabase, enqueueMany, findCall, findCalls } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany([
+        { data: null, error: null },
+        { data: null, error: null },
+        { data: { role: 'owner' }, error: null },
+        { data: { id: 'key-9' }, error: null },
+        { data: null, error: null },
+      ])
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(200)
+      const inserted = findCall('api_keys', 'insert')?.[0] as Record<string, unknown>
+      expect(inserted.company_id).toBe(B)
+      // The role cap ran against the effective default, not the stale one.
+      expect(findCalls('company_members', 'eq')).toContainEqual(['company_id', B])
+      expect(mocks.getActiveCompanyId).not.toHaveBeenCalled()
+    })
+
+    it('revokes the just-minted key and answers server_error when the allowlist insert fails', async () => {
+      codeWith(A, [A, B])
+      const { supabase, enqueueMany, findCall, findCalls } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany([
+        { data: null, error: null },
+        { data: null, error: null },
+        { data: { role: 'owner' }, error: null },
+        { data: { id: 'key-9' }, error: null },
+        { data: null, error: { code: '23503', message: 'fk violation' } }, // allowlist insert
+        { data: null, error: null }, // revoke update
+      ])
+
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const res = await POST(formRequest(codeExchange))
+      error.mockRestore()
+
+      expect(res.status).toBe(500)
+      const body = await res.json()
+      expect(body.error).toBe('server_error')
+      expect(body.access_token).toBeUndefined()
+
+      // Revoked by hash: the one identifier the route always holds.
+      const revoke = findCall('api_keys', 'update')?.[0] as Record<string, unknown>
+      expect(typeof revoke.revoked_at).toBe('string')
+      const insertedHash = (findCall('api_keys', 'insert')?.[0] as Record<string, unknown>).key_hash
+      expect(findCalls('api_keys', 'eq')).toContainEqual(['key_hash', insertedHash])
+    })
+
+    it('writes no allowlist rows for an unrestricted consent (companyIds null)', async () => {
+      codeWith(A, null)
+      const { supabase, enqueueMany, findCall } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany(exchangeResults({ role: 'owner' }))
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(200)
+      expect(findCall('api_key_companies', 'insert')).toBeUndefined()
+      const inserted = findCall('api_keys', 'insert')?.[0] as Record<string, unknown>
+      expect(inserted.company_id).toBe(A)
+    })
+
+    it('treats an allowlist with no uuid-shaped entries as unrestricted rather than as no company', async () => {
+      codeWith(A, ['nope', 42])
+      const { supabase, enqueueMany, findCall } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany(exchangeResults({ role: 'owner' }))
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(200)
+      expect(findCall('api_key_companies', 'insert')).toBeUndefined()
+    })
+  })
+
   describe('refresh_token grant', () => {
     it('rotates both tokens and returns a fresh access_token', async () => {
       const { token: refreshToken } = generateRefreshToken()

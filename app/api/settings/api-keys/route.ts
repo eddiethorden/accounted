@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 import {
   generateApiKey,
   DEFAULT_SCOPES,
@@ -7,15 +8,28 @@ import {
   findStageApproveConflict,
 } from '@/lib/auth/api-keys'
 import { withRouteContext } from '@/lib/api/with-route-context'
+import { createServiceClient } from '@/lib/supabase/server'
 import { errorResponse, errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import type { ApiKeyMode, ApiKeyScope } from '@/lib/auth/api-keys'
 import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-message'
+import { listUserCompaniesForPicker, resolveCompanySelection } from '@/lib/company/company-picker'
 
-/** GET /api/settings/api-keys: list the company's API keys (key value never returned). */
+/**
+ * Optional per-key company allowlist on create. Absent or empty means the
+ * key reaches every company the caller belongs to (today's behaviour).
+ */
+const companyIdsSchema = z.array(z.string().uuid()).max(200)
+
+/**
+ * GET /api/settings/api-keys: list the company's API keys (key value never
+ * returned). Each row carries `company_ids` (null = unrestricted) and the
+ * response adds `meta.companies`, the caller's companies for the picker, so
+ * the panel needs no second endpoint.
+ */
 export const GET = withRouteContext(
   'api_key.list',
   async (_request, ctx) => {
-    const { supabase, companyId, log, requestId } = ctx
+    const { user, supabase, companyId, log, requestId } = ctx
 
     // Both live and test keys for the active company. (Test keys are bound to the
     // active company too: they're simulation-only, so they never write real data.)
@@ -30,7 +44,44 @@ export const GET = withRouteContext(
       return errorResponse(error, log, { requestId })
     }
 
-    return NextResponse.json({ data })
+    // api_key_companies is service-role only: the session client would read
+    // zero rows and every key would look unrestricted.
+    const keys = data ?? []
+    const allowlists = new Map<string, string[]>()
+    if (keys.length > 0) {
+      const { data: rows, error: allowlistError } = await createServiceClient()
+        .from('api_key_companies')
+        .select('api_key_id, company_id')
+        .in('api_key_id', keys.map((key) => key.id))
+      if (allowlistError) {
+        log.error('api_key_companies list failed', allowlistError)
+        return errorResponse(allowlistError, log, { requestId })
+      }
+      for (const row of rows ?? []) {
+        const list = allowlists.get(row.api_key_id) ?? []
+        list.push(row.company_id)
+        allowlists.set(row.api_key_id, list)
+      }
+    }
+
+    let companies
+    try {
+      companies = await listUserCompaniesForPicker(supabase, user.id, { activeCompanyId: companyId })
+    } catch (err) {
+      log.error('company picker list failed', err)
+      return errorResponse(err, log, { requestId })
+    }
+
+    return NextResponse.json({
+      data: keys.map((key) => ({ ...key, company_ids: allowlists.get(key.id) ?? null })),
+      meta: {
+        companies: companies.map((company) => ({
+          company_id: company.company_id,
+          name: company.name,
+          is_active: company.company_id === companyId,
+        })),
+      },
+    })
   },
 )
 
@@ -49,6 +100,7 @@ export const POST = withRouteContext(
     let scopes: ApiKeyScope[] = DEFAULT_SCOPES
     let acknowledgeSod = false
     let mode: ApiKeyMode = 'live'
+    let requestedCompanyIds: string[] | undefined
     try {
       const body = await request.json()
       if (body.name && typeof body.name === 'string') {
@@ -65,6 +117,16 @@ export const POST = withRouteContext(
           details: { received: body.scopes },
         })
       }
+      if (body.company_ids !== undefined && body.company_ids !== null) {
+        const companyIds = companyIdsSchema.safeParse(body.company_ids)
+        if (!companyIds.success) {
+          return errorResponseFromCode('VALIDATION_ERROR', log, {
+            requestId,
+            details: { field: 'company_ids', reason: 'invalid', received: body.company_ids },
+          })
+        }
+        requestedCompanyIds = companyIds.data
+      }
     } catch {
       // Empty body: use defaults.
     }
@@ -78,6 +140,37 @@ export const POST = withRouteContext(
         requestId,
         details: { field: 'name', reason: 'reserved', reserved: OAUTH_MCP_KEY_NAME },
       })
+    }
+
+    // Company allowlist. Every id must be a live membership of the caller
+    // (403 otherwise: a key must never reach a company its creator cannot).
+    // Keeping every company selected means an unrestricted key, so rows are
+    // written only for a strict subset. The key's default company is the
+    // active one when it is in the set, otherwise the first selected in
+    // picker order.
+    let keyCompanyId = companyId
+    let allowlist: string[] | null = null
+    if (requestedCompanyIds && requestedCompanyIds.length > 0) {
+      let memberships
+      try {
+        memberships = await listUserCompaniesForPicker(supabase, user.id, { activeCompanyId: companyId })
+      } catch (err) {
+        log.error('company picker list failed', err)
+        return errorResponse(err, log, { requestId })
+      }
+      const memberIds = new Set(memberships.map((company) => company.company_id))
+      const foreign = requestedCompanyIds.filter((id) => !memberIds.has(id))
+      if (foreign.length > 0) {
+        return errorResponseFromCode('FORBIDDEN', log, {
+          requestId,
+          details: { field: 'company_ids', reason: 'not_a_member', company_ids: foreign },
+        })
+      }
+      const selection = resolveCompanySelection(requestedCompanyIds, memberships, companyId)
+      if (selection) {
+        keyCompanyId = selection.defaultCompanyId
+        allowlist = selection.companyIds
+      }
     }
 
     // Both live and test keys bind to the active company. A test key is
@@ -119,7 +212,7 @@ export const POST = withRouteContext(
       .from('api_keys')
       .insert({
         user_id: user.id,
-        company_id: companyId,
+        company_id: keyCompanyId,
         key_hash: hash,
         key_prefix: prefix,
         name,
@@ -140,6 +233,28 @@ export const POST = withRouteContext(
       })
     }
 
+    // Allowlist rows for a strict subset (service-role table). A key with no
+    // rows reaches every company, so a failed insert revokes the key rather
+    // than handing out one that reaches more than the caller selected.
+    if (allowlist) {
+      const serviceClient = createServiceClient()
+      const { error: allowlistError } = await serviceClient
+        .from('api_key_companies')
+        .insert(allowlist.map((allowedCompanyId) => ({ api_key_id: data.id, company_id: allowedCompanyId })))
+      if (allowlistError) {
+        log.error('api_key_companies insert failed, revoking key', allowlistError)
+        const { error: revokeError } = await serviceClient
+          .from('api_keys')
+          .update({ revoked_at: new Date().toISOString() })
+          .eq('id', data.id)
+        if (revokeError) log.error('revoke after allowlist failure also failed', revokeError)
+        return errorResponseFromCode('API_KEY_CREATE_FAILED', log, {
+          requestId,
+          details: { reason: getUserErrorMessage(allowlistError) },
+        })
+      }
+    }
+
     if (sodAcknowledgedAt) {
       // High-risk security event: the creator self-attested the stage+approve
       // combination. The durable record is the sod_acknowledged_* pair on the
@@ -151,13 +266,14 @@ export const POST = withRouteContext(
         conflictingScope,
         scopes,
         acknowledgedBy: user.id,
-        companyId,
+        companyId: keyCompanyId,
       })
     }
 
     return NextResponse.json({
       data: {
         ...data,
+        company_ids: allowlist,
         key, // only time the full key is returned
       },
     })
