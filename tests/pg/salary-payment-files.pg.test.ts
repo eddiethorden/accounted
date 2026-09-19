@@ -194,6 +194,17 @@ describe('salary_payment_files (pg)', () => {
     ).rejects.toThrow(/salary_payment_files_format_check/)
   })
 
+  it('blocks hard-deleting the author while the archive references them (RESTRICT, not CASCADE)', async () => {
+    const userId = await insertAuthUser()
+    const companyId = await insertCompany({ createdBy: userId })
+    await insertCompanyMember({ companyId, userId, role: 'owner' })
+    const runId = await insertRun(companyId, userId)
+    await insertFile({ companyId, runId, userId })
+    await expect(
+      getPool().query(`DELETE FROM auth.users WHERE id = $1`, [userId]),
+    ).rejects.toMatchObject({ code: '23503' })
+  })
+
   it('blocks deleting a run that has an archived payment file', async () => {
     const { userId, companyId, runId } = await seed()
     await insertFile(getPool(), { companyId, runId, userId })

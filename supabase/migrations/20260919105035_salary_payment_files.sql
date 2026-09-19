@@ -40,7 +40,10 @@ CREATE TABLE public.salary_payment_files (
   id             uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   company_id     uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   salary_run_id  uuid NOT NULL REFERENCES public.salary_runs(id) ON DELETE RESTRICT,
-  user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  -- RESTRICT, not the usual CASCADE: this is a seven-year archive and its
+  -- author's account may never take it along. Accounts are tombstoned, not
+  -- deleted (erase_user_personal_data), so the reference never blocks that.
+  user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   format         text NOT NULL CHECK (format IN ('pain001', 'bg_lb')),
   filename       text NOT NULL CHECK (char_length(filename) BETWEEN 1 AND 255),
   content_type   text NOT NULL CHECK (content_type IN ('application/xml', 'text/plain')),
