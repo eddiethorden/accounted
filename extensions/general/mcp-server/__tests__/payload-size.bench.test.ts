@@ -493,7 +493,8 @@ describe('tools/list payload size guard', () => {
     //     search-only and named by the list tool). The register is a new
     //     resource, so its ~20-field row schema had no earlier tool to share
     //     with; the item and write schemas were trimmed to bare formats first
-    //     (measured 61 849 after the trim, before the cutover-balance step above).
+    //     (measured 61 849 after the trim; 61 975 once merged with the
+    //     cutover-balance step above).
     expect(approxTokens).toBeLessThan(62_200)
   })
 
