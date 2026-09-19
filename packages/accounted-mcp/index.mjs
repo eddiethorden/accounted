@@ -36,7 +36,30 @@ function resolveMcpUrl(rawUrl) {
   }
 }
 
-const MCP_URL = resolveMcpUrl(process.env.ACCOUNTED_URL || DEFAULT_MCP_URL)
+// Optional company pin: ACCOUNTED_COMPANY=<company id> pins the whole
+// connection to one company (the server hides the company switch and refuses
+// calls for any other company). Anything that is not a UUID is ignored with a
+// note, so a typo cannot silently connect to the key's default company under
+// the impression of a pin.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const rawCompany = process.env.ACCOUNTED_COMPANY
+const COMPANY =
+  rawCompany && UUID_RE.test(rawCompany.trim()) ? rawCompany.trim().toLowerCase() : undefined
+if (rawCompany && !COMPANY) {
+  process.stderr.write(
+    'accounted-mcp: ignoring ACCOUNTED_COMPANY: must be a company id (UUID); the key default company is used\n'
+  )
+}
+
+function withCompanyPin(rawUrl) {
+  if (!COMPANY) return rawUrl
+  const url = new URL(rawUrl)
+  url.searchParams.set('company', COMPANY)
+  return url.toString()
+}
+
+const MCP_URL = withCompanyPin(resolveMcpUrl(process.env.ACCOUNTED_URL || DEFAULT_MCP_URL))
 
 // Optional distribution-channel marker (for example, "claude-desktop").
 // Forwarded for telemetry only and never used for authentication or behavior.

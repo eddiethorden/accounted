@@ -26,6 +26,10 @@ describe('accounted-mcp package', () => {
     expect(source).toContain('X-Accounted-Client')
     expect(source).toContain('tool_namespace')
     expect(source).toContain('gnubok_sk_')
+    // ACCOUNTED_COMPANY pins the connection through the `company` query
+    // parameter the server reads (COMPANY_PIN_QUERY_PARAM).
+    expect(source).toContain('ACCOUNTED_COMPANY')
+    expect(source).toContain("searchParams.set('company'")
 
     expect(source).not.toContain('GNUBOK_API_KEY')
     expect(source).not.toContain('GNUBOK_URL')
