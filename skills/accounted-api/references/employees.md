@@ -1005,7 +1005,7 @@ Example response `200`:
 **Get an employee's payroll cutover opening balances.**
 `scope:payroll:read · risk:low · idempotent`
 
-Returns the opening balances set for a mid-year migration (YTD gross/tax/net, vacation balances, opening semesterlöneskuld, karens adjustment) plus the lock state: locked=true once the employee has a booked salary run.
+Returns the opening balances set for a mid-year migration (YTD gross/tax/net, the five vacation pools Betalda/Sparade per år/Obetalda/Förskott/Extra betalda with their as-of date, opening semesterlöneskuld and förskottsskuld, karens adjustment) plus the lock state: locked=true once the employee has a booked salary run. ytd_net is null when the previous system could not export historical net pay.
 
 **Use when:** Verifying cutover state before the first calculated run, or checking whether balances can still be edited (locked=false).
 **Do not use for:** The live vacation liability (GET /reports/vacation-liability includes the opening terms). Pre-cutover absence history: GET /employees/{id}/absence.
@@ -1028,13 +1028,18 @@ Response `200`:
     cutover_date: string,
     ytd_gross: number,
     ytd_tax: number,
-    ytd_net: number,
+    ytd_net: number | null,
     vacation_paid_days_remaining: number,
     vacation_days_taken_this_year: number,
     vacation_saved_days_by_year: Record<string, number>,
     opening_semester_liability: number,
     opening_semester_liability_avgifter: number,
     karens_periods_adjustment: number,
+    vacation_as_of_date: string | null,
+    vacation_unpaid_days_remaining: number,
+    vacation_advance_days_remaining: number,
+    vacation_extra_paid_days_remaining: number,
+    opening_advance_vacation_debt: number,
     locked: boolean,
     locked_by_run_id: string | null
   },
@@ -1073,15 +1078,18 @@ Example response `200`:
 **Set an employee's payroll cutover opening balances.**
 `scope:payroll:write · risk:medium · idempotent · dry-run · reversible`
 
-Full-replace upsert of the cutover state: YTD gross/tax/net for the cutover year, paid vacation days remaining, paid days already taken this vacation year, sparade dagar keyed by origin year (5-year rule), opening semesterlöneskuld SEK (+avgifter), and karens periods not covered by imported absence rows. cutover_date must be the first of a month in the current or previous year, on/after employment_start.
+Full-replace upsert of the cutover state: YTD gross/tax/net for the cutover year, the vacation pools in the previous system's own terms (vacation_paid_days_remaining = Betalda, vacation_saved_days_by_year = Sparade per år, vacation_unpaid_days_remaining = Obetalda, vacation_advance_days_remaining = Förskott, vacation_extra_paid_days_remaining = Extra betalda), paid days already taken this vacation year, vacation_as_of_date (the day those pools are struck per), opening semesterlöneskuld SEK (+avgifter), opening_advance_vacation_debt (förskottsskuld SEK), and karens periods not covered by imported absence rows. cutover_date must be the first of a month in the current or previous year, on/after employment_start.
 
-**Use when:** Onboarding one employee during a mid-year migration from Fortnox/Visma/etc. For whole-company onboarding, prefer the bulk PUT /employees/opening-balances.
+**Use when:** Onboarding one employee during a mid-year migration from Fortnox/Azets/Visma/etc. For whole-company onboarding, prefer the bulk PUT /employees/opening-balances.
 **Do not use for:** SIE opening balances on the LEDGER (2920/2940 arrive via the SIE import). Ongoing sick cases: import pre-cutover days via PUT /employees/{id}/absence instead.
 
 **Pitfalls:**
-- Full replace: omitted numeric fields reset to 0 (their defaults). Send the complete state every time.
+- Full replace: omitted numeric fields reset to 0 (their defaults) and an omitted vacation_as_of_date resets to null. Send the complete state every time.
+- vacation_as_of_date defaults to the day before cutover_date. Booked runs whose avvikelseperiod ends on or before it are treated as already inside the balance and not deducted again, so with salary_deviation_period = previous_month send the last day BEFORE the month the first run deducts (cutover 2026-09-01, first run deducts August: send 2026-07-31) or August's leave is never deducted.
+- ytd_net: send null when the previous system cannot export historical net pay; the payslip prints "Underlag saknas" instead of a false 0. Never send gross minus tax as net.
 - 409 OPENING_BALANCES_LOCKED once the employee has a booked run; correcting that run unlocks.
-- The opening liability is NOT booked by Accounted: it only feeds the vacation-liability report.
+- The opening liability and the förskottsskuld are NOT booked by Accounted: they only feed the vacation-liability report (the förskottsskuld as its own row, subtracted from the net liability).
+- Extra betalda join the paid pool: the ledger's entitled days = Betalda + Extra betalda + days already taken. Obetalda lapse at the vacation-year close; Förskott days taken reduce the next year's entitlement.
 - YTD affects payslip display and reports only; per-month tax and avgifter caps never read it.
 
 | Parameter | In | Type | Required | Notes |
@@ -1096,29 +1104,40 @@ Request body:
   cutover_date: string,
   ytd_gross?: number,
   ytd_tax?: number,
-  ytd_net?: number,
+  ytd_net?: number | null,
   vacation_paid_days_remaining?: number,
   vacation_days_taken_this_year?: number,
   vacation_saved_days_by_year?: Record<string, number>,
   opening_semester_liability?: number,
   opening_semester_liability_avgifter?: number,
-  karens_periods_adjustment?: number
+  karens_periods_adjustment?: number,
+  vacation_as_of_date?: string | null,
+  vacation_unpaid_days_remaining?: number,
+  vacation_advance_days_remaining?: number,
+  vacation_extra_paid_days_remaining?: number,
+  opening_advance_vacation_debt?: number
 }
 ```
 
 Example request:
 ```json
 {
-  "cutover_date": "2026-07-01",
-  "ytd_gross": 210000,
-  "ytd_tax": 48000,
-  "ytd_net": 162000,
+  "cutover_date": "2026-09-01",
+  "ytd_gross": 280000,
+  "ytd_tax": 64000,
+  "ytd_net": 216000,
+  "vacation_as_of_date": "2026-07-31",
   "vacation_paid_days_remaining": 12.5,
+  "vacation_days_taken_this_year": 10,
+  "vacation_extra_paid_days_remaining": 2,
   "vacation_saved_days_by_year": {
     "2025": 5
   },
+  "vacation_unpaid_days_remaining": 0,
+  "vacation_advance_days_remaining": 3,
   "opening_semester_liability": 42000,
   "opening_semester_liability_avgifter": 13196.4,
+  "opening_advance_vacation_debt": 4500,
   "karens_periods_adjustment": 1
 }
 ```
@@ -1132,13 +1151,18 @@ Response `200`:
     cutover_date: string,
     ytd_gross: number,
     ytd_tax: number,
-    ytd_net: number,
+    ytd_net: number | null,
     vacation_paid_days_remaining: number,
     vacation_days_taken_this_year: number,
     vacation_saved_days_by_year: Record<string, number>,
     opening_semester_liability: number,
     opening_semester_liability_avgifter: number,
     karens_periods_adjustment: number,
+    vacation_as_of_date: string | null,
+    vacation_unpaid_days_remaining: number,
+    vacation_advance_days_remaining: number,
+    vacation_extra_paid_days_remaining: number,
+    opening_advance_vacation_debt: number,
     locked: boolean,
     locked_by_run_id: string | null
   },
@@ -1488,7 +1512,7 @@ Example response `200`:
 **Get an employee's current vacation balance.**
 `scope:payroll:read · risk:low · idempotent`
 
-Returns the open vacation-ledger row (recomputed on every booking): entitled/taken/remaining days, sparade dagar keyed by origin year (Semesterlagen 5-year rule), forced-payout days from expired savings, and a computed SEK estimate of the individual semesterlöneskuld.
+Returns the open vacation-ledger row (recomputed on every booking): entitled/taken/remaining paid days, sparade dagar still held per origin year (Semesterlagen 5-year rule; saved_days_taken shows what saved vacation lines consumed this year), the unpaid (Obetalda) and advance (Förskott) pools from the cutover import, forced-payout days from expired savings, and a computed SEK estimate of the individual semesterlöneskuld.
 
 **Use when:** Answering "how many vacation days does Anna have left", pre-payroll review, or preparing the year-close.
 **Do not use for:** The company-wide liability report: GET /reports/vacation-liability. Closing the year: POST /salary/vacation-year-close.
@@ -1497,6 +1521,7 @@ Returns the open vacation-ledger row (recomputed on every booking): entitled/tak
 - 404 VACATION_BALANCE_NOT_FOUND until the first booking (or year-close) touches the employee: the ledger seeds lazily.
 - remaining_days can go negative if more days were taken than entitled: surface it, do not clamp.
 - The SEK estimate uses the year-close day valuation (simplified BFNAR 2016:10); the booked 2920 is reconciled only at year-close.
+- unpaid_days and advance_days are the cutover pools minus unpaid/advance vacation lines in booked runs; both read 0 for companies that never loaded categorized balances and outside the cutover year (unpaid days lapse at close, förskott is a one-time grant).
 
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
@@ -1516,6 +1541,9 @@ Response `200`:
     remaining_days: number,
     saved_days: Record<string, number>,
     saved_days_total: number,
+    saved_days_taken: Record<string, number>,
+    unpaid_days: number,
+    advance_days: number,
     forced_payout_days: number,
     estimated_liability_sek: number
   },
@@ -1771,8 +1799,11 @@ Upserts opening balances for up to 200 employees in one call. Validation is all-
 
 **Pitfalls:**
 - Atomic: one bad item fails everything. The error details carry item_errors[{index, employee_id, code, message}]: fix and resubmit the full set.
-- Full replace per employee: resubmitting with fewer fields resets the omitted ones to 0.
+- Full replace per employee: resubmitting with fewer fields resets the omitted ones to 0 (vacation_as_of_date to null).
 - Duplicate employee_id within items is rejected outright.
+- Vacation pools map one to one onto Fortnox/Azets: vacation_paid_days_remaining = Betalda, vacation_saved_days_by_year = Sparade per år, vacation_unpaid_days_remaining = Obetalda, vacation_advance_days_remaining = Förskott, vacation_extra_paid_days_remaining = Extra betalda; opening_advance_vacation_debt is the förskottsskuld in SEK.
+- vacation_as_of_date is the day the pools are struck per (default: the day before cutover_date). Under salary_deviation_period = previous_month the first run deducts the month before cutover, so send the last day before that month or its leave is treated as already deducted.
+- ytd_net: null when the previous system cannot export historical net pay (payslip prints "Underlag saknas"); never gross minus tax.
 
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
@@ -1782,7 +1813,7 @@ Upserts opening balances for up to 200 employees in one call. Validation is all-
 Request body:
 ```ts
 {
-  items: { employee_id: string, cutover_date: string, ytd_gross?: number, ytd_tax?: number, ytd_net?: number, vacation_paid_days_remaining?: number, vacation_days_taken_this_year?: number, vacation_saved_days_by_year?: Record<string, number>, opening_semester_liability?: number, opening_semester_liability_avgifter?: number, karens_periods_adjustment?: number }[]
+  items: { employee_id: string, cutover_date: string, ytd_gross?: number, ytd_tax?: number, ytd_net?: number | null, vacation_paid_days_remaining?: number, vacation_days_taken_this_year?: number, vacation_saved_days_by_year?: Record<string, number>, opening_semester_liability?: number, opening_semester_liability_avgifter?: number, karens_periods_adjustment?: number, vacation_as_of_date?: string | null, vacation_unpaid_days_remaining?: number, vacation_advance_days_remaining?: number, vacation_extra_paid_days_remaining?: number, opening_advance_vacation_debt?: number }[]
 }
 ```
 
@@ -1792,10 +1823,20 @@ Example request:
   "items": [
     {
       "employee_id": "emp_77b2…",
-      "cutover_date": "2026-07-01",
-      "ytd_gross": 210000,
-      "ytd_tax": 48000,
-      "ytd_net": 162000
+      "cutover_date": "2026-09-01",
+      "ytd_gross": 280000,
+      "ytd_tax": 64000,
+      "ytd_net": null,
+      "vacation_as_of_date": "2026-07-31",
+      "vacation_paid_days_remaining": 12.5,
+      "vacation_days_taken_this_year": 10,
+      "vacation_saved_days_by_year": {
+        "2025": 5
+      },
+      "vacation_unpaid_days_remaining": 0,
+      "vacation_advance_days_remaining": 3,
+      "vacation_extra_paid_days_remaining": 2,
+      "opening_advance_vacation_debt": 4500
     }
   ]
 }
@@ -1846,16 +1887,20 @@ Example response `200`:
 **Get the company payroll settings.**
 `scope:payroll:read · risk:low · idempotent`
 
-Returns the payroll settings that drive new salary runs: pay day (salary_pay_day), avvikelseperiod (salary_deviation_period: which month a run reads absence and worked days from), salary payment file format (preferred_payment_format), the bank whose upload instructions are pre-selected (salary_default_bank), öresavrundning of net pay (salary_net_rounding) and the voucher series salary runs book into (salary_voucher_series). A company that has no settings row yet answers with the defaults the engine would apply (pay day 25, same_month, pain001, no bank, no rounding, series A).
+Returns the payroll settings that drive new salary runs: pay day (salary_pay_day), avvikelseperiod (salary_deviation_period: which month a run reads absence and worked days from), salary payment file format (preferred_payment_format), the bank whose upload instructions are pre-selected (salary_default_bank), öresavrundning of net pay (salary_net_rounding), the calculation conventions (salary_calculation_policy: partial_month, sick_rate, long_leave, leave_context, net_rounding, one_off_tax_rounding, every key always present) and the voucher series salary runs book into (salary_voucher_series). A company that has no settings row yet answers with the defaults the engine would apply (pay day 25, same_month, pain001, no bank, no rounding, every convention at its default, series A).
 
-**Use when:** You are provisioning or auditing a customer for payroll and need to know how new salary runs will be dated, which month their deviations are read from, which payment file the bank expects, or which voucher series the salary vouchers land in.
-**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Per-run values such as payment_date or deviation window (GET /salary-runs/{id}: they are snapshotted on the run). Employee-level pay settings (GET /employees/{id}).
+**Use when:** You are provisioning or auditing a customer for payroll and need to know how new salary runs will be dated, which month their deviations are read from, which calculation conventions the engine applies, which payment file the bank expects, or which voucher series the salary vouchers land in.
+**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Per-run values such as payment_date or deviation window (GET /salary-runs/{id}: they are snapshotted on the run). The conventions a calculated run actually used (GET /salary-runs/{id}: calculation_params.salary_calculation_policy). Employee-level pay settings (GET /employees/{id}).
 
 **Pitfalls:**
 - salary_deviation_period is snapshotted onto each salary run at creation: changing it never moves a run that already exists. Set it before the first run of a new month. Switching later makes the next run's deviation window overlap the previous run's window, and that run is refused with 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (pass explicit deviation_period_start/end on that one run to bridge the switch).
 - salary_pay_day only drives the default payment_date of NEW runs (the day of the pay month, 1-28 so it exists in every month). Existing runs keep their payment_date; override per run on POST /salary-runs.
 - salary_voucher_series is an alias for company_settings.default_voucher_series_per_source_type.salary_payment. Writes MERGE that one key into the per-source-type map; the other source types keep their letters. The default company layout books salaries on K.
 - preferred_payment_format: pain001 (ISO 20022) is the default; bg_lb (Bankgirot Leverantörsbetalningar / Lön) is being retired by the banks during 2026, so only pick it for a customer whose bank still accepts LB files.
+- salary_calculation_policy holds the company's calculation conventions (beräkningsprinciper). Every key defaults to the historical Accounted behaviour; a customer migrated from Fortnox usually wants partial_month=annual_calendar_days (månadslön × 12 / 365 per calendar day employed), sick_rate=annual_hourly (timlön = månadslön × 12 / (52 × veckoarbetstid) for sjuklön), long_leave=calendar_after_five_workdays (leave longer than five working days deducted per calendar day at månadslön × 12 / 365, a whole month = the monthly salary) and, with salary_net_rounding, net_rounding=nearest. Compare one historical payslip before switching.
+- A PATCH of salary_calculation_policy is merged key by key into the stored policy (omitted keys keep their value); the response and the stored value always carry all six keys. It is not snapshotted onto existing runs at creation: the conventions are read at :calculate and frozen into the run's calculation_params, so a draft recalculated after a change follows the new conventions and a calculated run does not.
+- long_leave=calendar_after_five_workdays is a five-day-week rule: :calculate refuses (400 VALIDATION_ERROR) a monthly employee whose workdays_per_week is not 5 while it is on. leave_context only matters under that convention.
+- one_off_tax_rounding governs engångsskatt on payslip lines that carry one_off_tax_percent (POST /salary-runs/{id}/employees/{employeeId}/lines); truncate (öretal bortfaller) is the statutory rule, nearest exists to reproduce another system's history.
 - A company without a settings row reports series A (the engine fallback). The first PATCH creates the row with the standard series set, where salary_payment is K, unless salary_voucher_series is supplied in that same call: send it explicitly when provisioning so the letter never changes under you.
 
 | Parameter | In | Type | Required | Notes |
@@ -1872,6 +1917,7 @@ Response `200`:
     preferred_payment_format: "pain001" | "bg_lb",
     salary_default_bank: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
     salary_net_rounding: boolean,
+    salary_calculation_policy: { partial_month?: "workdays" | "annual_calendar_days", sick_rate?: "daily_divisor" | "annual_hourly", long_leave?: "workdays" | "calendar_after_five_workdays", leave_context?: "all_registered" | "through_deviation_end", net_rounding?: "up" | "nearest", one_off_tax_rounding?: "truncate" | "nearest" },
     salary_voucher_series: string
   },
   meta: {
@@ -1895,6 +1941,14 @@ Example response `200`:
     "preferred_payment_format": "pain001",
     "salary_default_bank": "swedbank",
     "salary_net_rounding": true,
+    "salary_calculation_policy": {
+      "partial_month": "annual_calendar_days",
+      "sick_rate": "annual_hourly",
+      "long_leave": "calendar_after_five_workdays",
+      "leave_context": "all_registered",
+      "net_rounding": "nearest",
+      "one_off_tax_rounding": "truncate"
+    },
     "salary_voucher_series": "K"
   },
   "meta": {
@@ -1911,18 +1965,22 @@ Example response `200`:
 **Partially update the company payroll settings.**
 `scope:payroll:write · risk:low · idempotent · dry-run · reversible`
 
-Patches the payroll settings: salary_pay_day (1-28), salary_deviation_period (same_month | previous_month), preferred_payment_format (pain001 | bg_lb), salary_default_bank (swedbank | seb | handelsbanken | nordea | other | null), salary_net_rounding (boolean) and salary_voucher_series (one letter A-Z). All fields optional; at least one must be supplied; unknown fields are rejected. Upserts: a company without a settings row gets one created with the supplied values and DB defaults for the rest. Returns the full resource after the write. Idempotent (mandatory Idempotency-Key). Dry-runnable: ?dry_run=true returns the merged resource without writing.
+Patches the payroll settings: salary_pay_day (1-28), salary_deviation_period (same_month | previous_month), preferred_payment_format (pain001 | bg_lb), salary_default_bank (swedbank | seb | handelsbanken | nordea | other | null), salary_net_rounding (boolean), salary_calculation_policy (an object with any of partial_month: workdays | annual_calendar_days, sick_rate: daily_divisor | annual_hourly, long_leave: workdays | calendar_after_five_workdays, leave_context: all_registered | through_deviation_end, net_rounding: up | nearest, one_off_tax_rounding: truncate | nearest; merged key by key into the stored policy) and salary_voucher_series (one letter A-Z). All fields optional; at least one must be supplied; unknown fields are rejected. Upserts: a company without a settings row gets one created with the supplied values and DB defaults for the rest. Returns the full resource after the write. Idempotent (mandatory Idempotency-Key). Dry-runnable: ?dry_run=true returns the merged resource without writing.
 
-**Use when:** You are onboarding a customer for payroll over the API (set the pay day, avvikelseperiod, payment file format, bank and voucher series before the first run), or a customer changes bank or pay day.
-**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Changing the payment date or deviation window of an existing run (PATCH /salary-runs/{id}, or explicit deviation_period_start/end on POST). Tax and legal profile changes (not on the public API).
+**Use when:** You are onboarding a customer for payroll over the API (set the pay day, avvikelseperiod, calculation conventions, payment file format, bank and voucher series before the first run), a customer changes bank or pay day, or a customer migrated from Fortnox needs the same partial-month, sick-pay and long-leave conventions as their old payslips.
+**Do not use for:** Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Changing the payment date or deviation window of an existing run (PATCH /salary-runs/{id}, or explicit deviation_period_start/end on POST). Changing the conventions of a run that is already calculated (recalculate the draft, or :correct a booked run). Tax and legal profile changes (not on the public API).
 
 **Pitfalls:**
 - Idempotency-Key is mandatory; calls without it return 400.
-- At least one field must be supplied; an empty body returns 400. Unknown fields return 400 (strict body).
+- At least one field must be supplied; an empty body returns 400. Unknown fields return 400 (strict body), also inside salary_calculation_policy.
 - salary_deviation_period is snapshotted onto each salary run at creation: changing it never moves a run that already exists. Set it before the first run of a new month. Switching later makes the next run's deviation window overlap the previous run's window, and that run is refused with 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (pass explicit deviation_period_start/end on that one run to bridge the switch).
 - salary_pay_day only drives the default payment_date of NEW runs (the day of the pay month, 1-28 so it exists in every month). Existing runs keep their payment_date; override per run on POST /salary-runs.
 - salary_voucher_series is an alias for company_settings.default_voucher_series_per_source_type.salary_payment. Writes MERGE that one key into the per-source-type map; the other source types keep their letters. The default company layout books salaries on K.
 - preferred_payment_format: pain001 (ISO 20022) is the default; bg_lb (Bankgirot Leverantörsbetalningar / Lön) is being retired by the banks during 2026, so only pick it for a customer whose bank still accepts LB files.
+- salary_calculation_policy holds the company's calculation conventions (beräkningsprinciper). Every key defaults to the historical Accounted behaviour; a customer migrated from Fortnox usually wants partial_month=annual_calendar_days (månadslön × 12 / 365 per calendar day employed), sick_rate=annual_hourly (timlön = månadslön × 12 / (52 × veckoarbetstid) for sjuklön), long_leave=calendar_after_five_workdays (leave longer than five working days deducted per calendar day at månadslön × 12 / 365, a whole month = the monthly salary) and, with salary_net_rounding, net_rounding=nearest. Compare one historical payslip before switching.
+- A PATCH of salary_calculation_policy is merged key by key into the stored policy (omitted keys keep their value); the response and the stored value always carry all six keys. It is not snapshotted onto existing runs at creation: the conventions are read at :calculate and frozen into the run's calculation_params, so a draft recalculated after a change follows the new conventions and a calculated run does not.
+- long_leave=calendar_after_five_workdays is a five-day-week rule: :calculate refuses (400 VALIDATION_ERROR) a monthly employee whose workdays_per_week is not 5 while it is on. leave_context only matters under that convention.
+- one_off_tax_rounding governs engångsskatt on payslip lines that carry one_off_tax_percent (POST /salary-runs/{id}/employees/{employeeId}/lines); truncate (öretal bortfaller) is the statutory rule, nearest exists to reproduce another system's history.
 - salary_default_bank: null clears the bank; omitting the field leaves it unchanged. The bank only pre-selects upload instructions, it does not change the payment file format.
 
 | Parameter | In | Type | Required | Notes |
@@ -1938,6 +1996,14 @@ Request body:
   preferred_payment_format?: "bg_lb" | "pain001",
   salary_default_bank?: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
   salary_net_rounding?: boolean,
+  salary_calculation_policy?: {
+    partial_month?: "workdays" | "annual_calendar_days",
+    sick_rate?: "daily_divisor" | "annual_hourly",
+    long_leave?: "workdays" | "calendar_after_five_workdays",
+    leave_context?: "all_registered" | "through_deviation_end",
+    net_rounding?: "up" | "nearest",
+    one_off_tax_rounding?: "truncate" | "nearest"
+  },
   salary_voucher_series?: string
 }
 ```
@@ -1949,6 +2015,12 @@ Example request:
   "salary_deviation_period": "previous_month",
   "salary_default_bank": "swedbank",
   "salary_net_rounding": true,
+  "salary_calculation_policy": {
+    "partial_month": "annual_calendar_days",
+    "sick_rate": "annual_hourly",
+    "long_leave": "calendar_after_five_workdays",
+    "net_rounding": "nearest"
+  },
   "salary_voucher_series": "K"
 }
 ```
@@ -1963,6 +2035,7 @@ Response `200`:
     preferred_payment_format: "pain001" | "bg_lb",
     salary_default_bank: "swedbank" | "seb" | "handelsbanken" | "nordea" | "other" | null,
     salary_net_rounding: boolean,
+    salary_calculation_policy: { partial_month?: "workdays" | "annual_calendar_days", sick_rate?: "daily_divisor" | "annual_hourly", long_leave?: "workdays" | "calendar_after_five_workdays", leave_context?: "all_registered" | "through_deviation_end", net_rounding?: "up" | "nearest", one_off_tax_rounding?: "truncate" | "nearest" },
     salary_voucher_series: string
   },
   meta: {
@@ -1986,6 +2059,14 @@ Example response `200`:
     "preferred_payment_format": "pain001",
     "salary_default_bank": "swedbank",
     "salary_net_rounding": true,
+    "salary_calculation_policy": {
+      "partial_month": "annual_calendar_days",
+      "sick_rate": "annual_hourly",
+      "long_leave": "calendar_after_five_workdays",
+      "leave_context": "all_registered",
+      "net_rounding": "nearest",
+      "one_off_tax_rounding": "truncate"
+    },
     "salary_voucher_series": "K"
   },
   "meta": {

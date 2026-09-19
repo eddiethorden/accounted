@@ -2477,16 +2477,6 @@ const BANK_FILE: Record<string, StructuredErrorEntry> = {
     message_sv: 'Kunde inte skapa importpost.',
     message_en: 'Failed to create the bank file import record.',
   },
-  BANK_FILE_SETTLEMENT_ACCOUNT_INVALID: {
-    httpStatus: 400,
-    message_sv: 'Bankkontot måste vara ett konto i intervallet 1920-1999.',
-    message_en: 'The bank account must be an account in the 1920-1999 range.',
-  },
-  BANK_FILE_SETTLEMENT_ACCOUNT_FAILED: {
-    httpStatus: 500,
-    message_sv: 'Kunde inte skapa bankkontot för importen. Inga transaktioner lästes in.',
-    message_en: 'The bank account for this import could not be created. No transactions were imported.',
-  },
   BANK_FILE_EXECUTE_FAILED: {
     httpStatus: 500,
     message_sv: 'Bankfilsimporten misslyckades.',
@@ -2518,6 +2508,16 @@ const BANK_FILE: Record<string, StructuredErrorEntry> = {
     httpStatus: 400,
     message_sv: 'Ogiltiga listparametrar: limit måste vara 1-100, offset ett icke-negativt heltal och status ett giltigt importstatus.',
     message_en: 'Invalid list parameters: limit must be 1-100, offset a nonnegative integer, and status a valid import status.',
+  },
+  BANK_FILE_INVALID_SETTLEMENT_ACCOUNT: {
+    httpStatus: 400,
+    message_sv: 'Bankkontot måste vara ett aktivt konto i kontoklass 19 i din kontoplan (till exempel 1930).',
+    message_en: 'The bank account must be an active class 19 account in your chart of accounts (for example 1930).',
+  },
+  BANK_FILE_SETTLEMENT_ACCOUNT_UNAVAILABLE: {
+    httpStatus: 409,
+    message_sv: 'Det valda bankkontot kan inte användas för den här filen. Inget importerades.',
+    message_en: 'The selected bank account cannot be used for this file. Nothing was imported.',
   },
 }
 

@@ -694,6 +694,7 @@ Returns per-employee semesterlöneskuld balances as of year-end based on their v
 **Pitfalls:**
 - `year` is required.
 - Employees with vacation_rule = none or semesterersattning are excluded: they have no semesterlöneskuld liability.
+- advanceVacationDebt (per row and in totals) is the förskottsskuld loaded as a cutover opening balance (SemL 29 a §): a receivable on the employee. totalLiability stays the booked 2920 + 2940 liability and is what bokslut and reconciliation use; netLiability subtracts the förskottsskuld for information only.
 
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|

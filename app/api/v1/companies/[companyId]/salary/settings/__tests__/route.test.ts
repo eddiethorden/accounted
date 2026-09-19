@@ -151,7 +151,17 @@ const SAMPLE_ROW = {
 }
 
 const SALARY_SETTINGS_SELECT =
-  'salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type'
+  'salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type'
+
+/** What a row that never touched the conventions ({} or missing) reads as. */
+const DEFAULT_POLICY = {
+  partial_month: 'workdays',
+  sick_rate: 'daily_divisor',
+  long_leave: 'workdays',
+  leave_context: 'all_registered',
+  net_rounding: 'up',
+  one_off_tax_rounding: 'truncate',
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -212,6 +222,7 @@ describe('GET /api/v1/companies/:companyId/salary/settings', () => {
       preferred_payment_format: 'pain001',
       salary_default_bank: 'swedbank',
       salary_net_rounding: true,
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'K',
     })
     expect(body.meta.request_id).toBeTruthy()
@@ -238,6 +249,7 @@ describe('GET /api/v1/companies/:companyId/salary/settings', () => {
       preferred_payment_format: 'pain001',
       salary_default_bank: null,
       salary_net_rounding: false,
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'A',
     })
   })
@@ -489,6 +501,7 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
       preferred_payment_format: 'pain001',
       salary_default_bank: 'swedbank',
       salary_net_rounding: true,
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'L',
     })
 
@@ -615,6 +628,7 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
       preferred_payment_format: 'pain001',
       salary_default_bank: 'swedbank',
       salary_net_rounding: true,
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'L',
     })
     expect(supabaseMock.settingsUpdates()).toHaveLength(0)
@@ -646,6 +660,7 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
       // The insert leaves the map to the DB default (the standard set), so
       // the preview says what the created row will say: K, not the no-row
       // fallback A.
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'K',
     })
     expect(supabaseMock.settingsUpdates()).toHaveLength(0)
@@ -684,6 +699,7 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
       preferred_payment_format: 'pain001',
       salary_default_bank: null,
       salary_net_rounding: false,
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'K',
     })
 
@@ -734,6 +750,7 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
       salary_pay_day: 27,
       salary_deviation_period: 'previous_month',
       // The winner's series map is kept, not the fresh-company default.
+      salary_calculation_policy: DEFAULT_POLICY,
       salary_voucher_series: 'L',
     })
     expect(supabaseMock.settingsInserts()).toHaveLength(1)
@@ -823,5 +840,111 @@ describe('PATCH /api/v1/companies/:companyId/salary/settings', () => {
     expect(res.status).toBeGreaterThanOrEqual(500)
     const body = await res.json()
     expect(body.error.code).toBeTruthy()
+  })
+})
+
+describe('PATCH salary_calculation_policy', () => {
+  it('merges a partial policy into the stored one and writes the full object', async () => {
+    const currentRow = { ...SAMPLE_ROW, salary_calculation_policy: { sick_rate: 'annual_hourly' } }
+    const written = {
+      partial_month: 'annual_calendar_days',
+      sick_rate: 'annual_hourly',
+      long_leave: 'workdays',
+      leave_context: 'all_registered',
+      net_rounding: 'up',
+      one_off_tax_rounding: 'truncate',
+    }
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: MEMBER,
+      company_settings: [
+        { data: currentRow, error: null },
+        { data: { ...currentRow, salary_calculation_policy: written }, error: null },
+      ],
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await updateSalarySettings(
+      makePatchRequest(URL, { salary_calculation_policy: { partial_month: 'annual_calendar_days' } }),
+      companyParams(COMPANY_ID),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data.salary_calculation_policy).toEqual(written)
+    const payload = supabaseMock.settingsUpdates()[0] as Record<string, unknown>
+    // The stored sick_rate survives; the untouched keys take their defaults;
+    // no other column is touched.
+    expect(JSON.parse(JSON.stringify(payload))).toEqual({ salary_calculation_policy: written })
+  })
+
+  it('leaves the policy column alone when the body does not mention it', async () => {
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: MEMBER,
+      company_settings: [
+        { data: SAMPLE_ROW, error: null },
+        { data: { ...SAMPLE_ROW, salary_pay_day: 27 }, error: null },
+      ],
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await updateSalarySettings(makePatchRequest(URL, { salary_pay_day: 27 }), companyParams(COMPANY_ID))
+
+    expect(res.status).toBe(200)
+    const payload = supabaseMock.settingsUpdates()[0] as Record<string, unknown>
+    expect(payload.salary_calculation_policy).toBeUndefined()
+  })
+
+  it('reports a stored partial policy with every convention filled in on GET', async () => {
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: MEMBER,
+      company_settings: { data: { ...SAMPLE_ROW, salary_calculation_policy: { net_rounding: 'nearest' } }, error: null },
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await getSalarySettings(makeGetRequest(URL), companyParams(COMPANY_ID))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data.salary_calculation_policy).toEqual({ ...DEFAULT_POLICY, net_rounding: 'nearest' })
+  })
+
+  it('rejects an unknown convention key and a misspelled value (strict body)', async () => {
+    const supabaseMock = makeFlexibleSupabase({ company_members: MEMBER })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    for (const policy of [{ partial_month: 'calender' }, { unknown: 'workdays' }]) {
+      const res = await updateSalarySettings(
+        makePatchRequest(URL, { salary_calculation_policy: policy }),
+        companyParams(COMPANY_ID),
+      )
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error.code).toBe('VALIDATION_ERROR')
+    }
+    expect(supabaseMock.settingsUpdates()).toHaveLength(0)
+    expect(supabaseMock.settingsInserts()).toHaveLength(0)
+  })
+
+  it('previews the merged policy on dry run without writing', async () => {
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: MEMBER,
+      company_settings: { data: { ...SAMPLE_ROW, salary_calculation_policy: { sick_rate: 'annual_hourly' } }, error: null },
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await updateSalarySettings(
+      makePatchRequest(`${URL}?dry_run=true`, { salary_calculation_policy: { long_leave: 'calendar_after_five_workdays' } }),
+      companyParams(COMPANY_ID),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data.dry_run).toBe(true)
+    expect(body.data.preview.salary_calculation_policy).toEqual({
+      ...DEFAULT_POLICY,
+      sick_rate: 'annual_hourly',
+      long_leave: 'calendar_after_five_workdays',
+    })
+    expect(supabaseMock.settingsUpdates()).toHaveLength(0)
   })
 })

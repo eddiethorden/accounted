@@ -623,6 +623,11 @@ export interface CompanySettings {
   // reads absence and worked days from. 'previous_month' is the common
   // Swedish setup (innevarande månads lön, föregående månads avvikelser).
   salary_deviation_period: 'same_month' | 'previous_month'
+  // Calculation conventions (migration 20260919120100): jsonb validated by
+  // SalaryCalculationPolicySchema (lib/salary/calculation-policy.ts). The
+  // column default is {} = every convention at its default = the historical
+  // engine; the API stores the full object.
+  salary_calculation_policy?: Partial<import('@/lib/salary/calculation-policy').SalaryCalculationPolicy>
 
   // Sandbox
   is_sandbox: boolean
@@ -4338,7 +4343,9 @@ export interface SalaryRunEmployee {
   calculation_breakdown: Record<string, unknown> | null
   ytd_gross: number
   ytd_tax: number
-  ytd_net: number
+  /** null = unknown: the cutover opening balance had no historical net
+   *  (migration 20260919130000); the payslip prints "Underlag saknas". */
+  ytd_net: number | null
   created_at: string
   updated_at: string
   // Relations
@@ -4364,6 +4371,16 @@ export interface SalaryLineItem {
   sort_order: number
   /** The registered utlägg an expense_reimbursement line repays (#2331). */
   source_expense_claim_id?: string | null
+  /** Engångsskatt percentage (migration 20260919120200); null = taxed by the monthly table. */
+  one_off_tax_percent?: number | null
+  /** Engine provenance (migration 20260919120000): 'vacation_compensation' on the
+   *  semesterersättning row run-calculation derives; null on manual rows. */
+  calculation_source?: 'vacation_compensation' | null
+  /** Which vacation pool a vacation line draws from (migration 20260919130100);
+   *  null = paid. Only on item_type 'vacation'. */
+  vacation_category?: 'paid' | 'extra_paid' | 'saved' | 'unpaid' | 'advance' | null
+  /** Origin year (YYYY) of the sparade dagar a 'saved' line consumes; null = oldest first. */
+  vacation_saved_year?: string | null
   created_at: string
   updated_at: string
 }

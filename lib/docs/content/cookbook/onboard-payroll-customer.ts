@@ -45,6 +45,29 @@ curl -X PATCH "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/salary/setting
 
 Read it back with \`GET /salary/settings\`. There is no separate "avtal" to configure: statutory parameters (arbetsgivaravgifter, traktamenten, karens, sjuklön) live centrally per year and are maintained by Accounted.
 
+### Calculation policies
+
+The law fixes what is paid (sjuklön at 80 %, one karensavdrag per sjuklöneperiod, semesterlön); how a monthly salary is turned into a day, an hour or a partial month follows the employment contract and the kollektivavtal, and every payroll system has its conventions. \`salary_calculation_policy\` on the same endpoint makes them explicit per company. Every key defaults to the calculation Accounted has always done; the other value of each is what Fortnox does, so a customer you take over from Fortnox keeps the öre on their payslips. Send only the keys you change; they are merged into the stored policy and the response always shows all six.
+
+\`\`\`bash
+curl -X PATCH "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/salary/settings" \\
+  -H "Authorization: Bearer gnubok_sk_..." \\
+  -H "Idempotency-Key: $(uuidgen)" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "salary_calculation_policy": { "partial_month": "annual_calendar_days", "sick_rate": "annual_hourly", "long_leave": "calendar_after_five_workdays" } }'
+\`\`\`
+
+| Key | Default (Accounted) | Fortnox parity | What it changes |
+|---|---|---|---|
+| \`partial_month\` | \`workdays\`: månadslön × arbetsdagar i anställning / arbetsdagar i månaden | \`annual_calendar_days\`: (månadslön × 12 / 365, rounded to öre) × kalenderdagar i anställning; a whole month pays the whole salary | Base salary the month an employment starts or ends. Needed for every Fortnox customer with mid-month starters or leavers. |
+| \`sick_rate\` | \`daily_divisor\`: månadslön / 21 per day (schedule divisor for part-time weeks), weighted by hours | \`annual_hourly\`: timlön = månadslön × 12 / (52 × veckoarbetstid); sjukavdrag per timme = timlön, sjuklön = 80 % of it | Sick days 1-14. The karensavdrag (20 % of an average week's sjuklön) is the same under both. |
+| \`long_leave\` | \`workdays\`: one daily rate per absent day | \`calendar_after_five_workdays\`: up to five working days per working day; longer episodes per calendar day at månadslön × 12 / 365, weekends included; a full calendar month deducts exactly the monthly salary; sick day 15+ always per calendar day | Föräldraledighet, tjänstledighet utan lön and sjukfrånvaro from day 15. Five-day schedules only: \`:calculate\` refuses a monthly employee with another \`workdays_per_week\` while this is on. |
+| \`leave_context\` | \`all_registered\`: days registered after the deviation period's end count toward the five-day threshold | \`through_deviation_end\`: only days up to the period's end count, so a later registration never reprices a settled month | Only under \`calendar_after_five_workdays\`. Choose \`through_deviation_end\` when the customer registers leave month by month. |
+| \`net_rounding\` | \`up\`: whole-krona öresavrundning always rounds up | \`nearest\`: to the nearest krona; a negative difference books as a 3740 credit | Only when \`salary_net_rounding\` is on. |
+| \`one_off_tax_rounding\` | \`truncate\`: engångsskatt = belopp × procent, öretal bortfaller (SFL 22 kap. 1 §) | \`nearest\`: round to the nearest krona | Engångsskatt on lines with \`one_off_tax_percent\` (step 5). Keep the statutory default unless you are reproducing another system's history. |
+
+The conventions are read at \`:calculate\` and frozen into the run's \`calculation_params.salary_calculation_policy\`, so a change never moves a run that is already calculated; recalculate a draft to apply it, \`:correct\` a booked run. Set them in step 2, and compare one historical payslip from the old system against a dry run before the first live month.
+
 ## 3. Employees
 
 \`\`\`bash
@@ -76,15 +99,40 @@ curl -X PUT "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLO
   -d '{
     "cutover_date": "2026-09-01",
     "ytd_gross": 280000, "ytd_tax": 64000, "ytd_net": 216000,
+    "vacation_as_of_date": "2026-07-31",
     "vacation_paid_days_remaining": 12.5,
-    "vacation_saved_days_by_year": { "2025": 5 },
+    "vacation_days_taken_this_year": 10,
+    "vacation_extra_paid_days_remaining": 2,
+    "vacation_saved_days_by_year": { "2025": 5, "2024": 2 },
+    "vacation_unpaid_days_remaining": 0,
+    "vacation_advance_days_remaining": 3,
     "opening_semester_liability": 42000,
     "opening_semester_liability_avgifter": 13196.4,
+    "opening_advance_vacation_debt": 4500,
     "karens_periods_adjustment": 1
   }'
 \`\`\`
 
-\`karens_periods_adjustment\` is the number of sjuklöneperioder in the 12 months before cutover that the previous system handled, so the högriskskydd cap (10 karensavdrag per rolling 12 months) carries over. A pågående sjukfall is registered as ordinary absence days on their real dates (step 5): the engine merges them into the running sjuklöneperiod. \`PUT /employees/{employeeId}/opening-balances\` sets one employee; \`PUT /employees/opening-balances\` (no employee id) takes the whole roster in one call. The balances lock when the first run books.
+Every field maps onto the semestersaldo the previous system prints per employee:
+
+| Field | Fortnox / Azets | Meaning |
+|---|---|---|
+| \`cutover_date\` | | First day of the first month Accounted runs (always the 1st). YTD and the pools apply from here. |
+| \`ytd_gross\`, \`ytd_tax\`, \`ytd_net\` | Ackumulerat i år | Gross, withheld tax and net paid so far this calendar year. Send \`"ytd_net": null\` when the old system cannot export net: the payslip then prints "Underlag saknas" for the accumulator instead of a false 0. Never send gross minus tax as net. |
+| \`vacation_as_of_date\` | Saldo per | The day the vacation pools below are struck per. Omitted = the day before \`cutover_date\`. See the as-of rule under the table. |
+| \`vacation_paid_days_remaining\` | Betalda (kvar) | Paid days left this vacation year. |
+| \`vacation_days_taken_this_year\` | Betalda (uttagna) | Paid days already taken this vacation year. Together with the remaining days this gives the year's entitlement. |
+| \`vacation_extra_paid_days_remaining\` | Extra betalda | Paid days above the statutory 25 (kollektivavtal or contract) left this year. They join the paid pool. |
+| \`vacation_saved_days_by_year\` | Sparade per år | Sparade dagar keyed by the intjänandeår they come from, at most five years back; each year expires on its own (Semesterlagen 18 §). |
+| \`vacation_unpaid_days_remaining\` | Obetalda | Unpaid days the employee may still take this year (Semesterlagen 8 §). They lapse at the vacation-year close. |
+| \`vacation_advance_days_remaining\` | Förskott | Förskottssemester days granted but not yet taken. Days taken reduce the next year's entitlement. |
+| \`opening_semester_liability\`, \`opening_semester_liability_avgifter\` | Semesterlöneskuld | SEK on 2920 and 2940 at cutover. Report only: the balances themselves arrive through the SIE import. |
+| \`opening_advance_vacation_debt\` | Förskottsskuld | SEK the employee owes for förskottssemester already taken (Semesterlagen 29 a §, deductible at termination within five years, then written off). Report only: its own row on \`GET /reports/vacation-liability\`, subtracted from the net liability. |
+| \`karens_periods_adjustment\` | | Sjuklöneperioder in the 12 months before cutover that the previous system handled, so the högriskskydd cap (10 karensavdrag per rolling 12 months) carries over. |
+
+**The as-of rule.** The vacation ledger deducts a booked run's vacation days only when the run's avvikelseperiod ends after \`vacation_as_of_date\`; a run whose window ended on or before it is treated as already inside the balance. With \`same_month\` the default (the day before cutover) is right: the September run deducts September. With \`previous_month\` the September run deducts August, so a balance struck per 31 August already contains August's leave and the run is skipped; if the old system would have deducted August in its own September run, its "per 31 August" balance does not contain those days, and you send \`"vacation_as_of_date": "2026-07-31"\` so Accounted deducts them. Ask the customer which month the last payroll in the old system deducted leave for; the as-of date is the last day of that month.
+
+A pågående sjukfall is registered as ordinary absence days on their real dates (step 5): the engine merges them into the running sjuklöneperiod. \`PUT /employees/{employeeId}/opening-balances\` sets one employee; \`PUT /employees/opening-balances\` (no employee id) takes the whole roster in one call. Both are full replaces: an omitted pool resets to 0. The balances lock when the first run books.
 
 ## 5. Monthly inputs
 
@@ -127,7 +175,9 @@ curl "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLOYEE_ID/
 
 Deductions carry a negative amount and the API rejects the wrong sign for the item type. The förmånsvärde is added to the tax and avgifter basis at \`:calculate\`; supply the schablon figure, the API does not compute it from the car.
 
-**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`.
+**Vacation taken** is a payslip line too: \`item_type: "vacation"\` with \`quantity\` = days, and \`vacation_category\` when the days are not this year's paid days (\`saved\` with an optional \`vacation_saved_year\`, else the oldest saved year is consumed first; \`unpaid\`; \`advance\`; \`extra_paid\`), so the ledger draws them from the right pool loaded in step 4.
+
+**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A bonus, provision or final-settlement semesterersättning that Skatteverket taxes as an engångsbelopp takes \`one_off_tax_percent\` with the percentage you verified for the employee's yearly income; the line is then withheld at that flat rate instead of through the monthly table (a valid jämkning decision on the employee still wins), equal percentages are summed before the öre are dropped, and the payslip breakdown shows an "Engångsskatt (x %)" step. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`.
 
 ## 6. Run payroll
 
