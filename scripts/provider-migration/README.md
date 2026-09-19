@@ -5,6 +5,41 @@ No Docker or local database is used. The scripts refuse the production URL and
 never load `.env.local`. They create clearly named synthetic companies in the
 `erp-base` staging branch (`metjnjrhvujscngnpzdv`). Fixtures remain there for inspection.
 
+## Worker results recorded on 2026-09-19
+
+Both full worker runs passed against staging over HTTP. The providers returned
+synthetic responses; the worker, provider clients, local throttling, mappers,
+encryption and database RPCs were real. The two volume runs ran concurrently.
+
+| Provider | Invoices | Invoice lines | Total duration | Longest returned worker run | Worker budget |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Visma | 25,000 | 75,000 | 14 min 3 sec | 50.183 sec | 60 sec |
+| Bokio | 25,000 | 75,000 | 14 min 14 sec | 50.178 sec | 60 sec |
+
+Both jobs completed with zero failed or pending records, correct totals, 250
+customers and exactly 25,000 row-completion events. Each recovered from a real
+process kill after commit, a lost commit response and a simulated provider 429.
+A competing worker could not claim the active lease. The full import duration
+exceeds one invocation's budget because progress survives between invocations.
+
+Additional runs passed for each provider: 100 invoices with every detail request
+delayed 250 ms; 30 with two-second responses and a 15-second worker budget; and
+30 with 1.7-second responses that interrupt a detail fetch at the invocation
+boundary. These exposed and verified a fix: exhausting only the remaining
+invocation time now leaves the invoice pending for automatic resumption instead
+of marking it for manual retry or applying provider-error backoff. The volume
+runs picked up this fix in subsequent invocations; the short-budget scenarios
+and final smoke tests ran after the fix.
+
+The full unit suite passed 24,239 tests, with 5 skipped. Changed files pass lint,
+and the type check reports no new errors. Exact metrics, synthetic fixture IDs
+and measurement limits are in
+[`results-2026-09-19.json`](./results-2026-09-19.json).
+
+No live provider account, hosted scheduler, deployed function runtime or large
+SIE ledger was exercised. The changes are in the feature worktree and are not
+deployed. Hosted cron recovery still needs verification after deployment.
+
 ## Results recorded on 2026-09-18
 
 The database-only benchmark passed for both providers:
@@ -24,10 +59,8 @@ the real provider HTTP clients and mappers, with simulated responses and
 throttling disabled. Worker deadline regressions passed with stalled database
 claims, reads, commits and releases, plus an oversized 2,001-line invoice.
 
-The full worker-over-HTTP load run has **not run yet**: this workspace needs
-staging CLI credentials. No hosted scheduler, real provider API, deployed
-function timeout, or large-ledger matching result is claimed by these numbers.
-The timeout fix and harness are on the feature worktree and are not deployed.
+These earlier database-only numbers exclude worker and HTTP timings. See the
+2026-09-19 results above for the subsequent worker runs.
 
 ## Worker test over HTTP
 
@@ -74,7 +107,11 @@ Each provider run tests:
 - A lost commit acknowledgement and safe replay.
 - A competing claim while a worker holds the lease.
 - Invoice and line counts, exact header totals, completed receipts, and bounded
-  request sizes and worker runtimes.
+  request sizes and worker runtimes, with one row-completion event per invoice.
+
+The 429 is injected once per provider run, including when discovery spans
+several worker invocations. Repeating it on every restart could prevent a
+short-budget test from ever reaching its first commit.
 
 Only the synthetic job's lease/backoff timestamps are accelerated after injected
 failures, so recovery does not wait five minutes. The same claim/fencing RPCs
@@ -95,6 +132,19 @@ For a Visma-style register requiring detail for every invoice, use
 before database work. Total job duration can exceed an invocation limit safely;
 each invocation must checkpoint and return. The simulated delay does not model
 all provider outages or distributed Redis rate-limit contention.
+
+To interrupt detail requests at an invocation boundary and verify automatic
+resumption with a small dataset:
+
+```bash
+node --import tsx --conditions react-server scripts/provider-migration/load-staging.ts --count 30 --budget 15000 --detail-every 1 --delay-ms 1700
+```
+
+An invoice that only exhausts the remaining invocation time stays pending.
+It does not need manual retry and does not incur provider-error backoff.
+An invoice that exhausts its full 15-second detail allowance still gets an
+explicit retry outcome, so one consistently failing invoice cannot stall all
+remaining invoices indefinitely.
 
 Results are written after every invocation to `.env.provider-load-report.json`.
 The report includes synthetic company/job IDs, elapsed time per invocation,
@@ -134,7 +184,7 @@ VAT, payment states and fiscal-year scope. Deadline tests use a controlled clock
 they are separate from measured staging invocation times.
 
 Before release, also run a scrubbed representative source payload from the
-original incident, invoice lists that always require detail, a large existing
+original incident, a full 25,000-invoice register requiring every detail, a large existing
 SIE ledger with registration references, supplier invoices and settlement,
 foreign currencies, mixed VAT rates, missing fields, and reconnect after token
 expiry. These are additional integration datasets, not claims about the default

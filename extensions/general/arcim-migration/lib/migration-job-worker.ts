@@ -18,6 +18,7 @@ const log = createLogger('provider-migration-worker')
 const BATCH_SIZE = 10
 const MAX_BATCH_BYTES = 750_000
 const MAX_INVOICE_LINES = 2000
+const MAX_DETAIL_BUDGET_MS = 15_000
 
 type InvoiceDto = SalesInvoiceDto | SupplierInvoiceDto
 export interface MigrationChunk {
@@ -92,12 +93,15 @@ async function prepareRecord(supabase: SupabaseClient, job: ProviderMigrationJob
   const listed = dto as InvoiceDto
   if (!invoiceWithinScope(listed, job.fiscal_year_scope)) return { id: c.id, skip: 'outsideFiscalYears' }
   const provider = job.provider as ProviderName
-  const budget = Math.min(15_000, Math.max(0, deadline - Date.now() - 5000))
+  const budget = Math.min(MAX_DETAIL_BUDGET_MS, Math.max(0, deadline - Date.now() - 5000))
   if (budget < 1000) throw new Error('MIGRATION_DEADLINE')
   const hydrated = c.resource === 'salesInvoices'
     ? await hydrateSalesInvoices(provider, connection.accessToken, connection.providerCompanyId, [listed as SalesInvoiceDto], budget)
     : await hydrateSupplierInvoices(provider, connection.accessToken, connection.providerCompanyId, [listed as SupplierInvoiceDto], budget)
   if (hydrated.unhydratedIds.has(listed.id)) {
+    // A shortened detail budget means this invocation ran out of time,
+    // not that the invoice exhausted a full attempt. Leave it pending.
+    if (hydrated.hydration.abortedBy === 'budget' && budget < MAX_DETAIL_BUDGET_MS) throw new Error('MIGRATION_DEADLINE')
     // The provider client already retries transient errors. Isolate exhausted
     // detail failures so healthy records continue; the user can retry them.
     throw new Error(hydrated.hydration.abortedBy === 'auth' ? 'PROVIDER_AUTH_EXPIRED' : 'MIGRATION_DETAIL_RETRY')
@@ -278,7 +282,7 @@ export async function runProviderMigrationWorker(options: {
         'MIGRATION_WRITE_FORBIDDEN','MIGRATION_SOURCE_IDENTITY_CHANGED','PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED'].includes(code) || job.failures >= 4
       await migrationRpc(supabase, job, 'release_provider_migration_job', {
         p_error_code: code === 'MIGRATION_DEADLINE' ? null : code,
-        p_retry_seconds: attention ? -1 : migrationRetrySeconds(job.failures + 1),
+        p_retry_seconds: code === 'MIGRATION_DEADLINE' ? 0 : attention ? -1 : migrationRetrySeconds(job.failures + 1),
       }, deadline).catch(releaseError => {
         // An unreachable database must not hold the invocation open. The
         // lease expires and the next worker replays any uncertain commit.

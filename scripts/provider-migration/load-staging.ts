@@ -15,6 +15,7 @@ const { values } = parseArgs({ options: {
   budget: { type: 'string', default: '60000' }, 'detail-every': { type: 'string', default: '0' },
   'delay-ms': { type: 'string', default: '0' }, report: { type: 'string', default: '.env.provider-load-report.json' },
   child: { type: 'boolean', default: false }, job: { type: 'string' }, fault: { type: 'string' },
+  'rate-limit': { type: 'boolean', default: false },
 } })
 const count = Number(values.count), budget = Number(values.budget)
 const detailEvery = Number(values['detail-every']), delay = Number(values['delay-ms'])
@@ -31,7 +32,7 @@ assert.equal(url, `https://${PROJECT}.supabase.co`, 'This harness only writes to
 assert.ok(key, 'A staging service-role key is required; never paste it into logs')
 // Deliberately copy only these settings, never mail, analytics, or Redis credentials.
 process.env.NEXT_PUBLIC_SUPABASE_URL = url
-process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = key
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = config.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? config.SUPABASE_ANON_KEY ?? 'synthetic-unused-anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY = key
 process.env.PERSONNUMMER_ENCRYPTION_KEY = 'synthetic-provider-load-test-only'
 delete process.env.UPSTASH_REDIS_REST_URL
@@ -84,7 +85,7 @@ async function child() {
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer synthetic-load-token')
     providerRequests++
     if (delay) await sleep(delay)
-    if (values.fault === 'crash' && !rateLimited) {
+    if (values['rate-limit'] && !rateLimited) {
       rateLimited = true
       return Response.json({ message: 'Synthetic rate limit' }, { status: 429, headers: { 'Retry-After': '1' } })
     }
@@ -107,11 +108,12 @@ async function child() {
     leaseChecked, injected, rateLimited }))
 }
 
-async function runChild(provider: LoadProvider, job: string, fault?: string) {
+async function runChild(provider: LoadProvider, job: string, fault?: string, rateLimit = false) {
   const args = ['--import', 'tsx', '--conditions', 'react-server', resolve('scripts/provider-migration/load-staging.ts'),
     '--child', '--env', resolve(values.env!), '--provider', provider, '--count', String(count), '--budget', String(budget),
     '--detail-every', String(detailEvery), '--delay-ms', String(delay), '--job', job]
   if (fault) args.push('--fault', fault)
+  if (rateLimit) args.push('--rate-limit')
   return new Promise<Record<string, number | boolean>>((done, fail) => {
     const worker = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     let output = '', errors = ''
@@ -161,7 +163,7 @@ async function main() {
           .update({ lease_until: new Date(0).toISOString(), next_attempt_at: new Date(0).toISOString() })
           .eq('id', job.id).eq('company_id', company))
         const fault: string | undefined = !crashDone ? 'crash' : !lostAckDone ? 'lost-ack' : undefined
-        const result = await runChild(provider, job.id, fault)
+        const result = await runChild(provider, job.id, fault, !rateLimitDone)
         rateLimitDone ||= result.rateLimited === true
         crashDone ||= result.crashed === true
         lostAckDone ||= fault === 'lost-ack' && result.injected === true
@@ -178,6 +180,9 @@ async function main() {
       }
       const lineCount = await db.from('invoice_items').select('id,invoices!inner(company_id)', { head: true, count: 'exact' }).eq('invoices.company_id', company)
       assert.equal(lineCount.error, null); assert.equal(lineCount.count, count * 3)
+      const completions = await db.from('processing_history').select('event_id', { head: true, count: 'exact' })
+        .eq('company_id', company).eq('event_type', 'InvoiceRowsCompleted')
+      assert.equal(completions.error, null); assert.equal(completions.count, count, 'Duplicate row-completion events')
       const receipts = (await checked(db.rpc('provider_migration_counts', { p_job_id: job.id })))[0]
       assert.equal(Number(receipts.total), count)
       assert.equal(Number(receipts.completed), count)

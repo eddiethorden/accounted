@@ -107,6 +107,30 @@ describe('bounded durable worker', () => {
     expect(db.rows.map(r => r.state)).toEqual(['needs_attention', 'done'])
     expect(db.job.state).toBe('needs_attention')
   })
+  it('resumes a healthy detail when only the invocation time runs out', async () => {
+    vi.useFakeTimers()
+    const db = database({ phase: 'import', resources: ['salesInvoices'] })
+    const dto = (id: string) => ({ id, issueDate: '2026-01-01', currencyCode: 'SEK', _raw: { CustomerId: 'customer' },
+      customer: { name: 'Customer', identifications: [] }, lines: [{}] })
+    for (const id of ['a', 'b']) db.rows.push({ id, source_id: id, resource: 'salesInvoices', state: 'pending', ...sealMigrationPayload(dto(id)) })
+    mocks.hydrate.mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 3000)
+      return { invoices: [dto('a')], unhydratedIds: new Set(), hydration: {} }
+    }).mockImplementationOnce(async (...args) => {
+      expect(args[4]).toBe(2000)
+      vi.setSystemTime(Date.now() + 2000)
+      return { invoices: [dto('b')], unhydratedIds: new Set(['b']), hydration: { abortedBy: 'budget' } }
+    })
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id, budgetMs: 15000 })
+    expect(db.rows.map(row => row.state)).toEqual(['done', 'pending'])
+    expect(db.job.state).toBe('queued')
+    expect(db.rpc).toHaveBeenCalledWith('release_provider_migration_job', expect.objectContaining({
+      p_error_code: null, p_retry_seconds: 0,
+    }))
+    mocks.hydrate.mockResolvedValueOnce({ invoices: [dto('b')], unhydratedIds: new Set(), hydration: {} })
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.job.state).toBe('completed')
+  })
   it('yields a hung provider request at the worker deadline without advancing its cursor', async () => {
     vi.useFakeTimers()
     const db = database()
