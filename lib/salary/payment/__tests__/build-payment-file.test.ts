@@ -5,12 +5,19 @@
  * query order asserted here is the order the dashboard route tests rely on.
  */
 
+import { createHash } from 'crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createQueuedMockSupabase } from '@/tests/helpers'
 import { buildSalaryPaymentFile, SALARY_PAYMENT_FILE_ALLOWED_STATUSES } from '../build-payment-file'
 
 const COMPANY_ID = 'company-1'
 const RUN_ID = 'run-1'
+const USER_ID = 'user-1'
+
+/** SHA-256 hex over `content` encoded the way the download sends it. */
+function digest(content: string, encoding: 'utf8' | 'latin1'): string {
+  return createHash('sha256').update(Buffer.from(content, encoding)).digest('hex')
+}
 
 const run = { id: RUN_ID, status: 'approved', period_year: 2026, period_month: 4, payment_date: '2026-04-24' }
 const company = { name: 'Onboarding Name AB', org_number: '556000-0000' }
@@ -45,11 +52,18 @@ describe('buildSalaryPaymentFile', () => {
     expect([...SALARY_PAYMENT_FILE_ALLOWED_STATUSES]).toEqual(['approved', 'paid', 'booked'])
   })
 
-  it('loads run, company, settings, employees in that order and stamps the run', async () => {
+  it('loads run, company, settings, employees in that order, archives the file and stamps the run', async () => {
     const { supabase, enqueueMany, calls, findCall } = client()
-    enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [anna] }, { data: null }])
+    enqueueMany([
+      { data: run },
+      { data: company },
+      { data: settings },
+      { data: [anna] },
+      { data: null }, // salary_payment_files insert
+      { data: null }, // salary_runs update
+    ])
 
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -74,13 +88,45 @@ describe('buildSalaryPaymentFile', () => {
     const stamp = findCall('salary_runs', 'update')?.[0] as Record<string, unknown>
     expect(stamp.payment_file_format).toBe('pain001')
     expect(typeof stamp.payment_file_generated_at).toBe('string')
+
+    // Archived before the stamp, as one WORM row carrying the exact content
+    // and a digest over its UTF-8 bytes (the encoding the download sends).
+    const writes = calls
+      .filter((c) => c.method === 'insert' || c.method === 'update')
+      .map((c) => `${c.table}.${c.method}`)
+    expect(writes).toEqual(['salary_payment_files.insert', 'salary_runs.update'])
+    const archived = findCall('salary_payment_files', 'insert')?.[0] as Record<string, unknown>
+    expect(archived).toMatchObject({
+      id: result.paymentFileId,
+      company_id: COMPANY_ID,
+      salary_run_id: RUN_ID,
+      user_id: USER_ID,
+      format: 'pain001',
+      filename: 'pain001_lon_2026-04.xml',
+      content_type: 'application/xml',
+      charset: 'utf-8',
+      content: result.content,
+      sha256: digest(result.content, 'utf8'),
+      byte_size: Buffer.byteLength(result.content, 'utf8'),
+      payment_date: '2026-04-24',
+      employee_count: 1,
+      total_amount: 20000,
+      generated_at: result.generatedAt,
+    })
+    expect(result.sha256).toBe(archived.sha256)
+    expect(result.byteSize).toBe(archived.byte_size)
+    expect(typeof result.paymentFileId).toBe('string')
+    expect(stamp.payment_file_generated_at).toBe(archived.generated_at)
   })
 
   it('falls back to company_settings.preferred_payment_format when no format is given', async () => {
-    const { supabase, enqueueMany } = client()
-    enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [anna] }, { data: null }])
+    const { supabase, enqueueMany, findCall } = client()
+    // A Latin-1 name (ö) makes the encoding observable: the LB digest is over
+    // ISO 8859-1 bytes and differs from a UTF-8 digest of the same string.
+    const sjoberg = { ...anna, employee: { ...anna.employee, last_name: 'Sjöberg' } }
+    enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [sjoberg] }, { data: null }, { data: null }])
 
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -88,20 +134,32 @@ describe('buildSalaryPaymentFile', () => {
     expect(result.filename).toBe('bg_lb_lon_2026-04.txt')
     expect(result.charset).toBe('iso-8859-1')
     expect(result.content.startsWith('11')).toBe(true)
+    expect(result.content).toContain('Sjöberg')
+    expect(result.sha256).toBe(digest(result.content, 'latin1'))
+    expect(result.sha256).not.toBe(digest(result.content, 'utf8'))
+    expect(result.byteSize).toBe(Buffer.byteLength(result.content, 'latin1'))
+    const archived = findCall('salary_payment_files', 'insert')?.[0] as Record<string, unknown>
+    expect(archived).toMatchObject({
+      format: 'bg_lb',
+      content_type: 'text/plain',
+      charset: 'iso-8859-1',
+      sha256: result.sha256,
+      byte_size: result.byteSize,
+    })
   })
 
   it('defaults to pain001 when there is no settings row and reports SETTINGS_MISSING', async () => {
     const { supabase, enqueueMany } = client()
     enqueueMany([{ data: run }, { data: company }, { data: null }])
 
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID })
     expect(result).toMatchObject({ ok: false, code: 'SETTINGS_MISSING', format: 'pain001' })
   })
 
   it('reports RUN_NOT_FOUND and RUN_NOT_READY before touching anything else', async () => {
     const a = client()
     a.enqueueMany([{ data: null }])
-    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })).toMatchObject({
       ok: false,
       code: 'RUN_NOT_FOUND',
     })
@@ -109,7 +167,7 @@ describe('buildSalaryPaymentFile', () => {
 
     const b = client()
     b.enqueueMany([{ data: { ...run, status: 'review' } }])
-    const notReady = await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const notReady = await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(notReady).toMatchObject({
       ok: false,
       code: 'RUN_NOT_READY',
@@ -120,14 +178,14 @@ describe('buildSalaryPaymentFile', () => {
   it('reports COMPANY_NOT_FOUND after loading settings (the dashboard query order)', async () => {
     const { supabase, enqueueMany } = client()
     enqueueMany([{ data: run }, { data: null }, { data: settings }])
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(result).toMatchObject({ ok: false, code: 'COMPANY_NOT_FOUND' })
   })
 
   it('requires IBAN, then a saved or derivable BIC, for pain001', async () => {
     const a = client()
     a.enqueueMany([{ data: run }, { data: company }, { data: { ...settings, iban: '  ' } }])
-    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })).toMatchObject({
       ok: false,
       code: 'IBAN_MISSING',
       details: { field: 'iban' },
@@ -139,7 +197,7 @@ describe('buildSalaryPaymentFile', () => {
       { data: company },
       { data: { ...settings, bic: null, clearing_number: null, bank_name: 'Okänd Bank' } },
     ])
-    expect(await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })).toMatchObject({
       ok: false,
       code: 'BIC_MISSING',
     })
@@ -148,14 +206,14 @@ describe('buildSalaryPaymentFile', () => {
   it('requires a valid bankgiro for bg_lb (missing row counts as missing bankgiro)', async () => {
     const a = client()
     a.enqueueMany([{ data: run }, { data: company }, { data: null }])
-    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'bg_lb' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'bg_lb' })).toMatchObject({
       ok: false,
       code: 'BANKGIRO_MISSING',
     })
 
     const b = client()
     b.enqueueMany([{ data: run }, { data: company }, { data: { ...settings, bankgiro: '123-4567' } }])
-    expect(await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'bg_lb' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'bg_lb' })).toMatchObject({
       ok: false,
       code: 'BANKGIRO_INVALID',
       details: { field: 'bankgiro', value: '123-4567' },
@@ -165,7 +223,7 @@ describe('buildSalaryPaymentFile', () => {
   it('reports NO_EMPLOYEES for an empty roster', async () => {
     const { supabase, enqueueMany } = client()
     enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [] }])
-    expect(await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })).toMatchObject({
+    expect(await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })).toMatchObject({
       ok: false,
       code: 'NO_EMPLOYEES',
     })
@@ -181,7 +239,7 @@ describe('buildSalaryPaymentFile', () => {
     }
     const a = client()
     a.enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [anna, zeroNet] }, { data: null }])
-    const okResult = await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const okResult = await buildSalaryPaymentFile(a.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(okResult.ok).toBe(true)
     if (!okResult.ok) return
     expect(okResult.employeeCount).toBe(1)
@@ -190,7 +248,7 @@ describe('buildSalaryPaymentFile', () => {
     const noAccount = { ...anna, employee: { ...anna.employee, bank_account_number: null } }
     const b = client()
     b.enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [noAccount] }])
-    const blocked = await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const blocked = await buildSalaryPaymentFile(b.supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(blocked).toMatchObject({
       ok: false,
       code: 'EMPLOYEE_BANK_MISSING',
@@ -208,7 +266,7 @@ describe('buildSalaryPaymentFile', () => {
       { data: [{ ...anna, tax_withheld_override: 5500 }] },
       { data: null },
     ])
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.totalAmount).toBe(20500)
@@ -219,7 +277,7 @@ describe('buildSalaryPaymentFile', () => {
     const badClearing = { ...anna, employee: { ...anna.employee, clearing_number: '12' } }
     const { supabase, enqueueMany, calls } = client()
     enqueueMany([{ data: run }, { data: company }, { data: settings }, { data: [badClearing] }])
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(result).toMatchObject({ ok: false, code: 'GENERATOR_FAILED' })
     if (result.ok) return
     expect(String(result.details.message)).toContain('clearingnummer')
@@ -232,6 +290,7 @@ describe('buildSalaryPaymentFile', () => {
     const result = await buildSalaryPaymentFile(supabase, {
       companyId: COMPANY_ID,
       runId: RUN_ID,
+      userId: USER_ID,
       format: 'pain001',
       dryRun: true,
     })
@@ -240,13 +299,35 @@ describe('buildSalaryPaymentFile', () => {
     expect(result.content).toContain('<Document')
     expect(result.generatedAt).toBeNull()
     expect(result.stamped).toBe(false)
+    // The digest is a pure function of the content, so the preview carries
+    // it; nothing is archived and nothing is stamped.
+    expect(result.sha256).toBe(digest(result.content, 'utf8'))
+    expect(result.paymentFileId).toBeNull()
+    expect(calls.filter((c) => c.method === 'insert')).toHaveLength(0)
+    expect(calls.filter((c) => c.method === 'update')).toHaveLength(0)
+  })
+
+  it('fails with ARCHIVE_FAILED and never stamps when the archive insert fails', async () => {
+    const { supabase, enqueueMany, calls } = client()
+    enqueueMany([
+      { data: run },
+      { data: company },
+      { data: settings },
+      { data: [anna] },
+      { data: null, error: { code: '42501', message: 'permission denied' } },
+    ])
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
+    expect(result).toMatchObject({ ok: false, code: 'ARCHIVE_FAILED', format: 'pain001' })
+    if (result.ok) return
+    expect(result.cause).toMatchObject({ code: '42501' })
+    // The file must not be handed out unarchived, and the run is not stamped.
     expect(calls.filter((c) => c.method === 'update')).toHaveLength(0)
   })
 
   it('returns DB_ERROR with the stage when a read fails', async () => {
     const { supabase, enqueueMany } = client()
     enqueueMany([{ data: null, error: { code: 'XX000', message: 'boom' } }])
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(result).toMatchObject({ ok: false, code: 'DB_ERROR', stage: 'run' })
   })
 
@@ -257,9 +338,10 @@ describe('buildSalaryPaymentFile', () => {
       { data: company },
       { data: settings },
       { data: [anna] },
+      { data: null }, // archive insert succeeds
       { data: null, error: { code: '42501', message: 'permission denied' } },
     ])
-    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, { companyId: COMPANY_ID, runId: RUN_ID, userId: USER_ID, format: 'pain001' })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.stamped).toBe(false)

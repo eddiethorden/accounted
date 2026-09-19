@@ -98,6 +98,16 @@ const SAMPLE_DAY = {
 
 const OWNER_MEMBERSHIP = { data: { company_id: COMPANY_ID, role: 'owner' }, error: null }
 
+/** April 2026 pay month, booked, reading March ("previous_month"): locks 2026-03-01..31. */
+const BOOKED_RUN_APRIL_READS_MARCH = {
+  id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  status: 'booked',
+  period_year: 2026,
+  period_month: 4,
+  deviation_period_start: '2026-03-01',
+  deviation_period_end: '2026-03-31',
+}
+
 function makeRequest(url: string, init?: RequestInit): Request {
   return new Request(url, {
     ...init,
@@ -389,6 +399,32 @@ describe('PUT /api/v1/companies/:companyId/employees/:id/worked-days', () => {
     const body = await res.json()
     expect(body.error.code).toBe('ABSENCE_HOURS_CONFLICT')
     expect(body.error.details.message).toMatch(/Total tid/)
+  })
+
+  it('refuses dates a booked run has already read through its deviation window: 409 SALARY_REGISTER_DATES_LOCKED_BY_RUN, nothing written', async () => {
+    const supabaseMock = makeFlexibleSupabase({
+      company_members: OWNER_MEMBERSHIP,
+      employees: { data: { id: EMPLOYEE_ID }, error: null },
+      salary_runs: { data: [BOOKED_RUN_APRIL_READS_MARCH], error: null },
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await putWorkedDays(
+      makeRequest(BASE, { method: 'PUT', body: JSON.stringify(validBody) }),
+      routeParams(COMPANY_ID, EMPLOYEE_ID),
+    )
+
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.error.code).toBe('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+    expect(body.error.details).toMatchObject({
+      salary_run_id: BOOKED_RUN_APRIL_READS_MARCH.id,
+      status: 'booked',
+      deviation_period_start: '2026-03-01',
+      deviation_period_end: '2026-03-31',
+      locked_dates: ['2026-03-02', '2026-03-03'],
+    })
+    expect(supabaseMock.tableCalls).not.toContain('salary_worked_days')
   })
 
   it('returns 404 EMPLOYEE_NOT_FOUND without writing', async () => {

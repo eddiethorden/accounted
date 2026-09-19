@@ -332,8 +332,9 @@ describe('deriveAbsenceLineItems: karens cap, carry and partial days', () => {
   )
 
   it('counts whole dates, not weighted hours, toward the 120-day semestergrundande cap', () => {
-    // 119 dates YTD plus two half days: 121 dates, so no longer
-    // semestergrundande, even though the weighted deduction is one day.
+    // 119 dates YTD plus two half days: the first half day is date 120 and
+    // still semestergrundande, the second is date 121 and is not. The
+    // weighted deduction is one day in total, split half and half.
     const result = deriveAbsenceLineItems(
       baseInput({
         vabDaysYtd: 119,
@@ -343,9 +344,16 @@ describe('deriveAbsenceLineItems: karens cap, carry and partial days', () => {
         ],
       }),
     )
-    const vab = result.lineItems.find(li => li.item_type === 'vab')!
-    expect(vab.quantity).toBe(1)
-    expect(vab.is_vacation_basis).toBe(false)
+    const vab = result.lineItems.filter(li => li.item_type === 'vab')
+    expect(vab).toHaveLength(2)
+    expect(vab[0]).toMatchObject({ quantity: 0.5, is_vacation_basis: true, description: 'VAB (1 dagar)' })
+    expect(vab[1]).toMatchObject({
+      quantity: 0.5,
+      is_vacation_basis: false,
+      description: 'VAB (1 dagar, ej semestergrundande)',
+    })
+    expect(r2(vab[0].amount + vab[1].amount)).toBe(-1428.58) // 2 x r(714.285), one öre off the whole day
+    expect(result.aggregated.vabDays).toBe(2)
   })
 
   it('uses the employee schedule for the day length and never counts more than a day', () => {
@@ -372,10 +380,12 @@ describe('deriveAbsenceLineItems: VAB', () => {
         ]),
       }),
     )
-    const vab = result.lineItems.find(li => li.item_type === 'vab')
-    expect(vab).toBeDefined()
-    expect(vab!.quantity).toBe(2)
-    expect(vab!.is_vacation_basis).toBe(true) // ≤120 days YTD
+    const vab = result.lineItems.filter(li => li.item_type === 'vab')
+    expect(vab).toHaveLength(1)
+    expect(vab[0].quantity).toBe(2)
+    expect(vab[0].amount).toBe(-2857.14)
+    expect(vab[0].description).toBe('VAB (2 dagar)')
+    expect(vab[0].is_vacation_basis).toBe(true) // ≤120 days YTD
     expect(result.aggregated.vabDays).toBe(2)
   })
 
@@ -386,8 +396,131 @@ describe('deriveAbsenceLineItems: VAB', () => {
         vabDaysYtd: 120,
       }),
     )
-    const vab = result.lineItems.find(li => li.item_type === 'vab')
-    expect(vab!.is_vacation_basis).toBe(false)
+    const vab = result.lineItems.filter(li => li.item_type === 'vab')
+    expect(vab).toHaveLength(1)
+    expect(vab[0].is_vacation_basis).toBe(false)
+    expect(vab[0].quantity).toBe(1)
+    expect(vab[0].description).toBe('VAB (1 dagar, ej semestergrundande)')
+  })
+})
+
+// SemL 17 § (VAB) and 17 a § (parental leave): 120 calendar dates. The same
+// split rule serves both; the table carries what differs.
+const capCases = [
+  {
+    label: 'VAB',
+    absence_type: 'vab' as const,
+    item_type: 'vab' as const,
+    ytd: (n: number): Partial<DeriveInput> => ({ vabDaysYtd: n }),
+  },
+  {
+    label: 'Föräldraledighet',
+    absence_type: 'parental' as const,
+    item_type: 'parental_leave' as const,
+    ytd: (n: number): Partial<DeriveInput> => ({ parentalDaysPregnancyYtd: n }),
+  },
+]
+
+describe.each(capCases)('deriveAbsenceLineItems: 120-date cap split ($label)', ({ label, absence_type, item_type, ytd }) => {
+  const twoDates = () => days([
+    ['2026-07-01', absence_type],
+    ['2026-07-02', absence_type],
+  ])
+
+  it('splits the row when the 120th date falls inside the period', () => {
+    // 119 dates YTD: July 1 is date 120 (still semestergrundande), July 2 is
+    // date 121 (not). One row per part, amounts add up to the unsplit row.
+    const split = deriveAbsenceLineItems(baseInput({ ...ytd(119), periodDays: twoDates() }))
+    const whole = deriveAbsenceLineItems(baseInput({ ...ytd(0), periodDays: twoDates() }))
+    const rows = split.lineItems.filter(li => li.item_type === item_type)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toEqual({
+      item_type,
+      description: `${label} (1 dagar)`,
+      quantity: 1,
+      amount: -1428.57,
+      is_taxable: true,
+      is_avgift_basis: true,
+      is_vacation_basis: true,
+      is_gross_deduction: true,
+    })
+    expect(rows[1]).toEqual({
+      item_type,
+      description: `${label} (1 dagar, ej semestergrundande)`,
+      quantity: 1,
+      amount: -1428.57,
+      is_taxable: true,
+      is_avgift_basis: true,
+      is_vacation_basis: false,
+      is_gross_deduction: true,
+    })
+    const wholeRows = whole.lineItems.filter(li => li.item_type === item_type)
+    expect(wholeRows).toHaveLength(1)
+    expect(r2(rows[0].amount + rows[1].amount)).toBe(wholeRows[0].amount)
+    // The reported date count stays the whole period.
+    expect(split.aggregated).toEqual(whole.aggregated)
+  })
+
+  it('keeps one qualifying row when the period ends exactly on date 120', () => {
+    // 118 dates YTD plus two half days: dates 119 and 120, both qualify.
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        ...ytd(118),
+        periodDays: [
+          { absence_date: '2026-07-01', absence_type, hours: 4 },
+          { absence_date: '2026-07-02', absence_type, hours: 4 },
+        ],
+      }),
+    )
+    const rows = result.lineItems.filter(li => li.item_type === item_type)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].quantity).toBe(1)
+    expect(rows[0].is_vacation_basis).toBe(true)
+    expect(rows[0].description).toBe(`${label} (2 dagar)`)
+  })
+
+  it('emits one non-qualifying row when the cap was already reached', () => {
+    const result = deriveAbsenceLineItems(
+      baseInput({ ...ytd(120), periodDays: days([['2026-07-01', absence_type]]) }),
+    )
+    const rows = result.lineItems.filter(li => li.item_type === item_type)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].quantity).toBe(1)
+    expect(rows[0].amount).toBe(-1428.57)
+    expect(rows[0].is_vacation_basis).toBe(false)
+    expect(rows[0].description).toBe(`${label} (1 dagar, ej semestergrundande)`)
+  })
+
+  it('walks the rows in date order regardless of input order', () => {
+    // July 2 (a full day) is listed first, July 1 (a half day) second. Date
+    // 120 is July 1, so the qualifying part must be the half day.
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        ...ytd(119),
+        periodDays: [
+          { absence_date: '2026-07-02', absence_type, hours: 8 },
+          { absence_date: '2026-07-01', absence_type, hours: 4 },
+        ],
+      }),
+    )
+    const rows = result.lineItems.filter(li => li.item_type === item_type)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ quantity: 0.5, is_vacation_basis: true })
+    expect(rows[1]).toMatchObject({ quantity: 1, is_vacation_basis: false })
+  })
+
+  it('does not disturb the other absence rows', () => {
+    // A sick day and an unpaid day next to a split period: the split adds
+    // exactly one row and leaves everything else as it was.
+    const other = days([
+      ['2026-07-06', 'sick'],
+      ['2026-07-07', 'unpaid_leave'],
+    ])
+    const split = deriveAbsenceLineItems(baseInput({ ...ytd(119), periodDays: [...other, ...twoDates()] }))
+    const whole = deriveAbsenceLineItems(baseInput({ ...ytd(0), periodDays: [...other, ...twoDates()] }))
+    const others = (items: typeof split.lineItems) => items.filter(li => li.item_type !== item_type)
+    expect(others(split.lineItems)).toEqual(others(whole.lineItems))
+    expect(split.lineItems.length).toBe(whole.lineItems.length + 1)
   })
 })
 

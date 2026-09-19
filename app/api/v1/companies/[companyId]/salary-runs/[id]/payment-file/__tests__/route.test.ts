@@ -7,6 +7,7 @@
  * client are mocked.
  */
 
+import { createHash } from 'crypto'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 beforeAll(() => {
@@ -166,6 +167,17 @@ function happyTables(overrides: Record<string, TableResp | TableResp[]> = {}) {
 function stampCalls(calls: RecordedCall[]) {
   return calls.filter((c) => c.table === 'salary_runs' && c.method === 'update')
 }
+
+function archiveCalls(calls: RecordedCall[]) {
+  return calls.filter((c) => c.table === 'salary_payment_files' && c.method === 'insert')
+}
+
+/** SHA-256 hex over `content` encoded the way the download sends it. */
+function digest(content: string, encoding: 'utf8' | 'latin1'): string {
+  return createHash('sha256').update(Buffer.from(content, encoding)).digest('hex')
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -407,6 +419,54 @@ describe('POST /salary-runs/:id/payment-file', () => {
     const payload = stamps[0].args[0] as Record<string, unknown>
     expect(payload.payment_file_format).toBe('pain001')
     expect(typeof payload.payment_file_generated_at).toBe('string')
+
+    // Archived (BFL 7 kap. 1 §): one salary_payment_files row with the exact
+    // content, before the stamp; the response identifies it.
+    expect(body.data.payment_file_id).toMatch(UUID)
+    expect(body.data.sha256).toBe(digest(xml, 'utf8'))
+    const archives = archiveCalls(calls)
+    expect(archives).toHaveLength(1)
+    expect(archives[0].args[0]).toMatchObject({
+      id: body.data.payment_file_id,
+      company_id: COMPANY_ID,
+      salary_run_id: RUN_ID,
+      user_id: USER_ID,
+      format: 'pain001',
+      filename: 'pain001_lon_2026-05.xml',
+      content_type: 'application/xml',
+      charset: 'utf-8',
+      content: xml,
+      sha256: body.data.sha256,
+      byte_size: Buffer.byteLength(xml, 'utf8'),
+      payment_date: '2026-05-25',
+      employee_count: 1,
+      total_amount: 25000,
+      generated_at: body.data.generated_at,
+    })
+    // Archive before stamp (the trailing idempotency_keys insert is the
+    // wrapper's response cache, not part of the file flow).
+    const writeOrder = calls
+      .filter((c) => ['salary_payment_files', 'salary_runs'].includes(c.table))
+      .filter((c) => c.method === 'insert' || c.method === 'update')
+      .map((c) => `${c.table}.${c.method}`)
+    expect(writeOrder).toEqual(['salary_payment_files.insert', 'salary_runs.update'])
+  })
+
+  it('withholds the file and does not stamp when the archive insert fails', async () => {
+    const { supabase, calls } = makeRecordingSupabase(
+      happyTables({
+        salary_payment_files: { data: null, error: { code: '42501', message: 'permission denied' } },
+      }),
+    )
+    mockServiceClient.mockReturnValue(supabase)
+
+    const res = await paymentFile(makeRequest(URL), detailParams(COMPANY_ID, RUN_ID))
+    expect(res.status).toBeGreaterThanOrEqual(400)
+    const body = await res.json()
+    expect(body.error).toBeDefined()
+    expect(body.data).toBeUndefined()
+    expect(archiveCalls(calls)).toHaveLength(1)
+    expect(stampCalls(calls)).toHaveLength(0)
   })
 
   it('honors a tax_withheld_override in the paid amount', async () => {
@@ -458,6 +518,22 @@ describe('POST /salary-runs/:id/payment-file', () => {
     const stamps = stampCalls(calls)
     expect(stamps).toHaveLength(1)
     expect((stamps[0].args[0] as Record<string, unknown>).payment_file_format).toBe('bg_lb')
+
+    // The LB archive digest is over ISO 8859-1 bytes, the encoding the
+    // dashboard download re-encodes to, not over the UTF-8 form.
+    expect(body.data.payment_file_id).toMatch(UUID)
+    expect(body.data.sha256).toBe(digest(lb, 'latin1'))
+    const archives = archiveCalls(calls)
+    expect(archives).toHaveLength(1)
+    expect(archives[0].args[0]).toMatchObject({
+      format: 'bg_lb',
+      filename: 'bg_lb_lon_2026-05.txt',
+      content_type: 'text/plain',
+      charset: 'iso-8859-1',
+      content: lb,
+      sha256: body.data.sha256,
+      byte_size: Buffer.byteLength(lb, 'latin1'),
+    })
   })
 
   it('dry run returns the preview without content and performs no write', async () => {

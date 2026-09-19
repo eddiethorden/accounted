@@ -17,9 +17,15 @@
  * The calculation engine (lib/salary/run-calculation.ts) reads these rows by
  * the run's deviation window (deviation_period_start..end), not the pay
  * month, so hours must be registered on the dates they were worked.
+ *
+ * Every write first checks the register lock (lib/salary/register-locks.ts):
+ * dates a run in review, approved, paid or booked has already read through
+ * its deviation window are refused with SALARY_REGISTER_DATES_LOCKED_BY_RUN,
+ * dry runs included. Draft runs and corrected originals never lock.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { assertRegisterDatesUnlocked, assertRegisterRangeUnlocked } from './register-locks'
 
 export type WorkedDaysResult<T> =
   | { ok: true; data: T }
@@ -203,6 +209,9 @@ export async function replaceWorkedDay(
   const emp = await assertWorkedDaysEmployee(supabase, args.companyId, args.employeeId)
   if (!emp.ok) return emp
 
+  const locked = await assertRegisterDatesUnlocked(supabase, args.companyId, [args.day.work_date])
+  if (locked) return locked
+
   const { error: deleteError } = await supabase
     .from('salary_worked_days')
     .delete()
@@ -284,6 +293,15 @@ export async function upsertWorkedDays(
     }
   }
 
+  // Checked before the dry-run branch on purpose: a preview must report the
+  // lock, that is what the preview is for. An empty list never queries.
+  const locked = await assertRegisterDatesUnlocked(
+    supabase,
+    args.companyId,
+    args.days.map((day) => day.work_date),
+  )
+  if (locked) return locked
+
   const rows = args.days.map((day) => toRow(day, args.companyId, args.employeeId))
 
   if (args.dryRun) {
@@ -332,6 +350,11 @@ export async function deleteWorkedDaysRange(
 ): Promise<WorkedDaysResult<{ deleted_count: number }>> {
   const emp = await assertWorkedDaysEmployee(supabase, args.companyId, args.employeeId)
   if (!emp.ok) return emp
+
+  // Computed from the range, not from the rows it would delete: one query,
+  // and the dry run reports the lock too.
+  const locked = await assertRegisterRangeUnlocked(supabase, args.companyId, args.from, args.to)
+  if (locked) return locked
 
   if (args.dryRun) {
     // Count what WOULD be deleted so the preview is informative.

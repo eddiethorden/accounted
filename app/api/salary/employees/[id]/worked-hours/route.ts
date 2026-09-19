@@ -8,6 +8,7 @@ import {
   WorkedHoursRangeQuerySchema,
 } from '@/lib/api/schemas'
 import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-message'
+import { getErrorEntry } from '@/lib/errors/structured-errors'
 import {
   deleteWorkedDaysRange,
   listWorkedDays,
@@ -26,6 +27,10 @@ ensureInitialized()
  * `conflictStatus` is set by the write path: the 24h cap trigger
  * (check_violation) surfaces as a clean 409 with a Swedish message, and any
  * other CHECK violation keeps that status too.
+ *
+ * The register lock is a 409 of its own regardless of path: a run in review,
+ * approved, paid or booked has already read the date. The registry message
+ * says how to get out (revert or correct the run) and details name the run.
  */
 function failureResponse(
   failure: { code: string; details?: Record<string, unknown> },
@@ -33,6 +38,13 @@ function failureResponse(
 ) {
   if (failure.code === 'EMPLOYEE_NOT_FOUND') {
     return NextResponse.json({ error: 'Anställd hittades inte' }, { status: 404 })
+  }
+  if (failure.code === 'SALARY_REGISTER_DATES_LOCKED_BY_RUN') {
+    const entry = getErrorEntry(failure.code)
+    return NextResponse.json(
+      { error: entry?.message_sv ?? 'Datumen är låsta av en lönekörning', code: failure.code, details: failure.details },
+      { status: entry?.httpStatus ?? 409 },
+    )
   }
   const pgError = { code: failure.details?.pg_code, message: failure.details?.message }
   const isConflict =

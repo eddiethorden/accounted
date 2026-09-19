@@ -2,8 +2,10 @@
  * Unit tests for lib/salary/worked-days.ts.
  *
  * Range span helper, natural-key bulk upsert (one statement, onConflict on
- * the unique index), single-day replace, 24h-trigger mapping, and range
- * deletes with counts.
+ * the unique index), single-day replace, 24h-trigger mapping, range deletes
+ * with counts, and the register lock: a run in review/approved/paid/booked
+ * that already read the dates refuses the write
+ * (SALARY_REGISTER_DATES_LOCKED_BY_RUN), dry runs included.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,8 +37,21 @@ const ROW = {
   updated_at: '2026-03-02T00:00:00Z',
 }
 
+/** April 2026 pay month, booked, reading March ("previous_month"): locks 2026-03-01..31 only. */
+const BOOKED_RUN_APRIL_READS_MARCH = {
+  id: 'run-apr',
+  status: 'booked',
+  period_year: 2026,
+  period_month: 4,
+  deviation_period_start: '2026-03-01',
+  deviation_period_end: '2026-03-31',
+}
+
 let mock: ReturnType<typeof createQueuedMockSupabase>
 let supabase: SupabaseClient
+
+/** The register-lock lookup every write makes right after the employee check. */
+const enqueueNoLockingRuns = () => mock.enqueue({ data: [] })
 
 const fromCalls = () =>
   (mock.supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
@@ -195,6 +210,7 @@ describe('upsertWorkedDays', () => {
 
   it('bulk-upserts every day in one statement on the unique index', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: [ROW, { ...ROW, id: '22222222-2222-4222-8222-222222222222', work_date: '2026-03-03', hours: 4 }] })
 
     const result = await upsertWorkedDays(supabase, {
@@ -208,7 +224,7 @@ describe('upsertWorkedDays', () => {
       expect(result.data.count).toBe(2)
       expect(result.data.days).toHaveLength(2)
     }
-    expect(fromCalls()).toEqual(['employees', 'salary_worked_days'])
+    expect(fromCalls()).toEqual(['employees', 'salary_runs', 'salary_worked_days'])
 
     const upsert = mock.findCall('salary_worked_days', 'upsert')
     expect(upsert).toBeDefined()
@@ -243,6 +259,7 @@ describe('upsertWorkedDays', () => {
 
   it('dry-run echoes the would-be rows without touching salary_worked_days', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
 
     const result = await upsertWorkedDays(supabase, {
       companyId: COMPANY_ID,
@@ -262,7 +279,66 @@ describe('upsertWorkedDays', () => {
         notes: null,
       })
     }
-    expect(fromCalls()).toEqual(['employees'])
+    expect(fromCalls()).toEqual(['employees', 'salary_runs'])
+  })
+
+  it('refuses dates a booked run has already read through its stored window, without writing', async () => {
+    mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    mock.enqueue({ data: [BOOKED_RUN_APRIL_READS_MARCH] })
+
+    const result = await upsertWorkedDays(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      days: [
+        { work_date: '2026-03-31', hours: 8 },
+        { work_date: '2026-04-01', hours: 8 },
+      ],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+      expect(result.details).toEqual({
+        salary_run_id: 'run-apr',
+        status: 'booked',
+        period_year: 2026,
+        period_month: 4,
+        deviation_period_start: '2026-03-01',
+        deviation_period_end: '2026-03-31',
+        locked_dates: ['2026-03-31'],
+      })
+    }
+    expect(fromCalls()).toEqual(['employees', 'salary_runs'])
+  })
+
+  it('reports the lock on a dry run too: that is what the preview is for', async () => {
+    mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    mock.enqueue({ data: [BOOKED_RUN_APRIL_READS_MARCH] })
+
+    const result = await upsertWorkedDays(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      days: [{ work_date: '2026-03-02', hours: 8 }],
+      dryRun: true,
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+  })
+
+  it('does not lock the pay month of a run whose stored window is the month before', async () => {
+    mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    mock.enqueue({ data: [BOOKED_RUN_APRIL_READS_MARCH] })
+    mock.enqueue({ data: [{ ...ROW, work_date: '2026-04-01' }] })
+
+    const result = await upsertWorkedDays(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      days: [{ work_date: '2026-04-01', hours: 8 }],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fromCalls()).toEqual(['employees', 'salary_runs', 'salary_worked_days'])
   })
 
   it('returns count 0 and skips the write for an empty list', async () => {
@@ -320,6 +396,7 @@ describe('upsertWorkedDays', () => {
 
   it('maps the 24h-cap trigger (23514, "Total tid") to WORKED_HOURS_CONFLICT', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({
       data: null,
       error: { code: '23514', message: 'Total tid (arbete + frånvaro) för 2026-03-02 får inte överstiga 24 timmar' },
@@ -340,6 +417,7 @@ describe('upsertWorkedDays', () => {
 
   it('maps a non-24h CHECK violation (23514) to VALIDATION_ERROR', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({
       data: null,
       error: {
@@ -360,6 +438,7 @@ describe('upsertWorkedDays', () => {
 
   it('maps an RLS/privilege denial (42501) to DB_PERMISSION_DENIED', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({
       data: null,
       error: { code: '42501', message: 'new row violates row-level security policy for table "salary_worked_days"' },
@@ -380,6 +459,7 @@ describe('upsertWorkedDays', () => {
 
   it('keeps unrecognized DB errors as INTERNAL_ERROR', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } })
 
     const result = await upsertWorkedDays(supabase, {
@@ -396,6 +476,7 @@ describe('upsertWorkedDays', () => {
 describe('replaceWorkedDay', () => {
   it('deletes the day then inserts the full row, returning the stored row', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null }) // delete
     mock.enqueue({ data: ROW }) // insert ... select().single()
 
@@ -407,7 +488,7 @@ describe('replaceWorkedDay', () => {
 
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.id).toBe(ROW.id)
-    expect(fromCalls()).toEqual(['employees', 'salary_worked_days', 'salary_worked_days'])
+    expect(fromCalls()).toEqual(['employees', 'salary_runs', 'salary_worked_days', 'salary_worked_days'])
     expect(mock.findCall('salary_worked_days', 'delete')).toBeDefined()
     expect(mock.findCall('salary_worked_days', 'insert')?.[0]).toEqual({
       company_id: COMPANY_ID,
@@ -423,6 +504,7 @@ describe('replaceWorkedDay', () => {
 
   it('stores NULL times when the shift window is omitted', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null })
     mock.enqueue({ data: { ...ROW, start_time: null, end_time: null } })
 
@@ -440,6 +522,7 @@ describe('replaceWorkedDay', () => {
 
   it('maps the 24h-cap trigger on the insert to WORKED_HOURS_CONFLICT', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null })
     mock.enqueue({ data: null, error: { code: '23514', message: 'Total tid över 24h' } })
 
@@ -455,6 +538,7 @@ describe('replaceWorkedDay', () => {
 
   it('maps a failed delete to INTERNAL_ERROR and never inserts', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null, error: { code: '08006', message: 'connection reset' } })
 
     const result = await replaceWorkedDay(supabase, {
@@ -467,11 +551,32 @@ describe('replaceWorkedDay', () => {
     if (!result.ok) expect(result.code).toBe('INTERNAL_ERROR')
     expect(mock.findCall('salary_worked_days', 'insert')).toBeUndefined()
   })
+
+  it('refuses a day a booked run has already read: neither delete nor insert runs', async () => {
+    mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    mock.enqueue({ data: [BOOKED_RUN_APRIL_READS_MARCH] })
+
+    const result = await replaceWorkedDay(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      day: { work_date: '2026-03-02', hours: 8 },
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+      expect(result.details).toMatchObject({ salary_run_id: 'run-apr', locked_dates: ['2026-03-02'] })
+    }
+    expect(fromCalls()).toEqual(['employees', 'salary_runs'])
+    expect(mock.findCall('salary_worked_days', 'delete')).toBeUndefined()
+    expect(mock.findCall('salary_worked_days', 'insert')).toBeUndefined()
+  })
 })
 
 describe('deleteWorkedDaysRange', () => {
   it('deletes the range with company + employee filters and reports the count', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null, count: 3 })
 
     const result = await deleteWorkedDaysRange(supabase, {
@@ -493,6 +598,7 @@ describe('deleteWorkedDaysRange', () => {
 
   it('dry-run counts without deleting', async () => {
     mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    enqueueNoLockingRuns()
     mock.enqueue({ data: null, count: 2 })
 
     const result = await deleteWorkedDaysRange(supabase, {
@@ -518,5 +624,28 @@ describe('deleteWorkedDaysRange', () => {
     })
     expect(result).toEqual({ ok: false, code: 'EMPLOYEE_NOT_FOUND' })
     expect(fromCalls()).toEqual(['employees'])
+  })
+
+  it('refuses a range delete that overlaps a locked window, computed from the range in one query', async () => {
+    mock.enqueue({ data: { id: EMPLOYEE_ID } })
+    mock.enqueue({ data: [BOOKED_RUN_APRIL_READS_MARCH] })
+
+    const result = await deleteWorkedDaysRange(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      from: '2026-03-30',
+      to: '2026-04-02',
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+      expect(result.details).toMatchObject({
+        salary_run_id: 'run-apr',
+        locked_dates: ['2026-03-30', '2026-03-31'],
+      })
+    }
+    expect(fromCalls()).toEqual(['employees', 'salary_runs'])
+    expect(mock.findCall('salary_worked_days', 'delete')).toBeUndefined()
   })
 })

@@ -703,6 +703,7 @@ describe('company migration reset RPCs (pg)', () => {
         'company_settings',
         'rot_rut_payout_requests',
         'salary_line_items',
+        'salary_payment_files',
         'salary_run_employees',
         'salary_runs',
         'skatteverket_api_audit_log',

@@ -131,6 +131,7 @@ import '@/app/api/v1/companies/[companyId]/salary/vacation-year-close/route'
 import '@/app/api/v1/companies/[companyId]/salary/settings/route'
 import '@/app/api/v1/companies/[companyId]/employees/[id]/worked-days/route'
 import '@/app/api/v1/companies/[companyId]/salary-runs/[id]/payment-file/route'
+import '@/app/api/v1/companies/[companyId]/salary-runs/[id]/payment-files/route'
 
 // Payroll gap-closure 5: employee benefits, recurring lines, rättelsekörning.
 import '@/app/api/v1/companies/[companyId]/employees/[id]/benefits/route'

@@ -228,7 +228,8 @@ registerEndpoint({
     'For hourly employees the run\'s gross is derived from these rows (hourly_rate x sum(hours)): PATCH /salary-runs/{id}/employees/{employeeId} monthly_salary is irrelevant for them.',
     'start_time/end_time feed the OB/shift-premium rules: a row without them is priced as an assumed 08:00-17:00 day, so a night or weekend shift earns no premium. Times are HH:MM or HH:MM:SS; end_time before start_time means the shift crosses midnight.',
     'Worked hours plus absence hours on one date may not exceed 24 (DB trigger, shared with absence): the whole PUT is rejected with 409 ABSENCE_HOURS_CONFLICT, nothing is written.',
-    'Registering hours does not recompute an open salary run: call POST /salary-runs/{id}/calculate afterwards.',
+    'Dates inside the avvikelseperiod (deviation window, deviation_period_start..deviation_period_end, NULL = the pay month) of a run that is already calculated (review), approved, paid or booked are locked: 409 SALARY_REGISTER_DATES_LOCKED_BY_RUN naming the run (details.salary_run_id, details.status, details.locked_dates), nothing written, dry runs included. The way out is to revert that run to draft (dashboard) or, for a booked run, POST /salary-runs/{id}/correct and register the days against the correction run. Draft runs never lock.',
+    'Registering hours does not recompute a draft salary run: call POST /salary-runs/{id}/calculate afterwards.',
   ],
   example: {
     request: {
@@ -329,10 +330,11 @@ registerEndpoint({
   useWhen:
     'Hours were pushed for the wrong employee or the wrong dates, or a time-tracking re-sync needs a clean period before a fresh PUT.',
   doNotUseFor:
-    'Correcting hours on a day: PUT the day again instead. Rows already consumed by a BOOKED run: deleting them does not un-book the run; use the run correction flow.',
+    'Correcting hours on a day: PUT the day again instead. Rows a calculated, approved, paid or booked run has already read: the delete is refused (409 SALARY_REGISTER_DATES_LOCKED_BY_RUN); use the run correction flow.',
   pitfalls: [
     'deleted_count: 0 with a 200 means nothing matched: not an error.',
-    'Hours a calculated (not yet booked) run has already summed stay in the run until POST /salary-runs/{id}/calculate is called again.',
+    'Dates inside the avvikelseperiod (deviation window, deviation_period_start..deviation_period_end, NULL = the pay month) of a run that is already calculated (review), approved, paid or booked are locked: 409 SALARY_REGISTER_DATES_LOCKED_BY_RUN naming the run (details.salary_run_id, details.status, details.locked_dates), nothing written, dry runs included. The way out is to revert that run to draft (dashboard) or, for a booked run, POST /salary-runs/{id}/correct and register the days against the correction run. Draft runs never lock.',
+    'Hours a draft run has already summed stay in the run until POST /salary-runs/{id}/calculate is called again.',
   ],
   example: {
     response: {

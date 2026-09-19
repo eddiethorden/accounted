@@ -25,10 +25,16 @@
  * by a nettolöneavdrag) are left out of the file, so their bank details are
  * not required (see lib/salary/payment/effective-net.ts).
  *
- * Per BFL the generated file is räkenskapsinformation (underlag) linked to the
- * salary journal entry and subject to 7-year retention.
+ * Per BFL 7 kap. 1 § the generated file is räkenskapsinformation (underlag)
+ * linked to the salary journal entry and subject to 7-year retention, so on a
+ * live call the exact file is archived as a `salary_payment_files` row (WORM)
+ * before it is handed out: an archive failure is a hard error, the run stamp
+ * that follows is not. The archived sha256 / byte_size are over the bytes the
+ * HTTP layer sends (UTF-8 for pain.001, ISO 8859-1 for LB), so a bank-side
+ * copy can be verified against the archive.
  */
 
+import { createHash, randomUUID } from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
 import { getBranding } from '@/lib/branding/service'
@@ -54,6 +60,8 @@ export const SALARY_PAYMENT_FILE_ALLOWED_STATUSES = ['approved', 'paid', 'booked
 export interface BuildSalaryPaymentFileInput {
   companyId: string
   runId: string
+  /** The user generating the file; recorded on the archived row (who/when). */
+  userId: string
   /** Omit to use company_settings.preferred_payment_format (default pain001). */
   format?: SalaryPaymentFileFormat
   /**
@@ -76,6 +84,7 @@ export type SalaryPaymentFileErrorCode =
   | 'NO_EMPLOYEES'
   | 'EMPLOYEE_BANK_MISSING'
   | 'GENERATOR_FAILED'
+  | 'ARCHIVE_FAILED'
   | 'DB_ERROR'
 
 export type SalaryPaymentFileLoadStage = 'run' | 'company' | 'settings' | 'employees'
@@ -89,7 +98,7 @@ export interface SalaryPaymentFileError {
   stage?: SalaryPaymentFileLoadStage
   /** Machine-readable context for the caller's envelope. */
   details: Record<string, unknown>
-  /** The underlying error (DB_ERROR and GENERATOR_FAILED). */
+  /** The underlying error (DB_ERROR, ARCHIVE_FAILED and GENERATOR_FAILED). */
   cause?: unknown
 }
 
@@ -101,6 +110,13 @@ export interface SalaryPaymentFileOk {
   content: string
   contentType: 'application/xml' | 'text/plain'
   charset: 'utf-8' | 'iso-8859-1'
+  /**
+   * Lowercase hex SHA-256 over the file bytes as the HTTP layer sends them:
+   * `content` encoded as UTF-8 for pain001 and as ISO 8859-1 for bg_lb.
+   */
+  sha256: string
+  /** Size in bytes of the file in that same encoding. */
+  byteSize: number
   paymentDate: string
   periodLabel: string
   /** Employees that appear in the file (positive payout). */
@@ -112,6 +128,8 @@ export interface SalaryPaymentFileOk {
   generatedAt: string | null
   /** False when the stamp UPDATE failed or was skipped (dry run). The file is still returned. */
   stamped: boolean
+  /** Id of the archived salary_payment_files row; null on a dry run (nothing is archived). */
+  paymentFileId: string | null
 }
 
 export type SalaryPaymentFileResult = SalaryPaymentFileOk | SalaryPaymentFileError
@@ -349,12 +367,22 @@ export async function buildSalaryPaymentFile(
     )
   }
 
+  // Hash and size over the bytes the download sends, not over the JS string:
+  // the bg-lb route re-encodes to ISO 8859-1 (Buffer.from(content, 'latin1'))
+  // and pain.001 goes out as UTF-8, so the archived digest matches what the
+  // bank receives.
+  const bytes = Buffer.from(content, charset === 'utf-8' ? 'utf8' : 'latin1')
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const byteSize = bytes.length
+
   const base = {
     format,
     filename,
     content,
     contentType,
     charset,
+    sha256,
+    byteSize,
     paymentDate: runRow.payment_date,
     periodLabel,
     employeeCount: employees.length,
@@ -363,17 +391,42 @@ export async function buildSalaryPaymentFile(
   }
 
   if (input.dryRun) {
-    return { ok: true, ...base, generatedAt: null, stamped: false }
+    return { ok: true, ...base, generatedAt: null, stamped: false, paymentFileId: null }
   }
 
-  // Stamp the run. The file is räkenskapsinformation either way, so a failed
-  // stamp never withholds the file; callers log it.
+  // Archive first: the file is räkenskapsinformation (BFL 7 kap. 1 §) and
+  // must never be handed out unarchived, so a failed INSERT is a hard error.
+  // The id is minted here (no returning select needed) and the row's
+  // generated_at is the same instant the run is stamped with.
   const generatedAt = new Date().toISOString()
+  const paymentFileId = randomUUID()
+  const { error: archiveErr } = await supabase.from('salary_payment_files').insert({
+    id: paymentFileId,
+    company_id: companyId,
+    salary_run_id: runId,
+    user_id: input.userId,
+    format,
+    filename,
+    content_type: contentType,
+    charset,
+    content,
+    sha256,
+    byte_size: byteSize,
+    payment_date: runRow.payment_date,
+    employee_count: employees.length,
+    total_amount: totalAmount,
+    generated_at: generatedAt,
+  })
+  if (archiveErr) return fail('ARCHIVE_FAILED', format, {}, { cause: archiveErr })
+
+  // Stamp the run. The archive row above is the record; the stamp is
+  // bookkeeping about the run, so a failed UPDATE never withholds the file;
+  // callers log it.
   const { error: stampErr } = await supabase
     .from('salary_runs')
     .update({ payment_file_format: format, payment_file_generated_at: generatedAt })
     .eq('id', runId)
     .eq('company_id', companyId)
 
-  return { ok: true, ...base, generatedAt, stamped: !stampErr }
+  return { ok: true, ...base, generatedAt, stamped: !stampErr, paymentFileId }
 }

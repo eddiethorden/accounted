@@ -287,6 +287,9 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   'PATCH /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId': 'payroll:write',
   'DELETE /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId': 'payroll:write',
   'POST /api/v1/companies/:companyId/salary-runs/:id/correct': 'payroll:write',
+  // The archived payment files of a run (issue #2724): every generated
+  // pain.001 / LB file is räkenskapsinformation and kept 7 years.
+  'GET /api/v1/companies/:companyId/salary-runs/:id/payment-files': 'payroll:read',
 
   // Dimensions (kostnadsställe/projekt): dimensions PR2. Reads ride
   // reports:read (registry data feeds report filters/pickers); value creation
