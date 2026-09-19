@@ -19,12 +19,14 @@
  * tax-free). Every other type, bilförmån included, is stored as the schablon
  * value the caller supplies.
  *
- * Deletion is a hard delete, mirroring the dashboard. Because the provenance
- * column is ON DELETE SET NULL (migration 20260512200100), a deleted row's
- * derived payslip line on an already calculated run loses its back-link and
- * survives the next recalculation (#2695): deactivating (is_active=false) or
- * closing the window (valid_to) is the clean way to stop a benefit that a
- * run has consumed.
+ * Deletion is a hard delete only while nothing derives from the row. Once a
+ * payslip line references the benefit (source_benefit_id, ON DELETE SET NULL
+ * since migration 20260512200100), a hard delete would sever the chain from
+ * a possibly booked verifikat back to its förmån (BFL 5 kap 6-7 §, #2695),
+ * so the row is kept and switched off (is_active=false) instead, the same
+ * outcome the recurring-lines register gets from its NO ACTION foreign key.
+ * Closing the window (valid_to) remains the clean way to stop a benefit that a
+ * run has already consumed.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -66,7 +68,8 @@ export type EmployeeBenefitWriteOutcome<Preview> =
   | { committed: false; preview: Preview }
 
 export type EmployeeBenefitDeleteOutcome =
-  | { committed: true; deleted: boolean }
+  /** `deactivated`: payslip lines already derive from the row, so it was kept and switched off instead of deleted. */
+  | { committed: true; deleted: boolean; deactivated?: boolean }
   | { committed: false; preview: EmployeeBenefitRow }
 
 export type CreateEmployeeBenefitInput = z.infer<typeof CreateEmployeeBenefitSchema>
@@ -355,6 +358,11 @@ export async function updateEmployeeBenefit(
       data: { committed: false, preview: { ...existing, ...updates } as EmployeeBenefitRow },
     }
   }
+  // Nothing to change: PostgREST performs no update for an empty object and
+  // returns no row, which would read as NOT_FOUND. Answer with the stored row.
+  if (Object.keys(updates).length === 0) {
+    return { ok: true, data: { committed: true, row: existing } }
+  }
 
   const { data, error } = await supabase
     .from('employee_benefits')
@@ -417,6 +425,34 @@ export async function deleteEmployeeBenefit(
       return { ok: false, code: 'NOT_FOUND', details: NOT_FOUND_DETAILS }
     }
     return { ok: true, data: { committed: false, preview: data as unknown as EmployeeBenefitRow } }
+  }
+
+  // A benefit that already fed a payslip line stays: the line's provenance
+  // column is ON DELETE SET NULL, so a hard delete would sever the chain
+  // from a (possibly booked) verifikat back to its förmån (BFL 5 kap 6-7 §,
+  // #2695). Switch it off instead; recurring lines get the same outcome
+  // from their NO ACTION foreign key.
+  const { count: referencing, error: refError } = await supabase
+    .from('salary_line_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', args.companyId)
+    .eq('source_benefit_id', args.benefitId)
+  if (refError) {
+    return { ok: false, code: 'INTERNAL_ERROR', details: dbDetails(refError) }
+  }
+  if ((referencing ?? 0) > 0) {
+    const { data: kept, error: keepError } = await supabase
+      .from('employee_benefits')
+      .update({ is_active: false })
+      .eq('id', args.benefitId)
+      .eq('employee_id', args.employeeId)
+      .eq('company_id', args.companyId)
+      .select('id')
+    if (keepError) {
+      return { ok: false, ...mapWriteError(keepError) }
+    }
+    const found = Array.isArray(kept) && kept.length > 0
+    return { ok: true, data: { committed: true, deleted: false, deactivated: found } }
   }
 
   // Hard delete with RETURNING so the caller can tell a hit from a no-op:

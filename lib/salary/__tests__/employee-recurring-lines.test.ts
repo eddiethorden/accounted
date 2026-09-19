@@ -222,7 +222,7 @@ describe('createEmployeeRecurringLine', () => {
     expect(result).toEqual({
       ok: false,
       code: 'VALIDATION_ERROR',
-      details: { message: 'violates check constraint' },
+      details: { pg_code: '23514' },
       cause: pgError,
     })
   })

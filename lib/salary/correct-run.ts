@@ -42,7 +42,9 @@
  *     remaining stornos, so the verb can be called again until it succeeds.
  *   - Insert failure in step 5: every original entry is reversed, the run
  *     is already `corrected`, the payslip links are revoked, but no
- *     correction run exists. A unique-index conflict (23505,
+ *     correction run exists. Calling the verb again resumes at step 5 (the
+ *     run is `corrected` with no correction child), so the draft is created
+ *     without touching the ledger again. A unique-index conflict (23505,
  *     `SALARY_RUN_ALREADY_CORRECTED` with reason `period_conflict`) means a
  *     live run for the period already exists: in practice a concurrent
  *     correct call that won the insert, in which case that run IS the
@@ -99,7 +101,8 @@ export interface CorrectionSalaryRunRow extends Record<string, unknown> {
 export interface CorrectSalaryRunPreview {
   original_run: {
     id: string
-    status: 'booked'
+    /** `corrected` when the call resumes a correction whose draft was never created. */
+    status: 'booked' | 'corrected'
     period_year: number
     period_month: number
     payment_date: string
@@ -253,8 +256,12 @@ export async function correctSalaryRun(
   }
   const originalRun = runRow as CorrectableSalaryRunRow
 
+  // A run already marked `corrected` normally has its correction run; point
+  // the caller there. Without one, an earlier call reversed the entries and
+  // flipped the status but failed to insert the draft (or the draft was
+  // deleted): resume at step 5 instead of leaving the run uncorrectable.
+  let resume = false
   if (originalRun.status === 'corrected') {
-    // Point the caller at the correction so it can continue there.
     const { data: existing } = await supabase
       .from('salary_runs')
       .select('id')
@@ -263,17 +270,21 @@ export async function correctSalaryRun(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    return {
-      ok: false,
-      code: 'SALARY_RUN_ALREADY_CORRECTED',
-      details: {
-        current_status: originalRun.status,
-        correction_run_id: (existing as { id: string } | null)?.id ?? null,
-        reason: 'status_corrected',
-      },
+    const existingId = (existing as { id: string } | null)?.id ?? null
+    if (existingId) {
+      return {
+        ok: false,
+        code: 'SALARY_RUN_ALREADY_CORRECTED',
+        details: {
+          current_status: originalRun.status,
+          correction_run_id: existingId,
+          reason: 'status_corrected',
+        },
+      }
     }
+    resume = true
   }
-  if (originalRun.status !== 'booked') {
+  if (!resume && originalRun.status !== 'booked') {
     return {
       ok: false,
       code: 'SALARY_RUN_CORRECT_NOT_BOOKED',
@@ -290,7 +301,7 @@ export async function correctSalaryRun(
       preview: {
         original_run: {
           id: originalRun.id,
-          status: 'booked',
+          status: resume ? 'corrected' : 'booked',
           period_year: originalRun.period_year,
           period_month: originalRun.period_month,
           payment_date: originalRun.payment_date,
@@ -298,7 +309,7 @@ export async function correctSalaryRun(
           deviation_period_start: originalRun.deviation_period_start ?? null,
           deviation_period_end: originalRun.deviation_period_end ?? null,
         },
-        entries_to_reverse: entryIds,
+        entries_to_reverse: resume ? [] : entryIds,
         correction_run: {
           period_year: originalRun.period_year,
           period_month: originalRun.period_month,
@@ -317,7 +328,10 @@ export async function correctSalaryRun(
   // 2. Storno every original entry (BFL 5 kap 5 §). Each reverseEntry call
   //    is its own committed verifikation; see the module doc for the state a
   //    mid-loop failure leaves.
-  const reversedEntryIds: string[] = []
+  const reversedEntryIds: string[] = resume ? [...entryIds] : []
+  const warnings: string[] = []
+  const stampedAt = new Date().toISOString()
+  if (!resume) {
   for (const [index, entryId] of entryIds.entries()) {
     try {
       await reverseEntry(supabase, companyId, userId, entryId)
@@ -347,13 +361,10 @@ export async function correctSalaryRun(
     reversedEntryIds.push(entryId)
   }
 
-  const warnings: string[] = []
-
   // 3. Mark the original as corrected. The dashboard route never failed the
   //    request on this update; a failure surfaces as a warning and the insert
   //    below then hits the period index (period_conflict), which is the
   //    signal the operator acts on.
-  const stampedAt = new Date().toISOString()
   const { error: markError } = await supabase
     .from('salary_runs')
     .update({ status: 'corrected' })
@@ -367,6 +378,7 @@ export async function correctSalaryRun(
   //    (they show as "ersatt"). Fresh links are issued when the correction
   //    run's payslips are sent.
   await revokeLinksForRun(supabase, runId)
+  }
 
   // 5. Create the correction run for the same period. The partial unique
   //    index idx_salary_runs_period_unique excludes status 'corrected', so

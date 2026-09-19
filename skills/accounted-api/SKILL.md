@@ -312,7 +312,7 @@ DELETE /companies/{companyId}/employees/{id}/benefits/{benefitId} : Remove a ben
 GET /companies/{companyId}/employees/{id}/opening-balances : Get an employee's payroll cutover opening balances [scope:payroll:read risk:low idempotent]
 PUT /companies/{companyId}/employees/{id}/opening-balances : Set an employee's payroll cutover opening balances [scope:payroll:write risk:medium idempotent dry-run reversible]
 GET /companies/{companyId}/employees/{id}/recurring-lines : List recurring payslip lines for an employee [scope:payroll:read risk:low idempotent]
-POST /companies/{companyId}/employees/{id}/recurring-lines : Create a recurring payslip line for an employee [scope:payroll:write risk:low dry-run reversible]
+POST /companies/{companyId}/employees/{id}/recurring-lines : Create a recurring payslip line for an employee [scope:payroll:write risk:low idempotent dry-run reversible]
 PATCH /companies/{companyId}/employees/{id}/recurring-lines/{lineId} : Update a recurring payslip line [scope:payroll:write risk:low idempotent dry-run reversible]
 DELETE /companies/{companyId}/employees/{id}/recurring-lines/{lineId} : Delete a recurring payslip line, or deactivate it if a run already used it [scope:payroll:write risk:low idempotent dry-run]
 GET /companies/{companyId}/employees/{id}/vacation-balance : Get an employee's current vacation balance [scope:payroll:read risk:low idempotent]

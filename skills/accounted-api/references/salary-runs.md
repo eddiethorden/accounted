@@ -621,7 +621,7 @@ Per Bokföringslagen 5 kap 5 § a booked salary run is never edited: this verb r
 - A second call on the same run returns 409 SALARY_RUN_ALREADY_CORRECTED with `details.correction_run_id`: continue in that run instead.
 - Payslip links of the original are revoked immediately (employees see "ersatt"); fresh links are issued when the correction run's payslips are sent.
 - The arbetsgivardeklaration (AGI) for the period must be re-filed after the correction run books; Skatteverket receives the corrected figures, not a delta.
-- The storno entries land in the original payment_date's period: a locked period returns PERIOD_LOCKED and nothing is written. If the failure happens after the first storno, `valid_alternatives.reversed_entry_ids` names the entries already reversed and `valid_alternatives.remaining_entry_ids` the ones still posted; the run stays `booked` and a retry does not skip the reversed ones (CANNOT_REVERSE_NON_POSTED), so finish the storno of the remaining entries through POST /journal-entries/{id}/reverse.
+- The storno entries land in the original payment_date's period: a locked period returns PERIOD_LOCKED and nothing is written. If the failure happens after the first storno, `valid_alternatives.reversed_entry_ids` names the entries already reversed and `valid_alternatives.remaining_entry_ids` the ones still posted; the run stays `booked`; call this verb again once the cause is fixed: the retry skips the entries already reversed and continues with the remaining ones.
 - Idempotency-Key is mandatory.
 
 | Parameter | In | Type | Required | Notes |

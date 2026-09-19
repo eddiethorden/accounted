@@ -111,7 +111,9 @@ function dbFailure(
   error: { code?: string; message?: string },
   code: string = 'INTERNAL_ERROR',
 ): RecurringLineFailure {
-  return { ok: false, code, details: { message: error.message }, cause: error }
+  // The raw PostgreSQL message stays on `cause` (dashboard rendering via
+  // getErrorMessage); the wire-facing details carry only the SQLSTATE.
+  return { ok: false, code, details: { pg_code: error.code }, cause: error }
 }
 
 /**

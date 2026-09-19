@@ -9,9 +9,9 @@
  */
 
 import { z } from 'zod'
-import { noContent, ok } from '@/lib/api/v1/response'
+import { ok } from '@/lib/api/v1/response'
 import { dryRunPreview } from '@/lib/api/v1/dry-run'
-import { registerEndpoint, dataEnvelope, NoBodyResponse } from '@/lib/api/v1/registry'
+import { registerEndpoint, dataEnvelope } from '@/lib/api/v1/registry'
 import { withApiV1 } from '@/lib/api/v1/with-api-v1'
 import { v1ErrorResponseFromCode, v1ValidationError } from '@/lib/api/v1/errors'
 import { readV1JsonBody } from '@/lib/api/v1/body'
@@ -32,6 +32,12 @@ type BenefitParams = { params: Promise<{ companyId: string; id: string; benefitI
  * module-authored validation message ({ field, message }) is rendered in the
  * same `issues` list a failed Zod parse produces, so agents read one shape.
  */
+const BenefitDeleteOutcome = z.object({
+  employee_benefit_id: z.string().uuid(),
+  deleted: z.boolean(),
+  deactivated: z.boolean(),
+})
+
 function benefitError(
   result: { code: string; details?: Record<string, unknown> },
   log: Logger,
@@ -180,18 +186,21 @@ registerEndpoint({
     'Ending a benefit that a run has already consumed: PATCH is_active=false or set valid_to instead (see pitfalls). Removing the derived line from one run: edit that run\'s payslip lines.',
   pitfalls: [
     'Idempotency-Key is mandatory.',
-    '204 No Content is returned on success: there is no response body to parse. A second DELETE of the same id returns 404 NOT_FOUND.',
+    'Answers 200 with { employee_benefit_id, deleted, deactivated }. A benefit that a payslip line already derives from is never hard-deleted: it is kept and switched off (deleted=false, deactivated=true), so the chain from a booked verifikat back to its förmån stays intact (BFL 5 kap 6-7 §). A second DELETE of a gone id returns 404 NOT_FOUND.',
     'A benefit that already fed a calculated run leaves its derived payslip line behind on recalculate: the provenance column is ON DELETE SET NULL, so the engine no longer recognises the line as derived (#2695). Deactivate (PATCH is_active=false) or close the window (valid_to) instead; recalculating then removes the line.',
   ],
   example: {
-    response: { data: null, meta: { request_id: 'req_…', api_version: '2026-05-12' } },
+    response: {
+      data: { employee_benefit_id: 'ben_9c2e…', deleted: true, deactivated: false },
+      meta: { request_id: 'req_…', api_version: '2026-05-12' },
+    },
   },
   scope: 'payroll:write',
   risk: 'medium',
   idempotent: true,
   reversible: false,
   dryRunSupported: true,
-  response: { success: NoBodyResponse },
+  response: { success: dataEnvelope(BenefitDeleteOutcome) },
 })
 
 export const DELETE = withApiV1<BenefitParams>(
@@ -214,7 +223,7 @@ export const DELETE = withApiV1<BenefitParams>(
         log: ctx.log,
       })
     }
-    if (!result.data.deleted) {
+    if (!result.data.deleted && !result.data.deactivated) {
       ctx.log.warn('employees.benefits.delete: not found', {
         benefitId: ids.benefitId,
         employeeId: ids.employeeId,
@@ -225,7 +234,14 @@ export const DELETE = withApiV1<BenefitParams>(
         details: { resource: 'employee_benefit' },
       })
     }
-    return noContent({ requestId: ctx.requestId })
+    return ok(
+      {
+        employee_benefit_id: ids.benefitId,
+        deleted: result.data.deleted,
+        deactivated: result.data.deactivated === true,
+      },
+      { requestId: ctx.requestId },
+    )
   },
   { requireIdempotencyKey: true },
 )

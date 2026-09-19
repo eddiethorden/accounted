@@ -375,6 +375,18 @@ describe('updateEmployeeBenefit', () => {
     if (!gone.ok) expect(gone.code).toBe('NOT_FOUND')
   })
 
+  it('treats an empty patch as a no-op and returns the stored row', async () => {
+    mock.enqueue({ data: STORED })
+    const result = await updateEmployeeBenefit(supabase, {
+      companyId: COMPANY_ID,
+      employeeId: EMPLOYEE_ID,
+      benefitId: BENEFIT_ID,
+      patch: {},
+    })
+    expect(result).toEqual({ ok: true, data: { committed: true, row: STORED } })
+    expect(mock.findCall('employee_benefits', 'update')).toBeUndefined()
+  })
+
   it('returns the updated row on the happy path', async () => {
     mock.enqueue({ data: STORED })
     mock.enqueue({ data: { ...STORED, monthly_value: 100 } })
@@ -388,6 +400,7 @@ describe('deleteEmployeeBenefit', () => {
   const args = { companyId: COMPANY_ID, employeeId: EMPLOYEE_ID, benefitId: BENEFIT_ID }
 
   it('reports a hit when a row came back from the delete', async () => {
+    mock.enqueue({ data: null, count: 0 }) // no payslip line derives from it
     mock.enqueue({ data: [{ id: BENEFIT_ID }] })
     const result = await deleteEmployeeBenefit(supabase, args)
     expect(result).toEqual({ ok: true, data: { committed: true, deleted: true } })
@@ -395,6 +408,7 @@ describe('deleteEmployeeBenefit', () => {
   })
 
   it('reports a no-op when nothing matched', async () => {
+    mock.enqueue({ data: null, count: 0 })
     mock.enqueue({ data: [] })
     const result = await deleteEmployeeBenefit(supabase, args)
     expect(result).toEqual({ ok: true, data: { committed: true, deleted: false } })
@@ -412,7 +426,17 @@ describe('deleteEmployeeBenefit', () => {
     if (!missing.ok) expect(missing.code).toBe('NOT_FOUND')
   })
 
+  it('deactivates instead of deleting when a payslip line already derives from the row', async () => {
+    mock.enqueue({ data: null, count: 2 })
+    mock.enqueue({ data: [{ id: BENEFIT_ID }] })
+    const result = await deleteEmployeeBenefit(supabase, args)
+    expect(result).toEqual({ ok: true, data: { committed: true, deleted: false, deactivated: true } })
+    expect(mock.findCall('employee_benefits', 'delete')).toBeUndefined()
+    expect(mock.findCall('employee_benefits', 'update')).toBeDefined()
+  })
+
   it('maps a delete failure to INTERNAL_ERROR', async () => {
+    mock.enqueue({ data: null, count: 0 })
     mock.enqueue({ data: null, error: { code: '08006', message: 'connection failure' } })
     const result = await deleteEmployeeBenefit(supabase, args)
     expect(result.ok).toBe(false)

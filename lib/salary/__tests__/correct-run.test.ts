@@ -324,6 +324,27 @@ describe('correctSalaryRun live', () => {
     expect(revokeLinksForRun).toHaveBeenCalledOnce()
   })
 
+  it('creates the missing correction run when the original is corrected but has no child', async () => {
+    // An earlier call reversed the entries, flipped the status and revoked
+    // the links, then failed on the insert. Nothing in the ledger may be
+    // touched again; the draft must simply be created.
+    const { supabase, enqueueMany, calls } = trackedSupabase()
+    enqueueMany([
+      { data: makeBookedRun({ status: 'corrected', vacation_entry_id: null }) },
+      { data: null }, // no correction child yet
+      { data: CORRECTION_ROW },
+      { data: [] },
+    ])
+
+    const result = await correctSalaryRun(supabase as never, ARGS)
+
+    expect(result).toMatchObject({ ok: true, reversedEntryIds: ['je-salary', 'je-avg'] })
+    expect(reverseEntry).not.toHaveBeenCalled()
+    expect(revokeLinksForRun).not.toHaveBeenCalled()
+    expect(calls.filter((c) => c.method === 'update')).toEqual([])
+    expect(calls.filter((c) => c.method === 'insert')).toHaveLength(1)
+  })
+
   it('resumes past entries an earlier attempt already reversed', async () => {
     // An earlier call reversed je-salary and then failed further down: that
     // entry is now in status 'reversed', which reverseEntry reports as

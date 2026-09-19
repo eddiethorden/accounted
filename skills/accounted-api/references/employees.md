@@ -956,7 +956,7 @@ Hard-deletes the benefit row, the same operation the dashboard performs. 204 on 
 
 **Pitfalls:**
 - Idempotency-Key is mandatory.
-- 204 No Content is returned on success: there is no response body to parse. A second DELETE of the same id returns 404 NOT_FOUND.
+- Answers 200 with { employee_benefit_id, deleted, deactivated }. A benefit that a payslip line already derives from is never hard-deleted: it is kept and switched off (deleted=false, deactivated=true), so the chain from a booked verifikat back to its förmån stays intact (BFL 5 kap 6-7 §). A second DELETE of a gone id returns 404 NOT_FOUND.
 - A benefit that already fed a calculated run leaves its derived payslip line behind on recalculate: the provenance column is ON DELETE SET NULL, so the engine no longer recognises the line as derived (#2695). Deactivate (PATCH is_active=false) or close the window (valid_to) instead; recalculating then removes the line.
 
 | Parameter | In | Type | Required | Notes |
@@ -966,7 +966,35 @@ Hard-deletes the benefit row, the same operation the dashboard performs. 204 on 
 | `benefitId` | path | `string` | yes |  |
 | `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
 
-Response `204`.
+Response `200`:
+```ts
+{
+  data: { employee_benefit_id: string, deleted: boolean, deactivated: boolean },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "employee_benefit_id": "ben_9c2e…",
+    "deleted": true,
+    "deactivated": false
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
 
 ---
 
@@ -1206,7 +1234,7 @@ Example response `200`:
 ### `POST /api/v1/companies/{companyId}/employees/{id}/recurring-lines`
 
 **Create a recurring payslip line for an employee.**
-`scope:payroll:write · risk:low · dry-run · reversible`
+`scope:payroll:write · risk:low · idempotent · dry-run · reversible`
 
 Adds a standing monthly payslip row. From the next :calculate on, every salary run whose payment_date falls inside valid_from..valid_to derives a payslip line from it, with flags (taxable, avgift basis, gross vs net deduction) fixed by item_type. Amounts are kept to whole öre. Requires an Idempotency-Key header.
 

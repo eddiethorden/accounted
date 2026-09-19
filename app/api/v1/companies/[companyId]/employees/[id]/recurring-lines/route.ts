@@ -207,7 +207,7 @@ registerEndpoint({
   },
   scope: 'payroll:write',
   risk: 'low',
-  idempotent: false,
+  idempotent: true,
   reversible: true,
   dryRunSupported: true,
   request: { body: CreateEmployeeRecurringLineSchema },

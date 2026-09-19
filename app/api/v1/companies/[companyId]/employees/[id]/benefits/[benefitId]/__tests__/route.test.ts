@@ -3,7 +3,7 @@
  *
  * PATCH/DELETE /employees/{id}/benefits/{benefitId}. Both require an
  * Idempotency-Key and are dry-runnable. DELETE is a hard delete answering
- * 204, or 404 when no row matched.
+ * 200 with the outcome (deleted or deactivated), or 404 when no row matched.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -250,14 +250,33 @@ describe('PATCH /api/v1/companies/:companyId/employees/:id/benefits/:benefitId',
 })
 
 describe('DELETE /api/v1/companies/:companyId/employees/:id/benefits/:benefitId', () => {
-  it('hard-deletes the benefit and answers 204', async () => {
-    const supabaseMock = ownerMock({ employee_benefits: { data: [{ id: BENEFIT_ID }], error: null } })
+  it('hard-deletes an unreferenced benefit and answers 200 with the outcome', async () => {
+    const supabaseMock = ownerMock({
+      salary_line_items: { data: null, count: 0, error: null },
+      employee_benefits: { data: [{ id: BENEFIT_ID }], error: null },
+    })
     mockServiceClient.mockReturnValue(supabaseMock)
 
     const res = await deleteBenefit(del(), params)
 
-    expect(res.status).toBe(204)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data).toEqual({ employee_benefit_id: BENEFIT_ID, deleted: true, deactivated: false })
     expect(supabaseMock.tableCalls).toContain('employee_benefits')
+  })
+
+  it('keeps and deactivates a benefit that a payslip line already derives from', async () => {
+    const supabaseMock = ownerMock({
+      salary_line_items: { data: null, count: 1, error: null },
+      employee_benefits: { data: [{ id: BENEFIT_ID }], error: null },
+    })
+    mockServiceClient.mockReturnValue(supabaseMock)
+
+    const res = await deleteBenefit(del(), params)
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.data).toEqual({ employee_benefit_id: BENEFIT_ID, deleted: false, deactivated: true })
   })
 
   it('returns 404 NOT_FOUND when no row matched', async () => {
