@@ -74,8 +74,7 @@ collisions instead of issuing a duplicate number.
 
 ## Local session with staging
 
-Use the worktree `wt/resumable-provider-import` on
-`fix/2690-resumable-provider-import`, with Node 22 and environment configuration
+Use a checkout containing the provider migration worker, with Node 22 and environment configuration
 pointing to `erp-base` **staging**, never the production database. No local
 Supabase or Docker is needed. Do not copy the main checkout’s `.env.local`.
 
@@ -103,7 +102,7 @@ number-less draft invoices, supplier credit notes sharing display numbers,
 atomic row completion and payment contention across batches. The matching
 `provider-migration-jobs.pg.test.ts` runs the same assertions in pg-real CI.
 
-The five migrations in this branch have been applied to staging and verified
+The six migrations for provider jobs have been applied to staging and verified
 byte-for-byte against its migration history. The application and scheduler are
 not deployed by this worktree. Browser testing with a real provider account is
 still the joint local verification step. Production rollout requires merging and

@@ -134,7 +134,7 @@ BEGIN
   j:=create_provider_migration_job(company,u,consent,ARRAY['supplierInvoices'],NULL);
   j:=claim_provider_migration_job(worker,j.id);
   PERFORM save_provider_migration_page(j.id,worker,j.attempt,'supplierInvoices',1,
-    '[{"source_id":"supplier-invoice","payload":"cipher","payload_hash":"hash"},{"source_id":"supplier-credit","payload":"cipher","payload_hash":"hash"}]',NULL);
+    '[{"source_id":"supplier-invoice","payload":"cipher","payload_hash":"hash"},{"source_id":"supplier-credit","payload":"cipher","payload_hash":"hash"},{"source_id":"supplier-adopted","payload":"cipher","payload_hash":"hash"}]',NULL);
   SELECT id INTO a FROM migration_job_chunks WHERE job_id=j.id AND source_id='supplier-invoice';
   SELECT id INTO b FROM migration_job_chunks WHERE job_id=j.id AND source_id='supplier-credit';
   rec:=jsonb_build_object('id',a,'party_source_id','supplier-1','party',jsonb_build_object('name','Supplier'),
@@ -156,17 +156,36 @@ BEGIN
   SELECT count(*) INTO n FROM supplier_invoice_items WHERE supplier_invoice_id IN (SELECT target_id FROM migration_job_chunks WHERE job_id=j.id);
   ASSERT n=2,'supplier invoice retry duplicated lines';
 
+  -- Adoption may fill missing rows, but must preserve the existing VAT header.
+  SELECT supplier_id INTO customer FROM supplier_invoices WHERE id=(SELECT target_id FROM migration_job_chunks WHERE id=a);
+  target:=insert_provider_migration_row('supplier_invoices',rec->'row'||jsonb_build_object(
+    'company_id',company,'user_id',u,'supplier_id',customer,'arrival_number',get_next_arrival_number(company),
+    'supplier_invoice_number','adopted-number','subtotal',125,'subtotal_sek',125,
+    'vat_amount',0,'vat_amount_sek',0,'vat_treatment','exempt'));
+  SELECT id INTO bad FROM migration_job_chunks WHERE job_id=j.id AND source_id='supplier-adopted';
+  payload:=rec||jsonb_build_object('id',bad,'row',(rec->'row')||jsonb_build_object('supplier_invoice_number','adopted-number'));
+  PERFORM commit_provider_migration_records(j.id,worker,j.attempt,jsonb_build_array(payload));
+  ASSERT (SELECT target_id=target AND state='imported' FROM migration_job_chunks WHERE id=bad),
+    'matching header-only supplier invoice was not adopted';
+  ASSERT (SELECT subtotal=125 AND subtotal_sek=125 AND vat_amount=0 AND vat_amount_sek=0 AND vat_treatment='exempt'
+    FROM supplier_invoices WHERE id=target),'adoption overwrote existing supplier VAT fields';
+  PERFORM commit_provider_migration_records(j.id,worker,j.attempt,jsonb_build_array(payload));
+  SELECT count(*) INTO n FROM supplier_invoice_items WHERE supplier_invoice_id=target;
+  ASSERT n=1,'adopted supplier rows were missing or duplicated on retry';
+
   -- Payment matching is planned across ALL batches before any write. Two
   -- independently planned candidates for one voucher both require review.
   PERFORM advance_provider_migration_job(j.id,worker,j.attempt);
-  PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',a),jsonb_build_object('id',b)));
+  PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',a),jsonb_build_object('id',b),jsonb_build_object('id',bad)));
   PERFORM advance_provider_migration_job(j.id,worker,j.attempt);
   target:=gen_random_uuid();
   PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',a,'payment',jsonb_build_object('journal_entry_id',target))));
   PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',b,'payment',jsonb_build_object('journal_entry_id',target))));
+  PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',bad)));
   PERFORM advance_provider_migration_job(j.id,worker,j.attempt);
   PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',a)));
   PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',b)));
+  PERFORM commit_provider_migration_followup(j.id,worker,j.attempt,jsonb_build_array(jsonb_build_object('id',bad)));
   SELECT count(*) INTO n FROM migration_job_chunks WHERE job_id=j.id AND error_code='MIGRATION_PAYMENT_AMBIGUOUS';
   ASSERT n=2,'cross-batch payment contention picked a winner';
   SELECT count(*) INTO n FROM supplier_invoice_payments WHERE company_id=company;

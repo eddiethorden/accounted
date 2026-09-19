@@ -274,8 +274,10 @@ export async function runProviderMigrationWorker(options: {
         batches++
         log.info('migration phase checkpointed', { jobId: job.id, phase: job.phase, elapsedMs: Date.now() - started })
         const { data: current, error: currentError } = await withinMigrationDeadline(supabase.from('migration_jobs').select('*')
-          .eq('id', job.id).eq('company_id', job.company_id).single(), deadline - 5000)
+          .eq('id', job.id).eq('company_id', job.company_id)
+          .eq('worker_id', job.worker_id).eq('attempt', job.attempt).maybeSingle(), deadline - 5000)
         if (currentError) throw new Error(currentError.message)
+        if (!current) return { jobs, batches }
         job = current as ProviderMigrationJob
       }
       if (job.state === 'running') await migrationRpc(supabase, job, 'release_provider_migration_job', {}, deadline)

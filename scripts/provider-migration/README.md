@@ -1,6 +1,6 @@
 # Provider invoice load and recovery test
 
-Run from the `fix/2690-resumable-provider-import` worktree with Node 22 or newer.
+Run from the repository root with Node 22 or newer.
 No Docker or local database is used. The scripts refuse the production URL and
 never load `.env.local`. They create clearly named synthetic companies in the
 `erp-base` staging branch (`metjnjrhvujscngnpzdv`). Fixtures remain there for inspection.

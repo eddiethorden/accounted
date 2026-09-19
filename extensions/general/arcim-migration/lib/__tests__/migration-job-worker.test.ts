@@ -53,9 +53,14 @@ function database(overrides: Partial<ProviderMigrationJob> = {}) {
   })
   const supabase = { rpc, from: (table: string) => {
     let state: string | undefined; let limit = Infinity
-    const chain = { select: () => chain, eq: (key: string, value: string) => { if (key === 'state') state = value; return chain },
-      order: () => chain, limit: (value: number) => { limit = value; return chain }, single: () => chain,
-      then: (resolve: (data: unknown) => void) => resolve({ data: table === 'migration_jobs' ? { ...job } : rows.filter(r => r.state === state).slice(0, limit), error: null }) }
+    const filters: Record<string, unknown> = {}
+    const chain = { select: () => chain, eq: (key: string, value: unknown) => {
+      filters[key] = value; if (key === 'state') state = value as string; return chain
+    },
+      order: () => chain, limit: (value: number) => { limit = value; return chain }, single: () => chain, maybeSingle: () => chain,
+      then: (resolve: (data: unknown) => void) => resolve({ data: table === 'migration_jobs'
+        ? Object.entries(filters).every(([key, value]) => job[key as keyof ProviderMigrationJob] === value) ? { ...job } : null
+        : rows.filter(r => r.state === state).slice(0, limit), error: null }) }
     return chain
   } } as unknown as SupabaseClient
   return { supabase, rpc, job, rows }
@@ -69,6 +74,27 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs() })
 describe('bounded durable worker', () => {
+  it.each(['worker_id', 'attempt'] as const)('stops when the lease %s changes after a checkpoint', async token => {
+    const db = database()
+    const originalRpc = db.rpc.getMockImplementation()!
+    db.rpc.mockImplementation(async (name, args) => {
+      const result = await originalRpc(name, args)
+      if (name === 'save_provider_migration_page') {
+        if (token === 'worker_id') db.job.worker_id = 'replacement-worker'
+        else db.job.attempt++
+      }
+      return result
+    })
+    mocks.page.mockResolvedValueOnce({ items: [customer(1)], nextPage: null, total: 1 })
+
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+
+    expect(db.rows.map(row => row.state)).toEqual(['pending'])
+    expect(db.job.state).toBe('running')
+    expect(db.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'claim_provider_migration_job', 'save_provider_migration_page',
+    ])
+  })
   it.each(['salesInvoices', 'supplierInvoices'] as const)('isolates %s with inconsistent VAT rows before writing an invoice', async resource => {
     const db = database({ phase: 'import', resources: [resource] })
     const raw = { id: 'invoice', customerRef: { id: 'customer', name: 'Customer' },
