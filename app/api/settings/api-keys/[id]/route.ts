@@ -147,40 +147,21 @@ export const PATCH = withRouteContext<{ params: Promise<{ id: string }> }>(
         }
       }
 
-      // Replace the set on the service-role table. Insert first, then remove
-      // what is no longer selected: a failure between the two leaves the key
-      // at the union of the old and new sets, never unrestricted. Clearing to
-      // unrestricted is a single delete.
-      const serviceClient = createServiceClient()
-      if (allowlist) {
-        const { error: upsertError } = await serviceClient
-          .from('api_key_companies')
-          .upsert(
-            allowlist.map((allowedCompanyId) => ({ api_key_id: id, company_id: allowedCompanyId })),
-            { onConflict: 'api_key_id,company_id', ignoreDuplicates: true },
-          )
-        if (upsertError) {
-          log.error('api_key_companies upsert failed', upsertError)
-          return errorResponseFromCode('INTERNAL_ERROR', log, { requestId })
-        }
-        const { error: pruneError } = await serviceClient
-          .from('api_key_companies')
-          .delete()
-          .eq('api_key_id', id)
-          .not('company_id', 'in', `(${allowlist.join(',')})`)
-        if (pruneError) {
-          log.error('api_key_companies prune failed', pruneError)
-          return errorResponseFromCode('INTERNAL_ERROR', log, { requestId })
-        }
-      } else {
-        const { error: clearError } = await serviceClient
-          .from('api_key_companies')
-          .delete()
-          .eq('api_key_id', id)
-        if (clearError) {
-          log.error('api_key_companies clear failed', clearError)
-          return errorResponseFromCode('INTERNAL_ERROR', log, { requestId })
-        }
+      // Replace the set as one transaction in a SECURITY DEFINER RPC
+      // (migration 20260919220000): rows outside the new list are deleted
+      // and missing ones inserted together, so a failure never leaves the
+      // key at the union of the old and new sets. null clears every row
+      // (unrestricted). The RPC re-checks that every id is a live membership
+      // of the key's user and that the key is live; a refusal is a 500 here
+      // because the checks above already answered 403 / 404 for anything a
+      // caller can cause.
+      const { error: replaceError } = await createServiceClient().rpc('replace_api_key_allowlist', {
+        p_api_key_id: id,
+        p_company_ids: allowlist,
+      })
+      if (replaceError) {
+        log.error('replace_api_key_allowlist failed', replaceError)
+        return errorResponseFromCode('INTERNAL_ERROR', log, { requestId })
       }
     }
 

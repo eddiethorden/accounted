@@ -201,83 +201,50 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
   const conflictingScope = findStageApproveConflict(grantedScopes)
   const sodAcknowledgedAt = conflictingScope ? new Date().toISOString() : null
 
-  const { data: insertedKey, error: insertError } = await supabase
-    .from('api_keys')
-    .insert({
-      user_id: payload.userId,
-      company_id: companyId,
-      key_hash: hash,
-      key_prefix: prefix,
-      name: OAUTH_MCP_KEY_NAME,
-      scopes: grantedScopes,
-      refresh_token_hash: refresh.hash,
-      // Which built-in client this is (claude, chatgpt, grok, ...): the
-      // onboarding Done step and Hem show a connected state per client.
-      // The redirect URI was validated against the allowlist at /authorize
-      // and travels in the code payload; a registered client stores null.
-      client: builtInRedirectProvider(payload.redirectUri),
-      // Literal keys (null when no conflict): the no-phantom-columns scanner
-      // resolves object literals only, never spreads.
-      sod_acknowledged_at: sodAcknowledgedAt,
-      sod_acknowledged_by: sodAcknowledgedAt ? payload.userId : null,
-    })
-    .select('id')
-    .single()
+  // The key row and its company allowlist rows (for a restricted consent)
+  // are written by one SECURITY DEFINER RPC in one transaction. A key with
+  // no allowlist rows reaches every company its user belongs to, so the two
+  // writes must stand or fall together: two PostgREST requests with a
+  // compensating revoke in between could leave a live key that reaches more
+  // than the user ticked (migration 20260919220000). The RPC also re-checks
+  // that every allowed company is a live membership and that the default
+  // sits inside the list; a refusal fails the exchange and the client can
+  // restart consent.
+  const { error: createError } = await supabase.rpc('create_api_key_with_allowlist', {
+    p_user_id: payload.userId,
+    p_company_id: companyId,
+    p_key_hash: hash,
+    p_key_prefix: prefix,
+    p_name: OAUTH_MCP_KEY_NAME,
+    p_scopes: grantedScopes,
+    // Column default ('live'); the OAuth path never mints test keys.
+    p_mode: null,
+    // Which built-in client this is (claude, chatgpt, grok, ...): the
+    // onboarding Done step and Hem show a connected state per client.
+    // The redirect URI was validated against the allowlist at /authorize
+    // and travels in the code payload; a registered client stores null.
+    p_client: builtInRedirectProvider(payload.redirectUri),
+    p_refresh_token_hash: refresh.hash,
+    p_sod_acknowledged_at: sodAcknowledgedAt,
+    p_sod_acknowledged_by: sodAcknowledgedAt ? payload.userId : null,
+    p_unattended_commit_limit: null,
+    p_company_ids: allowlist,
+  })
 
-  if (insertError) {
+  if (createError) {
     // This 500 was silent while api_keys.company_id was NOT NULL and every
     // companyless signup died here (2026-08-26): always log the DB error.
-    console.error('[mcp-oauth/token] api key insert failed', {
-      code: insertError.code,
-      message: insertError.message,
+    console.error('[mcp-oauth/token] api key create failed', {
+      code: createError.code,
+      message: createError.message,
       companyless: companyId === null,
+      restricted: allowlist !== null,
+      keyPrefix: prefix,
     })
     return NextResponse.json(
       { error: 'server_error', error_description: 'Failed to create API key' },
       { status: 500 }
     )
-  }
-
-  // Company allowlist rows for a restricted consent. A key with no rows
-  // reaches every company its user belongs to, so a failed insert here must
-  // not leave the key alive: it would reach more than the user ticked. The
-  // key is revoked by hash (always known, unlike the id on a driver that
-  // returned no row) and the exchange fails; the client can restart consent.
-  if (allowlist) {
-    const keyId = (insertedKey as { id?: unknown } | null)?.id
-    const allowlistError =
-      typeof keyId === 'string'
-        ? (
-            await supabase.from('api_key_companies').insert(
-              allowlist.map((allowedCompanyId) => ({
-                api_key_id: keyId,
-                company_id: allowedCompanyId,
-              })),
-            )
-          ).error
-        : { code: 'NO_KEY_ID', message: 'api_keys insert returned no id' }
-    if (allowlistError) {
-      console.error('[mcp-oauth/token] api_key_companies insert failed, revoking key', {
-        code: allowlistError.code,
-        message: allowlistError.message,
-        keyPrefix: prefix,
-      })
-      const { error: revokeError } = await supabase
-        .from('api_keys')
-        .update({ revoked_at: new Date().toISOString() })
-        .eq('key_hash', hash)
-      if (revokeError) {
-        console.error('[mcp-oauth/token] revoke after allowlist failure also failed', {
-          code: revokeError.code,
-          message: revokeError.message,
-          keyPrefix: prefix,
-        })
-      }
-      return NextResponse.json(
-        { error: 'server_error', error_description: 'Failed to restrict the API key to the selected companies' },
-        { status: 500 }
-      )
-    }
   }
 
   if (conflictingScope) {

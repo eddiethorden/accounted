@@ -142,6 +142,17 @@ export const POST = withRouteContext(
       })
     }
 
+    // The caller's live memberships, with roles: the allowlist below is
+    // validated against them, and the key's company must be one the caller
+    // administers.
+    let memberships
+    try {
+      memberships = await listUserCompaniesForPicker(supabase, user.id, { activeCompanyId: companyId })
+    } catch (err) {
+      log.error('company picker list failed', err)
+      return errorResponse(err, log, { requestId })
+    }
+
     // Company allowlist. Every id must be a live membership of the caller
     // (403 otherwise: a key must never reach a company its creator cannot).
     // Keeping every company selected means an unrestricted key, so rows are
@@ -151,13 +162,6 @@ export const POST = withRouteContext(
     let keyCompanyId = companyId
     let allowlist: string[] | null = null
     if (requestedCompanyIds && requestedCompanyIds.length > 0) {
-      let memberships
-      try {
-        memberships = await listUserCompaniesForPicker(supabase, user.id, { activeCompanyId: companyId })
-      } catch (err) {
-        log.error('company picker list failed', err)
-        return errorResponse(err, log, { requestId })
-      }
       const memberIds = new Set(memberships.map((company) => company.company_id))
       const foreign = requestedCompanyIds.filter((id) => !memberIds.has(id))
       if (foreign.length > 0) {
@@ -171,6 +175,18 @@ export const POST = withRouteContext(
         keyCompanyId = selection.defaultCompanyId
         allowlist = selection.companyIds
       }
+    }
+
+    // Only an owner or admin of the key's company may mint a key for it.
+    // This was the api_keys_insert policy's job while the row was inserted
+    // through the session client; the atomic RPC below runs as the service
+    // role, so the gate lives here. requireWrite only excludes viewers.
+    const keyMembership = memberships.find((company) => company.company_id === keyCompanyId)
+    if (!keyMembership || (keyMembership.role !== 'owner' && keyMembership.role !== 'admin')) {
+      return errorResponseFromCode('FORBIDDEN', log, {
+        requestId,
+        details: { field: 'company_id', reason: 'admin_required', company_id: keyCompanyId },
+      })
     }
 
     // Both live and test keys bind to the active company. A test key is
@@ -208,52 +224,54 @@ export const POST = withRouteContext(
 
     const { key, hash, prefix } = generateApiKey(mode)
 
-    const { data, error } = await supabase
-      .from('api_keys')
-      .insert({
-        user_id: user.id,
-        company_id: keyCompanyId,
-        key_hash: hash,
-        key_prefix: prefix,
-        name,
-        scopes,
-        mode,
-        ...(sodAcknowledgedAt
-          ? { sod_acknowledged_at: sodAcknowledgedAt, sod_acknowledged_by: user.id }
-          : {}),
-      })
-      .select('id, key_prefix, name, scopes, mode, created_at')
-      .single()
+    // The key row and its allowlist rows (strict subset only) are written by
+    // one SECURITY DEFINER RPC in one transaction (migration 20260919220000).
+    // A key with no rows reaches every company, so a key insert that lands
+    // without its allowlist would reach more than the caller selected, and a
+    // compensating revoke is a second request that can itself fail. The RPC
+    // re-checks membership and the default company as the backstop to the
+    // 403 above; the service client is the only role allowed to execute it.
+    const serviceClient = createServiceClient()
+    const { data: createdKeyId, error: createError } = await serviceClient.rpc(
+      'create_api_key_with_allowlist',
+      {
+        p_user_id: user.id,
+        p_company_id: keyCompanyId,
+        p_key_hash: hash,
+        p_key_prefix: prefix,
+        p_name: name,
+        p_scopes: scopes,
+        p_mode: mode,
+        p_client: null,
+        p_refresh_token_hash: null,
+        p_sod_acknowledged_at: sodAcknowledgedAt,
+        p_sod_acknowledged_by: sodAcknowledgedAt ? user.id : null,
+        p_unattended_commit_limit: null,
+        p_company_ids: allowlist,
+      },
+    )
 
-    if (error) {
-      log.error('api_key insert failed', error)
+    if (createError || typeof createdKeyId !== 'string') {
+      log.error('api_key create failed', createError ?? { message: 'create_api_key_with_allowlist returned no id' })
       return errorResponseFromCode('API_KEY_CREATE_FAILED', log, {
         requestId,
-        details: { reason: getUserErrorMessage(error) },
+        details: { reason: createError ? getUserErrorMessage(createError) : 'no id' },
       })
     }
 
-    // Allowlist rows for a strict subset (service-role table). A key with no
-    // rows reaches every company, so a failed insert revokes the key rather
-    // than handing out one that reaches more than the caller selected.
-    if (allowlist) {
-      const serviceClient = createServiceClient()
-      const { error: allowlistError } = await serviceClient
-        .from('api_key_companies')
-        .insert(allowlist.map((allowedCompanyId) => ({ api_key_id: data.id, company_id: allowedCompanyId })))
-      if (allowlistError) {
-        log.error('api_key_companies insert failed, revoking key', allowlistError)
-        const { error: revokeError } = await serviceClient
-          .from('api_keys')
-          .update({ revoked_at: new Date().toISOString() })
-          .eq('id', data.id)
-        if (revokeError) log.error('revoke after allowlist failure also failed', revokeError)
-        return errorResponseFromCode('API_KEY_CREATE_FAILED', log, {
-          requestId,
-          details: { reason: getUserErrorMessage(allowlistError) },
-        })
-      }
+    // Read the stored row back for the response (created_at is set by the
+    // database). The key exists at this point, so a failed read is logged
+    // and the response falls back to what the route already knows.
+    const { data: storedKey, error: readError } = await serviceClient
+      .from('api_keys')
+      .select('id, key_prefix, name, scopes, mode, created_at')
+      .eq('id', createdKeyId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (readError || !storedKey) {
+      log.error('api_key read-back after create failed', readError ?? { message: 'no row' })
     }
+    const data = storedKey ?? { id: createdKeyId, key_prefix: prefix, name, scopes, mode, created_at: null }
 
     if (sodAcknowledgedAt) {
       // High-risk security event: the creator self-attested the stage+approve

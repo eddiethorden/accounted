@@ -6,10 +6,12 @@ const mockSupabase = {
   from: vi.fn(),
 }
 
-// api_key_companies is a service-role table: the route replaces the set
-// through createServiceClient, never through the session client.
+// api_key_companies is a service-role table and replace_api_key_allowlist is
+// service-role only: the route replaces the set through createServiceClient
+// (one RPC, one transaction), never through the session client.
 const serviceSupabase = {
   from: vi.fn(),
+  rpc: vi.fn(),
 }
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -118,6 +120,13 @@ function patch(body: unknown) {
   return createMockRequest('/api/settings/api-keys/key-1', { method: 'PATCH', body })
 }
 
+/** Named arguments of the replace_api_key_allowlist call. */
+function replaceArgs(): Record<string, unknown> {
+  const call = serviceSupabase.rpc.mock.calls.find((c) => c[0] === 'replace_api_key_allowlist')
+  expect(call).toBeDefined()
+  return call![1] as Record<string, unknown>
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockSupabase.auth.getUser.mockResolvedValue({ data: { user: mockUser } })
@@ -125,6 +134,7 @@ beforeEach(() => {
   requireWritePermissionMock.mockResolvedValue({ ok: true })
   listUserCompaniesForPickerMock.mockResolvedValue([{ company_id: 'company-1', name: 'Test AB', role: 'owner' }])
   setupServiceFrom()
+  serviceSupabase.rpc.mockResolvedValue({ data: 1, error: null })
 })
 
 describe('PATCH /api/settings/api-keys/[id]', () => {
@@ -152,8 +162,9 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
     expect(filters).toContainEqual(['company_id', 'company-1'])
     expect(filters).toContainEqual(['id', 'key-1'])
     expect(filters).toContainEqual(['revoked_at', null])
-    // The limit alone never touches the allowlist table.
+    // The limit alone never touches the allowlist.
     expect(serviceSupabase.from).not.toHaveBeenCalled()
+    expect(serviceSupabase.rpc).not.toHaveBeenCalled()
   })
 
   it('accepts null to clear the ceiling', async () => {
@@ -200,6 +211,7 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       const res = await PATCH(patch({ company_ids: ['nope'] }), params)
       expect(res.status).toBe(400)
       expect(serviceSupabase.from).not.toHaveBeenCalled()
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
     })
 
     it('returns 403 FORBIDDEN for a company the caller is not a member of', async () => {
@@ -210,6 +222,7 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       expect(body.error.code).toBe('FORBIDDEN')
       expect(body.error.details.company_ids).toEqual([FOREIGN])
       expect(serviceSupabase.from).not.toHaveBeenCalled()
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
     })
 
     it('returns 404 when the key is not this company\'s live key, before touching the allowlist', async () => {
@@ -217,6 +230,7 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       const res = await PATCH(patch({ company_ids: [ACTIVE] }), params)
       expect(res.status).toBe(404)
       expect(serviceSupabase.from).not.toHaveBeenCalled()
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
     })
 
     it('returns 400 when the subset drops the company the key is listed under', async () => {
@@ -227,9 +241,10 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       expect(body.error.code).toBe('VALIDATION_ERROR')
       expect(body.error.details.reason).toBe('key_company_required')
       expect(serviceSupabase.from).not.toHaveBeenCalled()
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
     })
 
-    it('replaces the set for a strict subset: upsert the new rows, then prune the rest', async () => {
+    it('replaces the set for a strict subset through one RPC call', async () => {
       const { filters } = setupFrom({ data: { id: 'key-1' } })
       const service = setupServiceFrom()
       const res = await PATCH(patch({ company_ids: [THIRD, ACTIVE] }), params)
@@ -242,63 +257,57 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       expect(filters).toContainEqual(['id', 'key-1'])
       expect(filters).toContainEqual(['revoked_at', null])
 
-      expect(service.find('upsert')).toEqual([
-        [
-          { api_key_id: 'key-1', company_id: ACTIVE },
-          { api_key_id: 'key-1', company_id: THIRD },
-        ],
-        { onConflict: 'api_key_id,company_id', ignoreDuplicates: true },
-      ])
-      // Insert before delete: a failure in between never widens the key.
-      const order = service.calls
-        .filter((c) => c.method === 'upsert' || c.method === 'delete')
-        .map((c) => c.method)
-      expect(order).toEqual(['upsert', 'delete'])
-      expect(service.find('not')).toEqual(['company_id', 'in', `(${ACTIVE},${THIRD})`])
-      expect(service.find('eq')).toEqual(['api_key_id', 'key-1'])
+      // One transaction: delete-outside + insert-missing happen inside the
+      // RPC, never as separate upsert and prune requests that could leave
+      // the key at the union of the old and new sets.
+      expect(serviceSupabase.rpc).toHaveBeenCalledTimes(1)
+      expect(replaceArgs()).toEqual({ p_api_key_id: 'key-1', p_company_ids: [ACTIVE, THIRD] })
+      expect(service.calls).toEqual([])
     })
 
     it('clears every row for null (unrestricted)', async () => {
       setupFrom({ data: { id: 'key-1' } })
       const service = setupServiceFrom()
+      serviceSupabase.rpc.mockResolvedValue({ data: 0, error: null })
       const res = await PATCH(patch({ company_ids: null }), params)
       const { status, body } = await parseJsonResponse<{ data: { company_ids: string[] | null } }>(res)
       expect(status).toBe(200)
       expect(body.data.company_ids).toBeNull()
-      expect(service.find('upsert')).toBeUndefined()
-      expect(service.find('delete')).toEqual([])
-      expect(service.find('eq')).toEqual(['api_key_id', 'key-1'])
-      expect(service.find('not')).toBeUndefined()
+      expect(replaceArgs()).toEqual({ p_api_key_id: 'key-1', p_company_ids: null })
+      expect(service.calls).toEqual([])
     })
 
     it('treats the full membership set like null: no rows kept', async () => {
       setupFrom({ data: { id: 'key-1' } })
-      const service = setupServiceFrom()
+      serviceSupabase.rpc.mockResolvedValue({ data: 0, error: null })
       const res = await PATCH(patch({ company_ids: [THIRD, OTHER, ACTIVE] }), params)
       const { status, body } = await parseJsonResponse<{ data: { company_ids: string[] | null } }>(res)
       expect(status).toBe(200)
       expect(body.data.company_ids).toBeNull()
-      expect(service.find('upsert')).toBeUndefined()
-      expect(service.find('delete')).toEqual([])
+      expect(replaceArgs()).toEqual({ p_api_key_id: 'key-1', p_company_ids: null })
     })
 
-    it('answers 500 and keeps the old set when the upsert fails', async () => {
+    it('answers 500 when the RPC fails (the old set is untouched by construction)', async () => {
       setupFrom({ data: { id: 'key-1' } })
-      const service = setupServiceFrom({ api_key_companies: { error: { message: 'boom', code: '23503' } } })
+      const service = setupServiceFrom()
+      serviceSupabase.rpc.mockResolvedValue({ data: null, error: { message: 'boom', code: '42501' } })
       const res = await PATCH(patch({ company_ids: [ACTIVE] }), params)
-      expect(res.status).toBe(500)
-      expect(service.find('delete')).toBeUndefined()
+      const { status, body } = await parseJsonResponse<{ error: { code: string }; data?: unknown }>(res)
+      expect(status).toBe(500)
+      expect(body.error.code).toBe('INTERNAL_ERROR')
+      expect(body.data).toBeUndefined()
+      // No fallback writes around the RPC: nothing to compensate.
+      expect(service.calls).toEqual([])
     })
 
     it('updates both fields in one call', async () => {
       const { updateSpy } = setupFrom({ data: { id: 'key-1', unattended_commit_limit: 900 } })
-      const service = setupServiceFrom()
       const res = await PATCH(patch({ unattended_commit_limit: 900, company_ids: [ACTIVE] }), params)
       const { status, body } = await parseJsonResponse<{ data: { id: string; unattended_commit_limit: number; company_ids: string[] | null } }>(res)
       expect(status).toBe(200)
       expect(body.data).toEqual({ id: 'key-1', unattended_commit_limit: 900, company_ids: [ACTIVE] })
       expect(updateSpy).toHaveBeenCalledWith({ unattended_commit_limit: 900 })
-      expect(service.find('upsert')?.[0]).toEqual([{ api_key_id: 'key-1', company_id: ACTIVE }])
+      expect(replaceArgs()).toEqual({ p_api_key_id: 'key-1', p_company_ids: [ACTIVE] })
     })
   })
 })
