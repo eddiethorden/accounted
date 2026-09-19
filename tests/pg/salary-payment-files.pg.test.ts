@@ -199,7 +199,7 @@ describe('salary_payment_files (pg)', () => {
     const companyId = await insertCompany({ createdBy: userId })
     await insertCompanyMember({ companyId, userId, role: 'owner' })
     const runId = await insertRun(companyId, userId)
-    await insertFile({ companyId, runId, userId })
+    await insertFile(getPool(), { companyId, runId, userId })
     await expect(
       getPool().query(`DELETE FROM auth.users WHERE id = $1`, [userId]),
     ).rejects.toMatchObject({ code: '23503' })
