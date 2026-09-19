@@ -45,6 +45,29 @@ curl -X PATCH "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/salary/setting
 
 Read it back with \`GET /salary/settings\`. There is no separate "avtal" to configure: statutory parameters (arbetsgivaravgifter, traktamenten, karens, sjuklön) live centrally per year and are maintained by Accounted.
 
+### Calculation policies
+
+The law fixes what is paid (sjuklön at 80 %, one karensavdrag per sjuklöneperiod, semesterlön); how a monthly salary is turned into a day, an hour or a partial month follows the employment contract and the kollektivavtal, and every payroll system has its conventions. \`salary_calculation_policy\` on the same endpoint makes them explicit per company. Every key defaults to the calculation Accounted has always done; the other value of each is what Fortnox does, so a customer you take over from Fortnox keeps the öre on their payslips. Send only the keys you change; they are merged into the stored policy and the response always shows all six.
+
+\`\`\`bash
+curl -X PATCH "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/salary/settings" \\
+  -H "Authorization: Bearer gnubok_sk_..." \\
+  -H "Idempotency-Key: $(uuidgen)" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "salary_calculation_policy": { "partial_month": "annual_calendar_days", "sick_rate": "annual_hourly", "long_leave": "calendar_after_five_workdays" } }'
+\`\`\`
+
+| Key | Default (Accounted) | Fortnox parity | What it changes |
+|---|---|---|---|
+| \`partial_month\` | \`workdays\`: månadslön × arbetsdagar i anställning / arbetsdagar i månaden | \`annual_calendar_days\`: (månadslön × 12 / 365, rounded to öre) × kalenderdagar i anställning; a whole month pays the whole salary | Base salary the month an employment starts or ends. Needed for every Fortnox customer with mid-month starters or leavers. |
+| \`sick_rate\` | \`daily_divisor\`: månadslön / 21 per day (schedule divisor for part-time weeks), weighted by hours | \`annual_hourly\`: timlön = månadslön × 12 / (52 × veckoarbetstid); sjukavdrag per timme = timlön, sjuklön = 80 % of it | Sick days 1-14. The karensavdrag (20 % of an average week's sjuklön) is the same under both. |
+| \`long_leave\` | \`workdays\`: one daily rate per absent day | \`calendar_after_five_workdays\`: up to five working days per working day; longer episodes per calendar day at månadslön × 12 / 365, weekends included; a full calendar month deducts exactly the monthly salary; sick day 15+ always per calendar day | Föräldraledighet, tjänstledighet utan lön and sjukfrånvaro from day 15. Five-day schedules only: \`:calculate\` refuses a monthly employee with another \`workdays_per_week\` while this is on. |
+| \`leave_context\` | \`all_registered\`: days registered after the deviation period's end count toward the five-day threshold | \`through_deviation_end\`: only days up to the period's end count, so a later registration never reprices a settled month | Only under \`calendar_after_five_workdays\`. Choose \`through_deviation_end\` when the customer registers leave month by month. |
+| \`net_rounding\` | \`up\`: whole-krona öresavrundning always rounds up | \`nearest\`: to the nearest krona; a negative difference books as a 3740 credit | Only when \`salary_net_rounding\` is on. |
+| \`one_off_tax_rounding\` | \`truncate\`: engångsskatt = belopp × procent, öretal bortfaller (SFL 22 kap. 1 §) | \`nearest\`: round to the nearest krona | Engångsskatt on lines with \`one_off_tax_percent\` (step 5). Keep the statutory default unless you are reproducing another system's history. |
+
+The conventions are read at \`:calculate\` and frozen into the run's \`calculation_params.salary_calculation_policy\`, so a change never moves a run that is already calculated; recalculate a draft to apply it, \`:correct\` a booked run. Set them in step 2, and compare one historical payslip from the old system against a dry run before the first live month.
+
 ## 3. Employees
 
 \`\`\`bash
@@ -127,7 +150,7 @@ curl "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLOYEE_ID/
 
 Deductions carry a negative amount and the API rejects the wrong sign for the item type. The förmånsvärde is added to the tax and avgifter basis at \`:calculate\`; supply the schablon figure, the API does not compute it from the car.
 
-**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`.
+**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A bonus, provision or final-settlement semesterersättning that Skatteverket taxes as an engångsbelopp takes \`one_off_tax_percent\` with the percentage you verified for the employee's yearly income; the line is then withheld at that flat rate instead of through the monthly table (a valid jämkning decision on the employee still wins), equal percentages are summed before the öre are dropped, and the payslip breakdown shows an "Engångsskatt (x %)" step. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`.
 
 ## 6. Run payroll
 

@@ -574,3 +574,221 @@ describe('deriveAbsenceLineItems: empty', () => {
     expect(result.flagLakarintyg).toBe(false)
   })
 })
+
+// ============================================================
+// Company calculation conventions (lib/salary/calculation-policy.ts)
+// ============================================================
+
+import { DEFAULT_SALARY_CALCULATION_POLICY, SalaryCalculationPolicySchema } from '../calculation-policy'
+
+/** Mon-Fri rows between two dates, one type, same hours. */
+const weekdayRows = (
+  start: string,
+  end: string,
+  absence_type: AbsenceDay['absence_type'],
+  hours = 8,
+): AbsenceDay[] => {
+  const rows: AbsenceDay[] = []
+  for (let ms = Date.parse(`${start}T00:00:00Z`); ms <= Date.parse(`${end}T00:00:00Z`); ms += 86_400_000) {
+    if (new Date(ms).getUTCDay() % 6 !== 0) {
+      rows.push({ absence_date: new Date(ms).toISOString().slice(0, 10), absence_type, hours })
+    }
+  }
+  return rows
+}
+
+const policy = (over: Record<string, string>) => SalaryCalculationPolicySchema.parse(over)
+
+describe('deriveAbsenceLineItems: calculation policy defaults are a no-op', () => {
+  it('produces the identical result with the default policy and schedule inputs supplied', () => {
+    const periodDays: AbsenceDay[] = [
+      ...weekdayRows('2026-07-01', '2026-07-03', 'sick'),
+      { absence_date: '2026-07-06', absence_type: 'vab', hours: 4 },
+      ...weekdayRows('2026-07-07', '2026-07-08', 'parental'),
+      { absence_date: '2026-07-09', absence_type: 'unpaid_leave', hours: 8 },
+    ]
+    const plain = deriveAbsenceLineItems(baseInput({ periodDays, lookbackSickDates: ['2026-06-25'] }))
+    const withDefaults = deriveAbsenceLineItems(
+      baseInput({
+        periodDays,
+        lookbackSickDates: ['2026-06-25'],
+        calculationPolicy: DEFAULT_SALARY_CALCULATION_POLICY,
+        hoursPerDay: 8,
+        hoursPerWeek: 40,
+        workdaysPerWeek: 5,
+        periodStart: '2026-07-01',
+        periodEnd: '2026-07-31',
+        contextDays: weekdayRows('2026-08-03', '2026-08-14', 'parental'),
+      }),
+    )
+    expect(withDefaults).toEqual(plain)
+  })
+})
+
+describe('deriveAbsenceLineItems: sick_rate = annual_hourly', () => {
+  it('prices sick days 1-14 per hour at månadslön × 12 / (52 × veckoarbetstid), karens unchanged', () => {
+    // 30 000 kr, 40 h: timlön 173,08, sjuklön per timme 138,46. One 8 h day:
+    // lost pay 1 384,64, sjuklön 1 107,68, deduction 276,96. The weekly
+    // karens (1 107,69) is capped at the sjuklön the day yields.
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        periodDays: [{ absence_date: '2026-07-01', absence_type: 'sick', hours: 8 }],
+        hoursPerWeek: 40,
+        calculationPolicy: policy({ sick_rate: 'annual_hourly' }),
+      }),
+    )
+    expect(result.lineItems.find(li => li.item_type === 'sick_day2_14')!.amount).toBe(-276.96)
+    expect(result.lineItems.find(li => li.item_type === 'sick_karens')!.amount).toBe(-1107.68)
+    // Default convention for the same day: daily rate 1 428,57.
+    const plain = deriveAbsenceLineItems(baseInput({ periodDays: [{ absence_date: '2026-07-01', absence_type: 'sick', hours: 8 }] }))
+    expect(plain.lineItems.find(li => li.item_type === 'sick_day2_14')!.amount).toBe(-285.71)
+    expect(plain.lineItems.find(li => li.item_type === 'sick_karens')!.amount).toBe(-1107.69)
+  })
+
+  it('leaves day 15+ on the daily rate unless the calendar long-leave convention is on', () => {
+    const lookback = weekdayRows('2026-06-01', '2026-06-30', 'sick').map(d => d.absence_date)
+    const periodDays = weekdayRows('2026-07-01', '2026-07-03', 'sick')
+    const hourly = deriveAbsenceLineItems(
+      baseInput({ periodDays, lookbackSickDates: lookback, hoursPerWeek: 40, calculationPolicy: policy({ sick_rate: 'annual_hourly' }) }),
+    )
+    const plain = deriveAbsenceLineItems(baseInput({ periodDays, lookbackSickDates: lookback }))
+    expect(hourly.lineItems.find(li => li.item_type === 'sick_day15_plus')!.amount).toBe(
+      plain.lineItems.find(li => li.item_type === 'sick_day15_plus')!.amount,
+    )
+  })
+})
+
+describe('deriveAbsenceLineItems: long_leave = calendar_after_five_workdays', () => {
+  const calendar = policy({ long_leave: 'calendar_after_five_workdays' })
+
+  it('requires a five-day schedule and a complete deviation window', () => {
+    const periodDays = weekdayRows('2037-07-27', '2037-07-31', 'parental')
+    expect(() =>
+      deriveAbsenceLineItems(baseInput({ periodDays, periodStart: '2037-07-01', periodEnd: '2037-07-31', workdaysPerWeek: 4, calculationPolicy: calendar })),
+    ).toThrow('femdagarsvecka')
+    expect(() => deriveAbsenceLineItems(baseInput({ periodDays, calculationPolicy: calendar }))).toThrow('avvikelseperiod')
+  })
+
+  it('judges the five-day threshold with the surrounding context, and leave_context caps it at the window end', () => {
+    // 63 000 kr: daily 3 000, calendar 2 071,23. Five parental workdays at the
+    // end of July, five more registered for early August.
+    const july = weekdayRows('2037-07-27', '2037-07-31', 'parental')
+    const august = weekdayRows('2037-08-03', '2037-08-07', 'parental')
+    const input = baseInput({
+      monthlySalary: 63000,
+      periodStart: '2037-07-01',
+      periodEnd: '2037-07-31',
+      periodDays: july,
+      contextDays: august,
+      calculationPolicy: calendar,
+    })
+    // Ten working days in all: calendar rate on the five in-window days.
+    expect(deriveAbsenceLineItems(input).lineItems[0].amount).toBe(-10356.15)
+    // Only days through the window end count: a five-day episode, daily rate.
+    expect(
+      deriveAbsenceLineItems({ ...input, calculationPolicy: policy({ long_leave: 'calendar_after_five_workdays', leave_context: 'through_deviation_end' }) })
+        .lineItems[0].amount,
+    ).toBe(-15000)
+    // Prior-month context is before the window end and still counts.
+    const june = weekdayRows('2037-06-22', '2037-06-30', 'parental')
+    const earlyJuly = weekdayRows('2037-07-01', '2037-07-03', 'parental')
+    expect(
+      deriveAbsenceLineItems({
+        ...input,
+        periodDays: earlyJuly,
+        contextDays: june,
+        calculationPolicy: policy({ long_leave: 'calendar_after_five_workdays', leave_context: 'through_deviation_end' }),
+      }).lineItems[0].amount,
+    ).toBe(-6213.69)
+  })
+
+  it('prices a short episode exactly as the default convention does', () => {
+    const periodDays = weekdayRows('2037-07-13', '2037-07-17', 'unpaid_leave')
+    const withPolicy = deriveAbsenceLineItems(baseInput({ periodDays, periodStart: '2037-07-01', periodEnd: '2037-07-31', calculationPolicy: calendar }))
+    const plain = deriveAbsenceLineItems(baseInput({ periodDays }))
+    expect(withPolicy.lineItems).toEqual(plain.lineItems)
+  })
+
+  it('prices unpaid leave longer than five working days per calendar day', () => {
+    // 30 000 kr: calendar rate 986,30; Mon 6 to Fri 17 July = 12 calendar days.
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        periodDays: weekdayRows('2037-07-06', '2037-07-17', 'unpaid_leave'),
+        periodStart: '2037-07-01',
+        periodEnd: '2037-07-31',
+        calculationPolicy: calendar,
+      }),
+    )
+    expect(result.lineItems).toHaveLength(1)
+    expect(result.lineItems[0].amount).toBe(-11835.6)
+    expect(result.lineItems[0].quantity).toBe(10)
+  })
+
+  it('shares one calendar-rate total over the 120-date parental split by weighted days', () => {
+    const periodDays = weekdayRows('2037-07-27', '2037-07-31', 'parental')
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        periodDays,
+        contextDays: weekdayRows('2037-08-03', '2037-08-07', 'parental'),
+        parentalDaysPregnancyYtd: 118,
+        periodStart: '2037-07-01',
+        periodEnd: '2037-07-31',
+        calculationPolicy: calendar,
+      }),
+    )
+    // 30 000 kr: five calendar days at 986,30 = 4 931,50 in all.
+    const parental = result.lineItems.filter(li => li.item_type === 'parental_leave')
+    expect(parental).toHaveLength(2)
+    expect(parental[0].is_vacation_basis).toBe(true)
+    expect(parental[0].amount).toBe(-1972.6)
+    expect(parental[1].is_vacation_basis).toBe(false)
+    expect(parental[1].amount).toBe(-2958.9)
+    expect(Math.round((parental[0].amount + parental[1].amount) * 100) / 100).toBe(-4931.5)
+  })
+
+  it('prices sick day 15+ per calendar day from its first day, keeping partial extents continuous', () => {
+    // 48 000 kr: calendar rate 1 578,08. Sick every day of June (6 h) and July
+    // (6 h the first four days, then 1 h): all of July is Försäkringskassan
+    // time, 4 days at 3/4 + 27 days at 1/8, and the karens was consumed in June.
+    const lookback = Array.from({ length: 30 }, (_, i) => `2037-06-${String(i + 1).padStart(2, '0')}`)
+    const periodDays: AbsenceDay[] = Array.from({ length: 31 }, (_, i) => ({
+      absence_date: `2037-07-${String(i + 1).padStart(2, '0')}`,
+      absence_type: 'sick',
+      hours: i < 4 ? 6 : 1,
+    }))
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        monthlySalary: 48000,
+        periodDays,
+        lookbackSickDates: lookback,
+        lookbackSickDays: lookback.map(date => ({ absence_date: date, absence_type: 'sick', hours: 6 })),
+        periodStart: '2037-07-01',
+        periodEnd: '2037-07-31',
+        calculationPolicy: calendar,
+      }),
+    )
+    expect(result.lineItems.find(li => li.item_type === 'sick_day15_plus')!.amount).toBe(-10060.26)
+    expect(result.lineItems.some(li => li.item_type === 'sick_karens')).toBe(false)
+  })
+
+  it('separates a long Försäkringskassan episode from a new employer-paid episode in one month (hourly sick rate)', () => {
+    // 48 000 kr, 3 h rows: June on sick leave, July 1-10 still day 15+, then a
+    // new sjuklöneperiod from Monday 27 July with its own karens.
+    const prior = weekdayRows('2037-06-01', '2037-06-30', 'sick', 3)
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        monthlySalary: 48000,
+        periodStart: '2037-07-01',
+        periodEnd: '2037-07-31',
+        calculationPolicy: policy({ long_leave: 'calendar_after_five_workdays', sick_rate: 'annual_hourly' }),
+        hoursPerWeek: 40,
+        lookbackSickDates: prior.map(d => d.absence_date),
+        lookbackSickDays: prior,
+        periodDays: [...weekdayRows('2037-07-01', '2037-07-10', 'sick', 3), ...weekdayRows('2037-07-27', '2037-07-31', 'sick', 3)],
+      }),
+    )
+    expect(result.lineItems.find(li => li.item_type === 'sick_day15_plus')!.amount).toBe(-5917.8)
+    expect(result.lineItems.find(li => li.item_type === 'sick_day2_14')!.amount).toBe(-830.7)
+    expect(result.lineItems.find(li => li.item_type === 'sick_karens')!.amount).toBe(-1772.31)
+  })
+})

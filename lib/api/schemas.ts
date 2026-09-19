@@ -21,6 +21,7 @@ import { countCalendarMonths } from '@/lib/bookkeeping/accruals/compute'
 import { DimensionsBagSchema } from '@/lib/bookkeeping/dimension-resolver'
 import { validateEmployeeBankAccount } from '@/lib/salary/payment/bank-account'
 import { validateJamkning } from '@/lib/salary/jamkning-rules'
+import { SalaryCalculationPolicySchema } from '@/lib/salary/calculation-policy'
 import { MAX_INVOICE_EMAIL_COPY_RECIPIENTS } from '@/lib/invoices/email-recipients'
 import { INVOICE_POSTING_ACCOUNT_REGEX } from '@/lib/invoices/posting-account'
 import { computeLineNet } from '@/lib/invoices/line-amounts'
@@ -2782,6 +2783,12 @@ export const UpdateSettingsSchema = z.object({
   // Öresavrundning: round each net payout up to whole kronor (banks that
   // reject öre in salary payment files). Diff books on 3740.
   salary_net_rounding: z.boolean().optional(),
+  // Calculation conventions (migration 20260919120100): partial-month
+  // proration, sick-pay rate, long-leave measure, leave context, net and
+  // one-off tax rounding. The full object is stored (every key present,
+  // defaults filled) and replaced as a whole by this route; the v1 salary
+  // settings route merges a partial patch into the stored policy first.
+  salary_calculation_policy: SalaryCalculationPolicySchema.optional(),
   // Avvikelseperiod (migration 20260918120000): which month's absence and
   // worked days a new run reads. Snapshotted onto each run at creation.
   salary_deviation_period: z.enum(['same_month', 'previous_month']).optional(),
@@ -3765,6 +3772,12 @@ export const CreateSalaryLineItemSchema = z.object({
   is_net_deduction: z.boolean().default(false),
   account_number: accountNumber.optional(),
   sort_order: z.number().int().default(0),
+  // Engångsskatt (lib/salary/one-off-tax.ts): the verified Skatteverket
+  // percentage for a one-off amount (bonus, provision, semesterersättning at
+  // final settlement). null/omitted = taxed by the monthly table. Only valid
+  // on a positive taxable addition of an eligible type: the shared command
+  // module answers 400 and the DB CHECK refuses anything else.
+  one_off_tax_percent: z.number().min(0).max(100).nullable().optional(),
 })
 
 export const UpdateSalaryLineItemSchema = CreateSalaryLineItemSchema.partial().omit({ salary_run_employee_id: true })

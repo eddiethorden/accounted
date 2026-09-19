@@ -623,6 +623,11 @@ export interface CompanySettings {
   // reads absence and worked days from. 'previous_month' is the common
   // Swedish setup (innevarande månads lön, föregående månads avvikelser).
   salary_deviation_period: 'same_month' | 'previous_month'
+  // Calculation conventions (migration 20260919120100): jsonb validated by
+  // SalaryCalculationPolicySchema (lib/salary/calculation-policy.ts). The
+  // column default is {} = every convention at its default = the historical
+  // engine; the API stores the full object.
+  salary_calculation_policy?: Partial<import('@/lib/salary/calculation-policy').SalaryCalculationPolicy>
 
   // Sandbox
   is_sandbox: boolean
@@ -4358,6 +4363,11 @@ export interface SalaryLineItem {
   sort_order: number
   /** The registered utlägg an expense_reimbursement line repays (#2331). */
   source_expense_claim_id?: string | null
+  /** Engångsskatt percentage (migration 20260919120200); null = taxed by the monthly table. */
+  one_off_tax_percent?: number | null
+  /** Engine provenance (migration 20260919120000): 'vacation_compensation' on the
+   *  semesterersättning row run-calculation derives; null on manual rows. */
+  calculation_source?: 'vacation_compensation' | null
   created_at: string
   updated_at: string
 }

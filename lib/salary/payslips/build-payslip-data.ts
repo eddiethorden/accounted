@@ -51,7 +51,13 @@ export function buildPayslipData(params: {
   const lineItems: PayslipLineItem[] = ((sre.line_items || []) as Array<Record<string, unknown>>)
     .sort((a, b) => ((a.sort_order as number) || 0) - ((b.sort_order as number) || 0))
     .map(li => ({
-      description: li.description as string,
+      // A line taxed at a flat engångsskatt says so on the payslip: the
+      // "Preliminär skatt" total then differs from the table amount and the
+      // breakdown's "Engångsskatt (x %)" step explains the difference.
+      description:
+        li.one_off_tax_percent !== null && li.one_off_tax_percent !== undefined
+          ? `${li.description as string} (engångsskatt ${li.one_off_tax_percent as number} %)`
+          : (li.description as string),
       quantity: li.quantity as number | undefined,
       unitPrice: li.unit_price as number | undefined,
       amount: li.amount as number,

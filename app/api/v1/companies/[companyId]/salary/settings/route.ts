@@ -19,6 +19,12 @@
  * the dashboard's SalarySettingsContent. Replacing the map would silently
  * move every other source type back to series A.
  *
+ * `salary_calculation_policy` (lib/salary/calculation-policy.ts) is a jsonb
+ * column read raw and reported parsed, every convention present. A PATCH
+ * carries any subset of the conventions and is merged key by key into the
+ * stored policy before the full object is written back, the same
+ * merge-never-replace rule as the voucher series map.
+ *
  * Field shapes reuse UpdateSettingsSchema (lib/api/schemas.ts) so this REST
  * surface and the internal settings route can never disagree on the allowed
  * values. Deliberately narrow: only the payroll fields. The general
@@ -27,6 +33,11 @@
  */
 
 import { z } from 'zod'
+import {
+  SalaryCalculationPolicyPatchSchema,
+  SalaryCalculationPolicySchema,
+  type SalaryCalculationPolicy,
+} from '@/lib/salary/calculation-policy'
 import { ok } from '@/lib/api/v1/response'
 import { dryRunPreview } from '@/lib/api/v1/dry-run'
 import { registerEndpoint, dataEnvelope } from '@/lib/api/v1/registry'
@@ -57,13 +68,16 @@ interface SalarySettingsRow {
   preferred_payment_format: PaymentFormat | null
   salary_default_bank: DefaultBank | null
   salary_net_rounding: boolean | null
+  /** Raw jsonb: {} on a fresh row, the full object once written through the API. */
+  salary_calculation_policy: Partial<SalaryCalculationPolicy> | null
   default_voucher_series_per_source_type: VoucherSeriesMap | null
 }
 
 /**
  * What a company without a settings row gets: the DB column defaults
- * (migrations 20260703190000, 20260813143000, 20260918120000) mirrored here
- * so a fresh company reads sensibly before its first write.
+ * (migrations 20260703190000, 20260813143000, 20260918120000,
+ * 20260919120100) mirrored here so a fresh company reads sensibly before its
+ * first write.
  */
 const SALARY_SETTINGS_DEFAULTS = {
   salary_pay_day: 25,
@@ -71,6 +85,7 @@ const SALARY_SETTINGS_DEFAULTS = {
   preferred_payment_format: 'pain001' as PaymentFormat,
   salary_default_bank: null as DefaultBank,
   salary_net_rounding: false,
+  salary_calculation_policy: {} as Partial<SalaryCalculationPolicy>,
 }
 
 const VOUCHER_SERIES_RE = /^[A-Z]$/
@@ -82,6 +97,7 @@ const SalarySettingsResource = z.object({
   preferred_payment_format: z.enum(['pain001', 'bg_lb']),
   salary_default_bank: z.enum(['swedbank', 'seb', 'handelsbanken', 'nordea', 'other']).nullable(),
   salary_net_rounding: z.boolean(),
+  salary_calculation_policy: SalaryCalculationPolicySchema,
   salary_voucher_series: z.string().regex(VOUCHER_SERIES_RE),
 })
 
@@ -91,6 +107,9 @@ type SalarySettingsResourceShape = z.infer<typeof SalarySettingsResource>
 // no-op), every key optional. The at-least-one-field rule is enforced in the
 // handler. Column shapes are the internal settings route's own Zod shapes;
 // the voucher series is this endpoint's alias for the per-source-type map.
+// salary_calculation_policy takes the PATCH shape (any subset of the
+// conventions, no defaults): it is merged into the stored policy below, so a
+// caller that sets one convention cannot reset the others.
 const V1PatchSalarySettingsSchema = z
   .object({
     salary_pay_day: UpdateSettingsSchema.shape.salary_pay_day,
@@ -98,6 +117,7 @@ const V1PatchSalarySettingsSchema = z
     preferred_payment_format: UpdateSettingsSchema.shape.preferred_payment_format,
     salary_default_bank: UpdateSettingsSchema.shape.salary_default_bank,
     salary_net_rounding: UpdateSettingsSchema.shape.salary_net_rounding,
+    salary_calculation_policy: SalaryCalculationPolicyPatchSchema.optional(),
     salary_voucher_series: z
       .string()
       .regex(VOUCHER_SERIES_RE, 'Voucher series must be a single uppercase letter A-Z.')
@@ -120,10 +140,29 @@ function toSalarySettingsResource(
       row?.preferred_payment_format ?? SALARY_SETTINGS_DEFAULTS.preferred_payment_format,
     salary_default_bank: row?.salary_default_bank ?? SALARY_SETTINGS_DEFAULTS.salary_default_bank,
     salary_net_rounding: row?.salary_net_rounding ?? SALARY_SETTINGS_DEFAULTS.salary_net_rounding,
+    // Every convention reported, defaults filled: {} on a fresh row reads as
+    // the historical engine, the same object :calculate snapshots.
+    salary_calculation_policy: SalaryCalculationPolicySchema.parse(
+      row?.salary_calculation_policy ?? SALARY_SETTINGS_DEFAULTS.salary_calculation_policy,
+    ),
     // null row => 'A': the same fallback the salary-run engine applies when
     // there is no settings row to read.
     salary_voucher_series: resolveDefaultSeriesForSource(row, 'salary_payment'),
   }
+}
+
+/**
+ * The stored policy after applying a patch, or undefined when the caller did
+ * not touch it (so the column is left alone by the write). The stored value
+ * is always the FULL object: patch keys win, untouched keys keep their stored
+ * value, keys never set take their default.
+ */
+function nextCalculationPolicy(
+  current: SalarySettingsRow | null,
+  patch: V1PatchSalarySettings['salary_calculation_policy'],
+): SalaryCalculationPolicy | undefined {
+  if (patch === undefined) return undefined
+  return SalaryCalculationPolicySchema.parse({ ...(current?.salary_calculation_policy ?? {}), ...patch })
 }
 
 /**
@@ -185,6 +224,10 @@ function mergeSalarySettings(
       current?.salary_net_rounding,
       SALARY_SETTINGS_DEFAULTS.salary_net_rounding,
     ),
+    salary_calculation_policy:
+      nextCalculationPolicy(current, changes.salary_calculation_policy) ??
+      current?.salary_calculation_policy ??
+      SALARY_SETTINGS_DEFAULTS.salary_calculation_policy,
     default_voucher_series_per_source_type:
       seriesMap ??
       (current
@@ -200,8 +243,23 @@ const EXAMPLE_RESOURCE = {
   preferred_payment_format: 'pain001',
   salary_default_bank: 'swedbank',
   salary_net_rounding: true,
+  salary_calculation_policy: {
+    partial_month: 'annual_calendar_days',
+    sick_rate: 'annual_hourly',
+    long_leave: 'calendar_after_five_workdays',
+    leave_context: 'all_registered',
+    net_rounding: 'nearest',
+    one_off_tax_rounding: 'truncate',
+  },
   salary_voucher_series: 'K',
 }
+
+const POLICY_PITFALLS = [
+  'salary_calculation_policy holds the company\'s calculation conventions (beräkningsprinciper). Every key defaults to the historical Accounted behaviour; a customer migrated from Fortnox usually wants partial_month=annual_calendar_days (månadslön × 12 / 365 per calendar day employed), sick_rate=annual_hourly (timlön = månadslön × 12 / (52 × veckoarbetstid) for sjuklön), long_leave=calendar_after_five_workdays (leave longer than five working days deducted per calendar day at månadslön × 12 / 365, a whole month = the monthly salary) and, with salary_net_rounding, net_rounding=nearest. Compare one historical payslip before switching.',
+  'A PATCH of salary_calculation_policy is merged key by key into the stored policy (omitted keys keep their value); the response and the stored value always carry all six keys. It is not snapshotted onto existing runs at creation: the conventions are read at :calculate and frozen into the run\'s calculation_params, so a draft recalculated after a change follows the new conventions and a calculated run does not.',
+  'long_leave=calendar_after_five_workdays is a five-day-week rule: :calculate refuses (400 VALIDATION_ERROR) a monthly employee whose workdays_per_week is not 5 while it is on. leave_context only matters under that convention.',
+  'one_off_tax_rounding governs engångsskatt on payslip lines that carry one_off_tax_percent (POST /salary-runs/{id}/employees/{employeeId}/lines); truncate (öretal bortfaller) is the statutory rule, nearest exists to reproduce another system\'s history.',
+]
 
 const SHARED_PITFALLS = [
   'salary_deviation_period is snapshotted onto each salary run at creation: changing it never moves a run that already exists. Set it before the first run of a new month. Switching later makes the next run\'s deviation window overlap the previous run\'s window, and that run is refused with 409 SALARY_RUN_DEVIATION_PERIOD_OVERLAP (pass explicit deviation_period_start/end on that one run to bridge the switch).',
@@ -216,13 +274,14 @@ registerEndpoint({
   path: '/api/v1/companies/:companyId/salary/settings',
   summary: 'Get the company payroll settings.',
   description:
-    'Returns the payroll settings that drive new salary runs: pay day (salary_pay_day), avvikelseperiod (salary_deviation_period: which month a run reads absence and worked days from), salary payment file format (preferred_payment_format), the bank whose upload instructions are pre-selected (salary_default_bank), öresavrundning of net pay (salary_net_rounding) and the voucher series salary runs book into (salary_voucher_series). A company that has no settings row yet answers with the defaults the engine would apply (pay day 25, same_month, pain001, no bank, no rounding, series A).',
+    'Returns the payroll settings that drive new salary runs: pay day (salary_pay_day), avvikelseperiod (salary_deviation_period: which month a run reads absence and worked days from), salary payment file format (preferred_payment_format), the bank whose upload instructions are pre-selected (salary_default_bank), öresavrundning of net pay (salary_net_rounding), the calculation conventions (salary_calculation_policy: partial_month, sick_rate, long_leave, leave_context, net_rounding, one_off_tax_rounding, every key always present) and the voucher series salary runs book into (salary_voucher_series). A company that has no settings row yet answers with the defaults the engine would apply (pay day 25, same_month, pain001, no bank, no rounding, every convention at its default, series A).',
   useWhen:
-    'You are provisioning or auditing a customer for payroll and need to know how new salary runs will be dated, which month their deviations are read from, which payment file the bank expects, or which voucher series the salary vouchers land in.',
+    'You are provisioning or auditing a customer for payroll and need to know how new salary runs will be dated, which month their deviations are read from, which calculation conventions the engine applies, which payment file the bank expects, or which voucher series the salary vouchers land in.',
   doNotUseFor:
-    'Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Per-run values such as payment_date or deviation window (GET /salary-runs/{id}: they are snapshotted on the run). Employee-level pay settings (GET /employees/{id}).',
+    'Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Per-run values such as payment_date or deviation window (GET /salary-runs/{id}: they are snapshotted on the run). The conventions a calculated run actually used (GET /salary-runs/{id}: calculation_params.salary_calculation_policy). Employee-level pay settings (GET /employees/{id}).',
   pitfalls: [
     ...SHARED_PITFALLS,
+    ...POLICY_PITFALLS,
     'A company without a settings row reports series A (the engine fallback). The first PATCH creates the row with the standard series set, where salary_payment is K, unless salary_voucher_series is supplied in that same call: send it explicitly when provisioning so the letter never changes under you.',
   ],
   example: {
@@ -245,15 +304,16 @@ registerEndpoint({
   path: '/api/v1/companies/:companyId/salary/settings',
   summary: 'Partially update the company payroll settings.',
   description:
-    'Patches the payroll settings: salary_pay_day (1-28), salary_deviation_period (same_month | previous_month), preferred_payment_format (pain001 | bg_lb), salary_default_bank (swedbank | seb | handelsbanken | nordea | other | null), salary_net_rounding (boolean) and salary_voucher_series (one letter A-Z). All fields optional; at least one must be supplied; unknown fields are rejected. Upserts: a company without a settings row gets one created with the supplied values and DB defaults for the rest. Returns the full resource after the write. Idempotent (mandatory Idempotency-Key). Dry-runnable: ?dry_run=true returns the merged resource without writing.',
+    'Patches the payroll settings: salary_pay_day (1-28), salary_deviation_period (same_month | previous_month), preferred_payment_format (pain001 | bg_lb), salary_default_bank (swedbank | seb | handelsbanken | nordea | other | null), salary_net_rounding (boolean), salary_calculation_policy (an object with any of partial_month: workdays | annual_calendar_days, sick_rate: daily_divisor | annual_hourly, long_leave: workdays | calendar_after_five_workdays, leave_context: all_registered | through_deviation_end, net_rounding: up | nearest, one_off_tax_rounding: truncate | nearest; merged key by key into the stored policy) and salary_voucher_series (one letter A-Z). All fields optional; at least one must be supplied; unknown fields are rejected. Upserts: a company without a settings row gets one created with the supplied values and DB defaults for the rest. Returns the full resource after the write. Idempotent (mandatory Idempotency-Key). Dry-runnable: ?dry_run=true returns the merged resource without writing.',
   useWhen:
-    'You are onboarding a customer for payroll over the API (set the pay day, avvikelseperiod, payment file format, bank and voucher series before the first run), or a customer changes bank or pay day.',
+    'You are onboarding a customer for payroll over the API (set the pay day, avvikelseperiod, calculation conventions, payment file format, bank and voucher series before the first run), a customer changes bank or pay day, or a customer migrated from Fortnox needs the same partial-month, sick-pay and long-leave conventions as their old payslips.',
   doNotUseFor:
-    'Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Changing the payment date or deviation window of an existing run (PATCH /salary-runs/{id}, or explicit deviation_period_start/end on POST). Tax and legal profile changes (not on the public API).',
+    'Invoice payment and contact details (PATCH /api/v1/companies/{companyId}/settings). Changing the payment date or deviation window of an existing run (PATCH /salary-runs/{id}, or explicit deviation_period_start/end on POST). Changing the conventions of a run that is already calculated (recalculate the draft, or :correct a booked run). Tax and legal profile changes (not on the public API).',
   pitfalls: [
     'Idempotency-Key is mandatory; calls without it return 400.',
-    'At least one field must be supplied; an empty body returns 400. Unknown fields return 400 (strict body).',
+    'At least one field must be supplied; an empty body returns 400. Unknown fields return 400 (strict body), also inside salary_calculation_policy.',
     ...SHARED_PITFALLS,
+    ...POLICY_PITFALLS,
     'salary_default_bank: null clears the bank; omitting the field leaves it unchanged. The bank only pre-selects upload instructions, it does not change the payment file format.',
   ],
   example: {
@@ -262,6 +322,12 @@ registerEndpoint({
       salary_deviation_period: 'previous_month',
       salary_default_bank: 'swedbank',
       salary_net_rounding: true,
+      salary_calculation_policy: {
+        partial_month: 'annual_calendar_days',
+        sick_rate: 'annual_hourly',
+        long_leave: 'calendar_after_five_workdays',
+        net_rounding: 'nearest',
+      },
       salary_voucher_series: 'K',
     },
     response: {
@@ -288,7 +354,7 @@ export const GET = withApiV1<{ params: Promise<{ companyId: string }> }>(
     // inline literals.
     const { data, error } = await ctx.supabase
       .from('company_settings')
-      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type')
       .eq('company_id', ctx.companyId!)
       .maybeSingle()
 
@@ -333,7 +399,7 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
     // insert. Literal projection for the schema guard (see GET).
     const { data: current, error: fetchErr } = await ctx.supabase
       .from('company_settings')
-      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type')
       .eq('company_id', ctx.companyId!)
       .maybeSingle()
 
@@ -365,10 +431,11 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
           preferred_payment_format: changes.preferred_payment_format,
           salary_default_bank: changes.salary_default_bank,
           salary_net_rounding: changes.salary_net_rounding,
+          salary_calculation_policy: nextCalculationPolicy(existing, changes.salary_calculation_policy),
           default_voucher_series_per_source_type: nextVoucherSeriesMap(existing, changes.salary_voucher_series),
         })
         .eq('company_id', ctx.companyId!)
-        .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+        .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type')
         .maybeSingle()
 
       if (error) {
@@ -411,9 +478,10 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
         preferred_payment_format: changes.preferred_payment_format,
         salary_default_bank: changes.salary_default_bank,
         salary_net_rounding: changes.salary_net_rounding,
+        salary_calculation_policy: nextCalculationPolicy(null, changes.salary_calculation_policy),
         default_voucher_series_per_source_type: seriesMap,
       })
-      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+      .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type')
       .maybeSingle()
 
     if (error) {
@@ -424,7 +492,7 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string }> }>(
       if ((error as { code?: string }).code === '23505') {
         const { data: raced, error: racedErr } = await ctx.supabase
           .from('company_settings')
-          .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, default_voucher_series_per_source_type')
+          .select('salary_pay_day, salary_deviation_period, preferred_payment_format, salary_default_bank, salary_net_rounding, salary_calculation_policy, default_voucher_series_per_source_type')
           .eq('company_id', ctx.companyId!)
           .maybeSingle()
         if (racedErr) {

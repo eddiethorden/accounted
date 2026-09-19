@@ -344,6 +344,7 @@ const SETTINGS_FIELDS: Record<string, string> = {
   salary_net_rounding: 'Avrundning nettolön',
   salary_default_bank: 'Standardbank för lön',
   salary_deviation_period: 'Avvikelseperiod för lön',
+  salary_calculation_policy: 'Beräkningsprinciper för lön',
   kontrolluppgifter_enabled: 'Kontrolluppgifter',
   fyllnadsinbetalning_enabled: 'Fyllnadsinbetalning',
   preliminary_tax_monthly: 'Preliminärskatt per månad',

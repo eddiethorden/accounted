@@ -23,6 +23,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { z } from 'zod'
 import type { CreateSalaryLineItemSchema, UpdateSalaryLineItemSchema } from '@/lib/api/schemas'
 import { getLineItemAccount } from '@/lib/salary/account-mapping'
+import { validateOneOffTaxLine } from '@/lib/salary/one-off-tax'
 import { roundOre } from '@/lib/money'
 import type { SalaryLineItemType } from '@/types'
 
@@ -46,6 +47,8 @@ export interface SalaryLineItemRow {
   is_net_deduction: boolean
   account_number: string | null
   sort_order: number
+  /** Engångsskatt percentage (lib/salary/one-off-tax.ts); null = taxed by the table. */
+  one_off_tax_percent?: number | null
   created_at: string
   updated_at: string
 }
@@ -63,7 +66,7 @@ export type PayslipLineTarget = { salaryRunEmployeeId: string } | { employeeId: 
 const LINE_COLUMNS =
   'id, salary_run_employee_id, company_id, item_type, description, quantity, unit_price, amount, ' +
   'is_taxable, is_avgift_basis, is_vacation_basis, is_gross_deduction, is_net_deduction, ' +
-  'account_number, sort_order, created_at, updated_at'
+  'account_number, sort_order, one_off_tax_percent, created_at, updated_at'
 
 /**
  * Verify the run exists in this company and is still a draft.
@@ -169,6 +172,13 @@ export async function createPayslipLine(
   if (!sre.ok) return sre
 
   const input = args.input
+  // Engångsskatt only on a positive taxable addition of an eligible type;
+  // the same rule the DB CHECK enforces, answered here as a 400 with a
+  // Swedish reason instead of a 23514.
+  const oneOffError = validateOneOffTaxLine(input)
+  if (oneOffError) {
+    return { ok: false, code: 'VALIDATION_ERROR', details: { field: 'one_off_tax_percent', message: oneOffError } }
+  }
   const accountNumber =
     input.account_number || getLineItemAccount(input.item_type as SalaryLineItemType)
 
@@ -187,6 +197,7 @@ export async function createPayslipLine(
     is_net_deduction: input.is_net_deduction,
     account_number: accountNumber,
     sort_order: input.sort_order,
+    one_off_tax_percent: input.one_off_tax_percent ?? null,
   }
 
   if (args.dryRun) {
@@ -225,6 +236,13 @@ export async function updatePayslipLine(
   const updates: Record<string, unknown> = { ...args.patch }
   if (typeof updates.amount === 'number') {
     updates.amount = roundOre(updates.amount)
+  }
+  // Validate the row as it will read after the patch: a sparse update that
+  // flips a flag or the sign can invalidate a percentage set earlier.
+  const merged = { ...existing.data, ...updates } as SalaryLineItemRow
+  const oneOffError = validateOneOffTaxLine(merged)
+  if (oneOffError) {
+    return { ok: false, code: 'VALIDATION_ERROR', details: { field: 'one_off_tax_percent', message: oneOffError } }
   }
 
   if (args.dryRun) {
