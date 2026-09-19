@@ -477,7 +477,14 @@ describe('tools/list payload size guard', () => {
     //     delete_absence lost 'UUID of the employee' (restates employee_id),
     //     'Range start/end (...)' wrappers around a date format, and the
     //     'use before register' sentence. Ceiling unchanged, no read demoted.
-    expect(approxTokens).toBeLessThan(60_500)
+    //   * 60.5K → 62K with the anläggningsregister family (API parity,
+    //     2026-09-19): five tools, of which only gnubok_list_assets and
+    //     gnubok_create_asset ride the default catalog (get/update/dispose are
+    //     search-only and named by the list tool). The register is a new
+    //     resource, so its ~20-field row schema had no earlier tool to share
+    //     with; the item and write schemas were trimmed to bare formats first
+    //     (measured 61 849 after the trim).
+    expect(approxTokens).toBeLessThan(62_000)
   })
 
   /**

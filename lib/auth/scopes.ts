@@ -288,6 +288,16 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   // invoices:read (the register exists to serve invoicing).
   'GET /api/v1/companies/:companyId/articles': 'invoices:read',
 
+  // Fixed assets (anläggningsregister). Reads ride reports:read (the register
+  // feeds the depreciation proposal and the balance-sheet notes); create and
+  // update are register writes, dispose posts the avyttring voucher: all three
+  // are bookkeeping:write like gnubok_post_annual_depreciation.
+  'GET /api/v1/companies/:companyId/assets': 'reports:read',
+  'POST /api/v1/companies/:companyId/assets': 'bookkeeping:write',
+  'GET /api/v1/companies/:companyId/assets/:id': 'reports:read',
+  'PATCH /api/v1/companies/:companyId/assets/:id': 'bookkeeping:write',
+  'POST /api/v1/companies/:companyId/assets/:id/dispose': 'bookkeeping:write',
+
   // Webhooks (Phase 6 PR-1)
   'GET /api/v1/companies/:companyId/webhooks': 'webhooks:manage',
   'POST /api/v1/companies/:companyId/webhooks': 'webhooks:manage',

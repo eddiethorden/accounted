@@ -58,6 +58,11 @@ import '@/app/api/v1/companies/[companyId]/invoices/bulk-create/route'
 import '@/app/api/v1/companies/[companyId]/invoices/[id]/pdf/route'
 import '@/app/api/v1/companies/[companyId]/customers/bulk-create/route'
 
+// API parity: fixed assets (anläggningsregister).
+import '@/app/api/v1/companies/[companyId]/assets/route'
+import '@/app/api/v1/companies/[companyId]/assets/[id]/route'
+import '@/app/api/v1/companies/[companyId]/assets/[id]/dispose/route'
+
 // Phase 3: transactions + reconciliation vertical.
 import '@/app/api/v1/companies/[companyId]/transactions/route'
 import '@/app/api/v1/companies/[companyId]/transactions/[id]/route'

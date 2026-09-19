@@ -33,6 +33,30 @@ import {
 import { checkRateLimit } from '@/lib/auth/rate-limit-http'
 import { getCanonicalBaseUrl } from '@/lib/api/v1/base-url'
 import { createCompanyCore } from '@/lib/company/create-company'
+import {
+  AssetCorrectionBlockedError,
+  AssetNotFoundError,
+  getAsset as getFixedAsset,
+  hasPostedDepreciation,
+  listAssets as listFixedAssets,
+  previewAssetDisposal,
+} from '@/lib/bokslut/assets/asset-service'
+import {
+  ASSET_CATEGORIES,
+  ASSET_DISPOSAL_TYPES,
+  ASSET_DISPOSAL_VAT_TREATMENTS,
+  AssetGateError,
+  CreateAssetSchema,
+  DEPRECIATION_METHODS,
+  DisposeAssetSchema,
+  UpdateAssetSchema,
+  assetView,
+  checkCreateAssetGates,
+  checkUpdateAssetGates,
+  disposalPreviewView,
+  loadPostedDepreciationAssetIds,
+  resolveCreateAccounts,
+} from '@/lib/bokslut/assets/asset-api'
 import { CompanySetupSchema, planCompanySetup } from '@/lib/company/onboarding-input'
 import { lookupCompanyByOrgNumber } from '@/extensions/general/tic/lib/lookup'
 import { TICAPIError } from '@/extensions/general/tic/lib/tic-types'
@@ -3499,6 +3523,80 @@ const SALES_ORDER_LINE_INPUT_SCHEMA = {
 } as const
 
 // ── Tools ────────────────────────────────────────────────────
+
+// Wire shape of one anläggningsregister row on the MCP door (qualified
+// asset_id; the field set is lib/bokslut/assets/asset-api.ts assetView()).
+const ASSET_TOOL_ITEM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    asset_id: { type: 'string' },
+    name: { type: 'string' },
+    category: { type: 'string', enum: [...ASSET_CATEGORIES] },
+    acquisition_date: { type: 'string' },
+    acquisition_cost: { type: 'number', description: 'Excl. VAT, SEK' },
+    salvage_value: { type: 'number' },
+    useful_life_months: { type: 'number' },
+    depreciation_method: { type: 'string' },
+    bas_asset_account: { type: 'string' },
+    bas_accumulated_account: { type: 'string' },
+    bas_expense_account: { type: 'string' },
+    k3_components: { type: ['array', 'null'], items: { type: 'object' } },
+    notes: { type: ['string', 'null'] },
+    disposed_at: { type: ['string', 'null'] },
+    disposal_type: { type: ['string', 'null'] },
+    disposed_proceeds: { type: ['number', 'null'] },
+    disposal_journal_entry_id: { type: ['string', 'null'] },
+    has_posted_depreciation: { type: 'boolean', description: 'True once an avskrivning is posted: basis locked' },
+    created_at: { type: 'string' },
+    updated_at: { type: 'string' },
+  },
+  required: [
+    'asset_id', 'name', 'category', 'acquisition_date', 'acquisition_cost', 'salvage_value',
+    'useful_life_months', 'depreciation_method', 'bas_asset_account', 'bas_accumulated_account',
+    'bas_expense_account', 'k3_components', 'notes', 'disposed_at', 'disposal_type',
+    'disposed_proceeds', 'disposal_journal_entry_id', 'has_posted_depreciation', 'created_at', 'updated_at',
+  ],
+} as const
+
+const ASSET_WRITE_PROPERTIES = {
+  name: { type: 'string' },
+  category: { type: 'string', enum: [...ASSET_CATEGORIES], description: 'Drives the default BAS account triple' },
+  acquisition_date: { type: 'string', description: 'yyyy-MM-dd' },
+  acquisition_cost: { type: 'number', description: 'Excl. VAT, SEK, > 0' },
+  salvage_value: { type: 'number', description: 'Restvärde, default 0' },
+  useful_life_months: { type: 'number', description: '60 = 5 years' },
+  depreciation_method: { type: 'string', enum: [...DEPRECIATION_METHODS] },
+  bas_asset_account: { type: 'string', description: 'Override; must be in the category range' },
+  bas_accumulated_account: { type: 'string', description: 'Override' },
+  bas_expense_account: { type: 'string', description: 'Override' },
+  k3_components: {
+    type: ['array', 'null'],
+    description: 'K3 only; costs must sum to acquisition_cost',
+    items: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        cost: { type: 'number' },
+        useful_life_months: { type: 'number' },
+        salvage_value: { type: 'number' },
+      },
+      required: ['name', 'cost', 'useful_life_months'],
+    },
+  },
+  notes: { type: 'string' },
+} as const
+
+const STAGING_ARGS_PROPERTIES = {
+  dry_run: {
+    type: 'boolean',
+    description: 'If true, validate inputs and return the would-be preview without staging. No DB writes, no side-effects.',
+  },
+  idempotency_key: {
+    type: 'string',
+    description: 'Random per-operation UUID. Repeat calls with the same key + same payload return the original response (24h TTL). Different payload → IDEMPOTENCY_KEY_REUSE error.',
+  },
+} as const
 
 export const tools: McpTool[] = [
   {
@@ -21186,6 +21284,280 @@ export const tools: McpTool[] = [
           args: { fiscal_period_id: fiscalPeriodId },
         },
         { dateForPeriodCheck: period.period_end },
+      )
+    },
+  },
+  // ── Anläggningsregister (fixed assets) ───────────────────────────
+  {
+    name: 'gnubok_list_assets',
+    keywords: ['anläggningstillgång', 'anläggningsregister', 'inventarier', 'tillgångar', 'inventarieförteckning', 'avskrivningsunderlag'],
+    title: 'List Fixed Assets',
+    description:
+      'List the anläggningsregister: category, acquisition basis, useful life, BAS accounts, disposal state and has_posted_depreciation. Use before proposing depreciation or before gnubok_update_asset / gnubok_dispose_asset.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        active_only: { type: 'boolean', description: 'Only assets not yet disposed (default false).' },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        assets: { type: 'array', items: ASSET_TOOL_ITEM_SCHEMA },
+        count: { type: 'number' },
+      },
+      required: ['assets', 'count'],
+    },
+    annotations: ANNOTATIONS_READ_ONLY,
+    async execute(args, companyId, _userId, supabase) {
+      const assets = await listFixedAssets(supabase, companyId, { activeOnly: args.active_only === true })
+      const posted = await loadPostedDepreciationAssetIds(supabase, companyId, assets.map((asset) => asset.id))
+      const rows = assets.map((asset) => ({ asset_id: asset.id, ...assetView(asset, posted.has(asset.id)) }))
+      return { assets: rows, count: rows.length }
+    },
+  },
+  {
+    name: 'gnubok_get_asset',
+    keywords: ['tillgång', 'anläggningstillgång', 'avskrivningsplan', 'bokfört värde'],
+    title: 'Get Fixed Asset',
+    description:
+      'One asset from the anläggningsregister with its depreciation schedule per fiscal period (planned amount and the posted verifikat, if any). Use to check the basis before gnubok_update_asset or gnubok_dispose_asset.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        asset_id: { type: 'string', description: 'Asset UUID from gnubok_list_assets' },
+      },
+      required: ['asset_id'],
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        asset: ASSET_TOOL_ITEM_SCHEMA,
+        depreciation_schedule: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              fiscal_period_id: { type: 'string' },
+              planned_depreciation: { type: 'number' },
+              journal_entry_id: { type: ['string', 'null'], description: 'Set once the period\'s avskrivning is posted' },
+            },
+            required: ['fiscal_period_id', 'planned_depreciation', 'journal_entry_id'],
+          },
+        },
+      },
+      required: ['asset', 'depreciation_schedule'],
+    },
+    annotations: ANNOTATIONS_READ_ONLY,
+    catalogVisibility: 'search',
+    async execute(args, companyId, _userId, supabase) {
+      const assetId = args.asset_id
+      if (typeof assetId !== 'string' || !UUID_RE.test(assetId)) throw new Error('asset_id must be a UUID')
+      const asset = await getFixedAsset(supabase, companyId, assetId)
+      if (!asset) throw new AssetNotFoundError()
+      const { data: schedules, error } = await supabase
+        .from('depreciation_schedules')
+        .select('fiscal_period_id, planned_depreciation, journal_entry_id')
+        .eq('company_id', companyId)
+        .eq('asset_id', assetId)
+        .order('fiscal_period_id', { ascending: true })
+      if (error) throw dbError(error)
+      const rows = ((schedules ?? []) as Array<{ fiscal_period_id: string; planned_depreciation: number | string; journal_entry_id: string | null }>).map(
+        (row) => ({
+          fiscal_period_id: row.fiscal_period_id,
+          planned_depreciation: Number(row.planned_depreciation),
+          journal_entry_id: row.journal_entry_id ?? null,
+        }),
+      )
+      const posted = rows.some((row) => row.journal_entry_id !== null)
+      return { asset: { asset_id: asset.id, ...assetView(asset, posted) }, depreciation_schedule: rows }
+    },
+  },
+  {
+    name: 'gnubok_create_asset',
+    keywords: ['ny anläggningstillgång', 'registrera inventarie', 'aktivera tillgång', 'lägg till i anläggningsregistret'],
+    title: 'Create Fixed Asset',
+    description:
+      'Stage a new row in the anläggningsregister. No voucher is posted: the purchase is already booked (bank row or supplier invoice). BAS accounts default per category, framework-aware. Low risk. Depreciation is then proposed per period via gnubok_propose_annual_depreciation.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { ...ASSET_WRITE_PROPERTIES, ...STAGING_ARGS_PROPERTIES },
+      required: ['name', 'category', 'acquisition_date', 'acquisition_cost', 'useful_life_months'],
+    },
+    outputSchema: STAGED_OPERATION_SCHEMA,
+    annotations: ANNOTATIONS_STAGED_WRITE,
+    async execute(args, companyId, userId, supabase, actor) {
+      const { dry_run, idempotency_key, ...rest } = args
+      const parsed = CreateAssetSchema.safeParse(rest)
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0]
+        const path = issue?.path?.join('.') || 'args'
+        throw new Error(`Invalid ${path}: ${issue?.message ?? 'validation failed'}`)
+      }
+      const body = parsed.data
+      const gate = await checkCreateAssetGates(supabase, companyId, body)
+      if (gate) throw new AssetGateError(gate)
+      const accounts = await resolveCreateAccounts(supabase, companyId, body)
+      const cost = roundOre(body.acquisition_cost)
+      return stagePendingOperation(
+        supabase, companyId, userId, 'create_asset',
+        `Ny anläggningstillgång: ${body.name}, ${cost} SEK`,
+        body as Record<string, unknown>,
+        {
+          name: body.name,
+          category: body.category,
+          acquisition_date: body.acquisition_date,
+          acquisition_cost: cost,
+          salvage_value: body.salvage_value ?? 0,
+          useful_life_months: body.useful_life_months,
+          depreciation_method: body.depreciation_method ?? 'linear',
+          accounts,
+          k3_component_count: body.k3_components?.length ?? 0,
+          will: 'add the asset to the anläggningsregister; no voucher is posted (the purchase is already booked)',
+        },
+        actor,
+        undefined,
+        {
+          dryRun: Boolean(dry_run),
+          idempotencyKey: typeof idempotency_key === 'string' ? idempotency_key : undefined,
+        },
+      )
+    },
+  },
+  {
+    name: 'gnubok_update_asset',
+    keywords: ['ändra tillgång', 'rätta anläggningstillgång', 'nyttjandeperiod', 'byt kategori tillgång'],
+    title: 'Update Fixed Asset',
+    description:
+      'Stage a partial update of an anläggningsregister row. Name, notes, salvage value and useful life are always editable; acquisition date, cost and category only while nothing is posted against the asset (else ASSET_CORRECTION_BLOCKED: storno first). Low risk, no voucher.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        asset_id: { type: 'string', description: 'Asset UUID from gnubok_list_assets' },
+        ...ASSET_WRITE_PROPERTIES,
+        notes: { type: ['string', 'null'], description: 'null clears the note' },
+        ...STAGING_ARGS_PROPERTIES,
+      },
+      required: ['asset_id'],
+    },
+    outputSchema: STAGED_OPERATION_SCHEMA,
+    annotations: ANNOTATIONS_STAGED_WRITE,
+    // Search-only with gnubok_dispose_asset: gnubok_list_assets names both, so
+    // the default catalog carries the register read and the create only.
+    catalogVisibility: 'search',
+    async execute(args, companyId, userId, supabase, actor) {
+      const { dry_run, idempotency_key, asset_id: assetId, ...rest } = args
+      if (typeof assetId !== 'string' || !UUID_RE.test(assetId)) throw new Error('asset_id must be a UUID')
+      const parsed = UpdateAssetSchema.safeParse(rest)
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0]
+        const path = issue?.path?.join('.') || 'args'
+        throw new Error(`Invalid ${path}: ${issue?.message ?? 'validation failed'}`)
+      }
+      const changes = parsed.data
+      if (Object.keys(changes).length === 0) throw new Error('At least one field to change is required')
+      const existing = await getFixedAsset(supabase, companyId, assetId)
+      if (!existing) throw new AssetNotFoundError()
+      // Pre-flight the correction lock so the agent hears about it at staging
+      // rather than at approval: the executor (updateAsset) enforces it again.
+      const isCorrection =
+        changes.category !== undefined ||
+        changes.acquisition_date !== undefined ||
+        changes.acquisition_cost !== undefined
+      if (isCorrection) {
+        if (existing.disposed_at) throw new AssetCorrectionBlockedError('disposed')
+        if (await hasPostedDepreciation(supabase, companyId, assetId)) {
+          throw new AssetCorrectionBlockedError('depreciation_posted')
+        }
+      }
+      const gate = await checkUpdateAssetGates(supabase, companyId, changes, existing)
+      if (gate) throw new AssetGateError(gate)
+      return stagePendingOperation(
+        supabase, companyId, userId, 'update_asset',
+        `Ändra anläggningstillgång: ${existing.name} (${Object.keys(changes).join(', ')})`,
+        { asset_id: assetId, changes },
+        {
+          asset_id: assetId,
+          asset_name: existing.name,
+          changes,
+          will: 'update the register row; no voucher is posted',
+        },
+        actor,
+        undefined,
+        {
+          dryRun: Boolean(dry_run),
+          idempotencyKey: typeof idempotency_key === 'string' ? idempotency_key : undefined,
+        },
+      )
+    },
+  },
+  {
+    name: 'gnubok_dispose_asset',
+    keywords: ['avyttring', 'avyttra tillgång', 'utrangering', 'sälja inventarie', 'skrota tillgång', 'verksamhetsöverlåtelse', 'jämkning moms'],
+    title: 'Dispose Fixed Asset (Avyttring)',
+    description:
+      'Stage an asset disposal (sale, scrap or business_transfer): on approval one voucher posts depreciation to date, reverses cost and accumulated depreciation, books proceeds with VAT and the gain/loss, plus ML 15 kap. jämkning when due. Mid-risk. dry_run shows the exact lines.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        asset_id: { type: 'string', description: 'Asset UUID from gnubok_list_assets' },
+        disposal_type: { type: 'string', enum: [...ASSET_DISPOSAL_TYPES], description: 'sale, scrap (utrangering) or business_transfer (ML 5 kap. 38 §)' },
+        disposed_at: { type: 'string', description: 'yyyy-MM-dd; the voucher date' },
+        disposed_proceeds: { type: 'number', description: 'Gross incl. VAT for a taxable sale; 0 for scrap' },
+        proceeds_account: { type: 'string', description: 'Account the proceeds landed on (default 1930)' },
+        fiscal_period_id: { type: 'string', description: 'Open fiscal period the voucher is posted in' },
+        vat_treatment: { type: 'string', enum: [...ASSET_DISPOSAL_VAT_TREATMENTS], description: 'Required for a sale with proceeds; forbidden otherwise' },
+        jamkning_original_input_vat: { type: 'number', description: 'Original input VAT at acquisition (with the deduction percent) enables the jämkning assessment' },
+        jamkning_original_deduction_percent: { type: 'number', description: '0-100' },
+        business_transfer_confirmed: { type: 'boolean', description: 'Required for business_transfer' },
+        adjustment_document_confirmed: { type: 'boolean', description: 'Required when the jämkning obligation transfers (justeringshandling)' },
+        ...STAGING_ARGS_PROPERTIES,
+      },
+      required: ['asset_id', 'disposal_type', 'disposed_at', 'disposed_proceeds', 'fiscal_period_id'],
+    },
+    outputSchema: STAGED_OPERATION_SCHEMA,
+    annotations: ANNOTATIONS_STAGED_WRITE,
+    catalogVisibility: 'search',
+    async execute(args, companyId, userId, supabase, actor) {
+      const { dry_run, idempotency_key, asset_id: assetId, ...rest } = args
+      if (typeof assetId !== 'string' || !UUID_RE.test(assetId)) throw new Error('asset_id must be a UUID')
+      const parsed = DisposeAssetSchema.safeParse(rest)
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0]
+        const path = issue?.path?.join('.') || 'args'
+        throw new Error(`Invalid ${path}: ${issue?.message ?? 'validation failed'}`)
+      }
+      const body = parsed.data
+      // Throws the typed asset errors (not found, already disposed, blocked,
+      // jämkning data required) exactly where the commit would.
+      const preview = await previewAssetDisposal(supabase, companyId, assetId, body)
+      const view = disposalPreviewView(preview, body)
+      return stagePendingOperation(
+        supabase, companyId, userId, 'dispose_asset',
+        `Avyttring: ${preview.asset.name} (${body.disposal_type}), ${view.proceeds_gross} SEK`,
+        { asset_id: assetId, ...body },
+        {
+          asset_id: assetId,
+          ...view,
+          will: view.posts_journal_entry
+            ? `post the avyttring voucher (${view.lines.length} lines, gain/loss ${view.gain_or_loss} SEK) and mark the asset disposed`
+            : 'mark the asset disposed; nothing to post (fully depreciated, no proceeds)',
+        },
+        actor,
+        undefined,
+        {
+          dryRun: Boolean(dry_run),
+          idempotencyKey: typeof idempotency_key === 'string' ? idempotency_key : undefined,
+          dateForPeriodCheck: body.disposed_at,
+        },
       )
     },
   },

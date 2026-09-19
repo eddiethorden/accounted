@@ -418,6 +418,13 @@ export const TOOL_SCOPE_MAP: Record<string, ApiKeyScope> = {
   gnubok_list_rot_rut_payout_requests:         'invoices:read',
   // Skatteverkets utbetalning: bank row booked against its begäran (stages)
   gnubok_settle_rot_rut_payout:                'transactions:write',
+  // Anläggningsregister: reads ride reports:read (register data feeds the
+  // depreciation proposal); writes are bookkeeping:write like the posting.
+  gnubok_list_assets:                          'reports:read',
+  gnubok_get_asset:                            'reports:read',
+  gnubok_create_asset:                         'bookkeeping:write',
+  gnubok_update_asset:                         'bookkeeping:write',
+  gnubok_dispose_asset:                        'bookkeeping:write',
   gnubok_list_verifikat_without_documents:     'transactions:read',
   gnubok_find_voucher_candidates_for_invoice:  'invoices:read',
   gnubok_propose_dispositioner:                'reports:read',

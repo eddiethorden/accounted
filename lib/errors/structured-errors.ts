@@ -4605,6 +4605,20 @@ const ASSETS: Record<string, StructuredErrorEntry> = {
     message_en:
       'Acquisition date, cost and category cannot be changed once the asset has been disposed or depreciation has been posted. Reverse (storno) first, or use the disposal flow.',
   },
+  K3_REQUIRED_FOR_COMPONENTS: {
+    httpStatus: 422,
+    message_sv:
+      'Komponentuppdelning (k3_components) kräver att företaget tillämpar K3 (BFNAR 2012:1).',
+    message_en:
+      'Component depreciation (k3_components) requires the company to apply K3 (BFNAR 2012:1).',
+  },
+  INVALID_K3_COMPONENTS: {
+    httpStatus: 400,
+    message_sv:
+      'Komponentuppdelningen är ogiltig: komponenternas anskaffningsvärden måste summera till tillgångens anskaffningsvärde.',
+    message_en:
+      'The component breakdown is invalid: component costs must sum to the acquisition cost of the asset.',
+  },
   // Generic on purpose: the flag covers accounts excluded from K2 for several
   // different reasons (egenupparbetade immateriella, uppskjuten skatt,
   // verkligt värde, säkringsredovisning, ...), so the static entry states only

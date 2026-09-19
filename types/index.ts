@@ -2614,6 +2614,12 @@ export type PendingOperationType =
   // (one or several, #2239): one voucher debit 19xx / credit 1513 per begäran,
   // the row linked, every begäran marked settled (gnubok_settle_rot_rut_payout).
   | 'settle_rot_rut_payout'
+  // Anläggningsregister (gnubok_create_asset / gnubok_update_asset /
+  // gnubok_dispose_asset): the register rows are master data (no voucher),
+  // the disposal posts the avyttring voucher via disposeAsset().
+  | 'create_asset'
+  | 'update_asset'
+  | 'dispose_asset'
 // 'failed_partial' (issue #842, DB CHECK widened in 20260722134114): terminal
 // state for ops whose executor posted an irreversible side-effect (voucher,
 // credit note) and then failed a later step. Not re-committable, not pending

@@ -143,6 +143,16 @@ const GROUPS: Array<{ file: string; title: string; members: string[]; blurb: str
       'general ledger, VAT declaration, AR/AP ledgers, salary journal, and SIE export.',
   },
   {
+    file: 'assets.md',
+    title: 'Fixed assets',
+    members: ['assets'],
+    blurb:
+      'The anläggningsregister: register an asset (no voucher, the purchase is already booked), ' +
+      'correct it while no depreciation is posted, and dispose it (sale, scrap or business transfer) ' +
+      'which posts the avyttring voucher with gain/loss, VAT and jämkning. Depreciation itself is ' +
+      'proposed and posted per fiscal period through the year-end flow.',
+  },
+  {
     file: 'webhooks.md',
     title: 'Webhooks',
     members: ['webhooks', 'webhook-deliveries'],

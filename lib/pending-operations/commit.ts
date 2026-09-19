@@ -91,6 +91,22 @@ import {
 } from '@/lib/core/bookkeeping/kontantmetod-cutoff'
 import { executeCurrencyRevaluation } from '@/lib/bookkeeping/currency-revaluation'
 import {
+  AssetCorrectionBlockedError,
+  createAsset as createFixedAsset,
+  disposeAsset as disposeFixedAsset,
+  getAsset as getFixedAsset,
+  hasPostedDepreciation,
+  updateAsset as updateFixedAsset,
+} from '@/lib/bokslut/assets/asset-service'
+import {
+  CreateAssetSchema,
+  DisposeAssetSchema,
+  UpdateAssetSchema,
+  assetView,
+  checkCreateAssetGates,
+  checkUpdateAssetGates,
+} from '@/lib/bokslut/assets/asset-api'
+import {
   createSupplierCreditNoteEntry,
   createSupplierInvoiceRegistrationEntry,
 } from '@/lib/bookkeeping/supplier-invoice-entries'
@@ -4618,6 +4634,95 @@ async function commitPostAnnualDepreciation(
   }
 }
 
+// ── Anläggningsregister ──────────────────────────────────────────
+
+function invalidAssetParams(err: z.ZodError): ExecutorResult {
+  const issue = err.issues[0]
+  const path = issue?.path?.join('.') || 'params'
+  return { error: `Invalid ${path}: ${issue?.message ?? 'validation failed'}`, status: 400 }
+}
+
+async function commitCreateAsset(
+  supabase: SupabaseClient,
+  userId: string,
+  companyId: string,
+  params: Record<string, unknown>
+): Promise<ExecutorResult> {
+  // Re-validate at the commit boundary: a tampered pending_operations row
+  // must not reach the register with fields the staging tool never accepted.
+  const parsed = CreateAssetSchema.safeParse(params)
+  if (!parsed.success) return invalidAssetParams(parsed.error)
+  const gate = await checkCreateAssetGates(supabase, companyId, parsed.data)
+  if (gate) return { error: gate.message_en, errorCode: gate.code, status: gate.status }
+  try {
+    const asset = await createFixedAsset(supabase, companyId, userId, parsed.data)
+    return { data: { asset_id: asset.id, ...assetView(asset, false) } }
+  } catch (err) {
+    return failUnlessBookkeepingError(err, 'Asset creation failed', 400)
+  }
+}
+
+async function commitUpdateAsset(
+  supabase: SupabaseClient,
+  companyId: string,
+  params: Record<string, unknown>
+): Promise<ExecutorResult> {
+  const assetId = params.asset_id
+  if (typeof assetId !== 'string' || !assetId) return { error: 'asset_id is required', status: 400 }
+  const parsed = UpdateAssetSchema.safeParse(params.changes ?? {})
+  if (!parsed.success) return invalidAssetParams(parsed.error)
+  if (Object.keys(parsed.data).length === 0) return { error: 'changes must contain at least one field', status: 400 }
+  const existing = await getFixedAsset(supabase, companyId, assetId)
+  if (!existing) return { error: 'Asset not found', errorCode: 'ASSET_NOT_FOUND', status: 404 }
+  const gate = await checkUpdateAssetGates(supabase, companyId, parsed.data, existing)
+  if (gate) return { error: gate.message_en, errorCode: gate.code, status: gate.status }
+  try {
+    const asset = await updateFixedAsset(supabase, companyId, assetId, parsed.data)
+    const posted = await hasPostedDepreciation(supabase, companyId, assetId)
+    return { data: { asset_id: asset.id, ...assetView(asset, posted) } }
+  } catch (err) {
+    if (err instanceof AssetCorrectionBlockedError) {
+      return { error: err.message, errorCode: err.code, status: 409 }
+    }
+    return failUnlessBookkeepingError(err, 'Asset update failed', 400)
+  }
+}
+
+async function commitDisposeAsset(
+  supabase: SupabaseClient,
+  userId: string,
+  companyId: string,
+  params: Record<string, unknown>
+): Promise<ExecutorResult> {
+  const { asset_id: assetId, ...rest } = params
+  if (typeof assetId !== 'string' || !assetId) return { error: 'asset_id is required', status: 400 }
+  const parsed = DisposeAssetSchema.safeParse(rest)
+  if (!parsed.success) return invalidAssetParams(parsed.error)
+  try {
+    const result = await disposeFixedAsset(supabase, companyId, userId, assetId, parsed.data)
+    return {
+      data: {
+        asset_id: result.asset.id,
+        disposed_at: result.asset.disposed_at,
+        disposal_type: result.asset.disposal_type ?? parsed.data.disposal_type,
+        disposal_journal_entry_id: result.disposal_entry?.id ?? null,
+        voucher_number: result.disposal_entry?.voucher_number ?? null,
+        gain_or_loss: result.gain_or_loss,
+      },
+    }
+  } catch (err) {
+    // The typed asset errors carry a registry code; surface it so the caller
+    // can branch (404 not found, 409 already disposed / blocked, 422 missing
+    // jämkning data or confirmation) instead of parsing prose.
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string' && code.startsWith('ASSET_')) {
+      const status = code === 'ASSET_NOT_FOUND' ? 404 : code.endsWith('_REQUIRED') ? 422 : 409
+      return { error: (err instanceof Error && err.message) || code, errorCode: code, status }
+    }
+    return failUnlessBookkeepingError(err, 'Asset disposal failed', 400)
+  }
+}
+
 async function commitExplainVoucherGap(
   supabase: SupabaseClient,
   userId: string,
@@ -7650,6 +7755,15 @@ async function commitPendingOperationInner(
         break
       case 'post_annual_depreciation':
         result = await commitPostAnnualDepreciation(supabase, userId, companyId, pendingOp.params)
+        break
+      case 'create_asset':
+        result = await commitCreateAsset(supabase, userId, companyId, pendingOp.params)
+        break
+      case 'update_asset':
+        result = await commitUpdateAsset(supabase, companyId, pendingOp.params)
+        break
+      case 'dispose_asset':
+        result = await commitDisposeAsset(supabase, userId, companyId, pendingOp.params)
         break
       case 'create_salary_run':
         result = await commitCreateSalaryRun(supabase, userId, companyId, pendingOp.params)
