@@ -30,6 +30,8 @@ describe('accounted-mcp package', () => {
     // parameter the server reads (COMPANY_PIN_QUERY_PARAM).
     expect(source).toContain('ACCOUNTED_COMPANY')
     expect(source).toContain("searchParams.set('company'")
+    // A malformed pin fails closed (exit), never open to the default scope.
+    expect(source).toMatch(/ACCOUNTED_COMPANY must be a company id[\s\S]*process\.exit\(1\)/)
 
     expect(source).not.toContain('GNUBOK_API_KEY')
     expect(source).not.toContain('GNUBOK_URL')

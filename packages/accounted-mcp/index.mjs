@@ -38,18 +38,19 @@ function resolveMcpUrl(rawUrl) {
 
 // Optional company pin: ACCOUNTED_COMPANY=<company id> pins the whole
 // connection to one company (the server hides the company switch and refuses
-// calls for any other company). Anything that is not a UUID is ignored with a
-// note, so a typo cannot silently connect to the key's default company under
-// the impression of a pin.
+// calls for any other company). A value that is not a UUID is a hard error:
+// a pin exists to narrow the connection, so a typo must never fall open to
+// the key's unrestricted default scope.
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const rawCompany = process.env.ACCOUNTED_COMPANY
-const COMPANY =
-  rawCompany && UUID_RE.test(rawCompany.trim()) ? rawCompany.trim().toLowerCase() : undefined
-if (rawCompany && !COMPANY) {
+const COMPANY = rawCompany ? rawCompany.trim().toLowerCase() : undefined
+if (COMPANY !== undefined && !UUID_RE.test(COMPANY)) {
   process.stderr.write(
-    'accounted-mcp: ignoring ACCOUNTED_COMPANY: must be a company id (UUID); the key default company is used\n'
+    'Error: ACCOUNTED_COMPANY must be a company id (UUID, from accounted_list_companies).\n' +
+      'Refusing to start: an invalid pin would connect with the key\'s full company scope.\n'
   )
+  process.exit(1)
 }
 
 function withCompanyPin(rawUrl) {
