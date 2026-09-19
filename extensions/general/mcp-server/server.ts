@@ -4408,12 +4408,14 @@ export const tools: McpTool[] = [
           if (kind === 'vat') {
             innerArgs = { period_type: args.period_type, year: args.year, period: args.period }
           } else {
-            // The open fiscal period is the one year-end can run on.
+            // The earliest not-yet-closed fiscal period is the one year-end
+            // can run on (fiscal_periods has no status column: closed state is
+            // is_closed, lock state is locked_at).
             const { data: periods, error } = await supabase
               .from('fiscal_periods')
-              .select('id, period_start, period_end, status')
+              .select('id, period_start, period_end, is_closed')
               .eq('company_id', company.companyId)
-              .eq('status', 'open')
+              .eq('is_closed', false)
               .order('period_start', { ascending: true })
               .limit(1)
             if (error) throw new Error(`Failed to find the open fiscal period: ${error.message}`)
