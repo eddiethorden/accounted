@@ -456,8 +456,10 @@ export async function generateAgiDeclaration(
   const totalAvgifterAmount = declared.totalAmount
   const totalAvgifterBasis = declared.totalUnderlag
 
-  // FK499 sjuklönekostnad: sum of paid sjuklön (days 2-14) across all
-  // employees. Day 1 is karens (unpaid); day 15+ is Försäkringskassan.
+  // FK499 sjuklönekostnad: the sjuklön actually paid across all employees:
+  // 80 % of the lost pay for days 1-14 (the sick_day2_14 row covers day one
+  // too since SjLL 6 § 2019) less the karensavdrag rows. Day 15+ is
+  // Försäkringskassan.
   const calcParams = ((run.calculation_params as Record<string, unknown>) ?? {}) as {
     sjuklonRate?: number
     sjuklon_rate?: number
@@ -473,6 +475,8 @@ export async function generateAgiDeclaration(
       if (li.item_type === 'sick_day2_14') {
         const days = li.quantity ?? 0
         totalSjuklonekostnad += dailyRate * sjuklonRate * days
+      } else if (li.item_type === 'sick_karens') {
+        totalSjuklonekostnad -= Math.abs(li.amount ?? 0)
       }
     }
   }

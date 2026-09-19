@@ -250,6 +250,27 @@ describe('deriveAbsenceLineItems: cutover karensPeriodsAdjustment', () => {
 })
 
 describe('deriveAbsenceLineItems: karens cap, carry and partial days', () => {
+  it('keeps suppressing karens for every period past the högriskskydd cap in one month', () => {
+    // 10 prior single-day periods, each more than 5 days apart, inside the
+    // 12-month window: the 11th and 12th periods in the month are both
+    // suppressed, and the suppressed 11th still counts toward the window.
+    const lookback = Array.from({ length: 10 }, (_, i) => {
+      const d = new Date(Date.UTC(2026, 0, 5 + i * 10))
+      return d.toISOString().slice(0, 10)
+    })
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        lookbackSickDates: lookback,
+        periodDays: days([
+          ['2026-07-06', 'sick'],
+          ['2026-07-20', 'sick'],
+        ]),
+      }),
+    )
+    expect(result.lineItems.filter(li => li.item_type === 'sick_karens')).toHaveLength(0)
+    expect(result.lineItems.find(li => li.item_type === 'sick_day2_14')!.quantity).toBe(2)
+  })
+
   // 30 000 kr, divisor 21: daily 1428.57, sjuklön/day 1142.86,
   // karensavdrag 20 % of a week's sjuklön = 1107.69.
   it('caps the karensavdrag at the sjuklön the period yields (SjLL 6 §)', () => {

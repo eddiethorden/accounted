@@ -77,6 +77,11 @@ export interface SalaryCalculationInput {
   employmentEnd?: string | null
 }
 
+/** Row types Step 3 consumes as signed absence; Step 4 must never see them again. */
+const ABSENCE_ITEM_TYPES: ReadonlySet<string> = new Set([
+  'sick_karens', 'sick_day2_14', 'sick_day15_plus', 'vab', 'parental_leave', 'unpaid_leave', 'vacation',
+])
+
 export interface CalculationLineItem {
   itemType: SalaryLineItemType
   amount: number
@@ -349,9 +354,7 @@ export function calculateSalary(
   }
 
   // ─── Step 3: Subtract absence deductions ───
-  const absenceItems = input.lineItems.filter(
-    li => ['sick_karens', 'sick_day2_14', 'sick_day15_plus', 'vab', 'parental_leave', 'unpaid_leave', 'vacation'].includes(li.itemType)
-  )
+  const absenceItems = input.lineItems.filter(li => ABSENCE_ITEM_TYPES.has(li.itemType))
   const totalAbsence = r(absenceItems.reduce((sum, li) => sum + li.amount, 0))
   if (totalAbsence !== 0) {
     steps.push({
@@ -369,7 +372,7 @@ export function calculateSalary(
   // deducted twice: 31 500 kr with one VAB day gave 28 500 instead of 30 000
   // (reported by Frey, 2026-09-18).
   const grossDeductionItems = input.lineItems.filter(
-    li => li.isGrossDeduction && !absenceItems.includes(li),
+    li => li.isGrossDeduction && !ABSENCE_ITEM_TYPES.has(li.itemType),
   )
   const totalGrossDeductions = r(Math.abs(grossDeductionItems.reduce((sum, li) => sum + li.amount, 0)))
   if (totalGrossDeductions > 0) {
