@@ -103,7 +103,7 @@ number-less draft invoices, supplier credit notes sharing display numbers,
 atomic row completion and payment contention across batches. The matching
 `provider-migration-jobs.pg.test.ts` runs the same assertions in pg-real CI.
 
-The four migrations in this branch have been applied to staging and verified
+The five migrations in this branch have been applied to staging and verified
 byte-for-byte against its migration history. The application and scheduler are
 not deployed by this worktree. Browser testing with a real provider account is
 still the joint local verification step. Production rollout requires merging and
