@@ -237,7 +237,12 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
     // repeatedly: softer error than the opposite.
     //
     // TODO: persist per-period karens deduction state if the period-count
-    // reading produces complaints in the field.
+    // reading produces complaints in the field. The same state would carry
+    // the karens amount already consumed by a period that continues from
+    // the previous pay period; today that is reconstructed from the prior
+    // sick hours at the CURRENT daily rate, so a salary or schedule change
+    // inside one sjuklöneperiod straddling a month boundary can shift the
+    // combined karens by the rate difference.
     const cap = payrollConfig.maxKarensavdragPerYear ?? 10
     const cutoff = addDays(periodMin, -365)
     const lookbackOnlySegments = buildSjukloneperioder(
@@ -376,7 +381,9 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
       amount: -vab.deduction,
       is_taxable: true,
       is_avgift_basis: true,
-      is_vacation_basis: vab.semesterGrundande,
+      // SemL 17 §: the 120-day cap counts calendar dates, not weighted hours;
+      // the YTD figure is a date count too.
+      is_vacation_basis: input.vabDaysYtd + vabCount <= 120,
       is_gross_deduction: true,
     })
   }
@@ -398,7 +405,8 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
       amount: -parental.deduction,
       is_taxable: true,
       is_avgift_basis: true,
-      is_vacation_basis: parental.semesterGrundande,
+      // SemL 17 a §: 120 calendar dates per pregnancy, whole dates as above.
+      is_vacation_basis: input.parentalDaysPregnancyYtd + parentalCount <= 120,
       is_gross_deduction: true,
     })
   }

@@ -331,6 +331,23 @@ describe('deriveAbsenceLineItems: karens cap, carry and partial days', () => {
     },
   )
 
+  it('counts whole dates, not weighted hours, toward the 120-day semestergrundande cap', () => {
+    // 119 dates YTD plus two half days: 121 dates, so no longer
+    // semestergrundande, even though the weighted deduction is one day.
+    const result = deriveAbsenceLineItems(
+      baseInput({
+        vabDaysYtd: 119,
+        periodDays: [
+          { absence_date: '2026-07-01', absence_type: 'vab', hours: 4 },
+          { absence_date: '2026-07-02', absence_type: 'vab', hours: 4 },
+        ],
+      }),
+    )
+    const vab = result.lineItems.find(li => li.item_type === 'vab')!
+    expect(vab.quantity).toBe(1)
+    expect(vab.is_vacation_basis).toBe(false)
+  })
+
   it('uses the employee schedule for the day length and never counts more than a day', () => {
     const sixHourDay = deriveAbsenceLineItems(
       baseInput({ hoursPerDay: 6, periodDays: [{ absence_date: '2026-07-01', absence_type: 'vab', hours: 3 }] }),
