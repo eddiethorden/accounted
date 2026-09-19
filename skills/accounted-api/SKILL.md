@@ -8,7 +8,7 @@ description: >-
   transactions and reconciliation, payroll (lön), VAT/moms and financial
   reports, SIE import/export, documents, webhooks. Covers auth with
   gnubok_sk_ API keys, conventions (dry-run, idempotency, cursor
-  pagination, scopes), and all 163 endpoints.
+  pagination, scopes), and all 164 endpoints.
 ---
 
 <!-- GENERATED FILE, do not edit. Source: lib/api/v1 registry + scripts/api-skill/overlays. Regenerate with `npm run apiskill:generate`. -->
@@ -142,7 +142,7 @@ call can undo it, e.g. invoice credit).
 
 ## Endpoint index
 
-API version `2026-05-12`, 163 operations. Paths are shown without
+API version `2026-05-12`, 164 operations. Paths are shown without
 their `/api/v1` prefix (full base URL: `https://app.gnubok.se/api/v1`).
 
 ### Core (5)
@@ -325,7 +325,7 @@ PATCH /companies/{companyId}/salary/settings : Partially update the company payr
 POST /companies/{companyId}/salary/vacation-year-close : Close a vacation year (semesterberedning + arsavslut) [scope:payroll:write risk:high idempotent dry-run]
 ```
 
-### Salary runs (21)
+### Salary runs (22)
 
 Full detail: [references/salary-runs.md](references/salary-runs.md)
 
@@ -350,6 +350,7 @@ PATCH /companies/{companyId}/salary-runs/{id}/lines/{lineId} : Update a payslip 
 DELETE /companies/{companyId}/salary-runs/{id}/lines/{lineId} : Delete a payslip line from a draft salary run [scope:payroll:write risk:low idempotent dry-run]
 POST /companies/{companyId}/salary-runs/{id}/mark-paid : Mark an approved salary run as paid [scope:payroll:write risk:low idempotent dry-run]
 POST /companies/{companyId}/salary-runs/{id}/payment-file : Generate the bank payment file (pain.001 or Bankgirot LB) for a salary run [scope:payroll:write risk:medium idempotent dry-run reversible]
+GET /companies/{companyId}/salary-runs/{id}/payment-files : List the archived bank payment files of a salary run [scope:payroll:read risk:low idempotent]
 GET /companies/{companyId}/salary-runs/{id}/payslips/{employeeId}/pdf : Download one employee's payslip as PDF [scope:payroll:read risk:low idempotent]
 ```
 

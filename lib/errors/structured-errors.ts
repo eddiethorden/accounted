@@ -3573,6 +3573,7 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     httpStatus: 409,
     message_sv: 'Lönekörningen är redan korrigerad; arbeta vidare i korrigeringskörningen.',
     message_en: 'The salary run is already corrected; continue in its correction run.',
+  },
   SALARY_REGISTER_DATES_LOCKED_BY_RUN: {
     httpStatus: 409,
     message_sv:
