@@ -21,6 +21,7 @@ import { BL_RESOURCE_CONFIGS } from './bjornlunden/config';
 import { WintClient } from './wint/client';
 import { WINT_RESOURCE_CONFIGS } from './wint/config';
 import { ResourceType } from './dto';
+import type { MigrationResource } from './migration-contract';
 
 // Singleton clients (they hold rate limiters)
 const fortnoxClient = new FortnoxClient();
@@ -29,6 +30,57 @@ const brioxClient = new BrioxClient();
 const bokioClient = new BokioClient();
 const bjornLundenClient = new BjornLundenClient();
 const wintClient = new WintClient();
+
+export type MigrationDto = CustomerDto | SupplierDto | SalesInvoiceDto | SupplierInvoiceDto;
+
+/** One provider page, never a whole-register loop. The worker persists its cursor. */
+export async function fetchMigrationPage(
+  provider: ProviderName, accessToken: string, providerCompanyId: string | undefined,
+  resource: MigrationResource, page: number,
+): Promise<{ items: MigrationDto[]; nextPage: number | null; total: number }> {
+  const kind = { customers: ResourceType.Customers, suppliers: ResourceType.Suppliers,
+    salesInvoices: ResourceType.SalesInvoices, supplierInvoices: ResourceType.SupplierInvoices }[resource];
+  const configs = { fortnox: FORTNOX_RESOURCE_CONFIGS, visma: VISMA_RESOURCE_CONFIGS,
+    briox: BRIOX_RESOURCE_CONFIGS, bokio: BOKIO_RESOURCE_CONFIGS,
+    bjornlunden: BL_RESOURCE_CONFIGS, wint: WINT_RESOURCE_CONFIGS };
+  const config = configs[provider][kind];
+  if (!config) return { items: [], nextPage: null, total: 0 };
+  if ((provider === 'bokio' || provider === 'bjornlunden') && !providerCompanyId) {
+    throw new Error('MIGRATION_SOURCE_IDENTITY_MISSING');
+  }
+  let result: { items: Record<string, unknown>[]; page: number; totalPages: number; totalCount: number };
+  if (provider === 'visma') {
+    result = await vismaClient.getPage(accessToken, config.listEndpoint, { page, pageSize: 1000 });
+  } else if (provider === 'fortnox') {
+    result = await fortnoxClient.getPage(accessToken, config.listEndpoint, FORTNOX_RESOURCE_CONFIGS[kind]!.listKey, { page });
+  } else if (provider === 'briox') {
+    result = await brioxClient.getPage(accessToken, config.listEndpoint, BRIOX_RESOURCE_CONFIGS[kind]!.listKey, { page });
+  } else if (provider === 'bokio') {
+    try {
+      result = await bokioClient.getPage(accessToken, providerCompanyId!, config.listEndpoint, { page });
+    } catch (error) {
+      // Preserve the direct importer's handling of optional Bokio AP endpoints.
+      if ((resource === 'suppliers' || resource === 'supplierInvoices')
+        && error instanceof BokioApiError && error.statusCode === 404) {
+        return { items: [], nextPage: null, total: 0 };
+      }
+      throw error;
+    }
+  } else if (provider === 'bjornlunden') {
+    // BL's party registers are a single unpaged response. Its invoice APIs page.
+    result = await bjornLundenClient.getPage(accessToken, providerCompanyId!, config.listEndpoint, { page });
+  } else {
+    const response = await wintClient.getPage<Record<string, unknown>>(accessToken, config.listEndpoint, { page });
+    result = { ...response, totalPages: Math.ceil(response.totalItems / response.pageSize), totalCount: response.totalItems };
+  }
+  if (result.page !== page) throw new Error('MIGRATION_PROVIDER_PAGE_MISMATCH');
+  if (result.items.length === 0 && page < result.totalPages) throw new Error('MIGRATION_PROVIDER_EMPTY_PAGE');
+  return {
+    items: result.items.map(item => config.mapper(item) as MigrationDto),
+    nextPage: result.items.length > 0 && page < result.totalPages ? page + 1 : null,
+    total: result.totalCount,
+  };
+}
 
 // ── Helper to paginate Bokio (uses getPage with companyId) ──────────
 
