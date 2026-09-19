@@ -163,6 +163,16 @@ BEGIN
   ASSERT n=2,'cross-batch payment contention picked a winner';
   SELECT count(*) INTO n FROM supplier_invoice_payments WHERE company_id=company;
   ASSERT n=0,'ambiguous matching wrote a payment';
+  ASSERT NOT EXISTS(SELECT 1 FROM journal_entries WHERE company_id=company),
+    'register import created a journal entry';
+  BEGIN
+    PERFORM insert_provider_migration_row('journal_entries','{}');
+    RAISE EXCEPTION 'TEST: register writer accepted journal_entries';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM<>'MIGRATION_TABLE_FORBIDDEN' THEN RAISE; END IF; END;
+  BEGIN
+    PERFORM insert_provider_migration_row('journal_entry_lines','{}');
+    RAISE EXCEPTION 'TEST: register writer accepted journal_entry_lines';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM<>'MIGRATION_TABLE_FORBIDDEN' THEN RAISE; END IF; END;
   PERFORM advance_provider_migration_job(j.id,worker,j.attempt);
   DELETE FROM provider_consent_tokens WHERE consent_id=consent;
   DELETE FROM provider_consents WHERE id=consent;

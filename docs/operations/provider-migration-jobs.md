@@ -49,6 +49,26 @@ candidates in different batches cannot each consume the same voucher.
   Job state is operational; source-ID mappings are included in the
   company archive alongside the imported registers.
 
+## Accounting and retention boundaries
+
+The provider worker imports registers and links existing posted vouchers; it
+does not create journal entries. VAT, FX and unlinked-credit warnings are stored
+in receipts and shown in the result. These warnings do not by themselves put
+every record into `needs_attention` and must be reviewed before later accounting
+actions. The existing mapper is reused without changing its VAT rules.
+
+There is no snapshot purge or TTL job. A pending or failed snapshot remains
+available for retry. The archive includes customers, suppliers, invoices, their
+items and payments, and source-ID mappings; operational jobs and encrypted
+replay payloads are excluded. Source documents keep their separate import and
+retention flow.
+
+Historical invoice numbers are preserved. This worker does not change the
+company's invoice prefix or next number and does not create a separate number
+namespace. Before issuing new invoices after a migration, check those settings
+against the imported numbers. The existing company-wide unique index refuses
+collisions instead of issuing a duplicate number.
+
 ## Local session with staging
 
 Use the worktree `wt/resumable-provider-import` on
