@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ProviderMigrationJob } from '@/lib/providers/migration-contract'
 import { sealMigrationPayload } from '@/lib/providers/migration-payload'
+import { mapBokioToSalesInvoice, mapBokioToSupplierInvoice } from '@/lib/providers/bokio/mapper'
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), page: vi.fn(), hydrate: vi.fn(), link: vi.fn(), reconcile: vi.fn() }))
 vi.mock('@/lib/auth/api-keys', () => ({ createServiceClientNoCookies: vi.fn() }))
 vi.mock('@/lib/providers/resolve-consent', () => ({ resolveConsent: mocks.resolve }))
@@ -12,10 +13,11 @@ vi.mock('../entity-mapper', () => ({
   mapCustomer: (dto: { party: { name: string } }) => ({ name: dto.party.name }),
   mapSupplier: (dto: { party: { name: string } }) => ({ name: dto.party.name }),
   buildFxRateIndex: vi.fn().mockResolvedValue(new Map()),
-  mapSalesInvoice: () => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] }),
-  mapSupplierInvoice: () => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] }),
+  mapSalesInvoice: vi.fn(() => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] })),
+  mapSupplierInvoice: vi.fn(() => ({ invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 }, items: [{ line_total: 100, vat_amount: 25 }] })),
 }))
-import { migrationRpc, runProviderMigrationWorker, withinMigrationDeadline } from '../migration-job-worker'
+import { mapSalesInvoice, mapSupplierInvoice } from '../entity-mapper'
+import { invoicePartySourceId, migrationRpc, runProviderMigrationWorker, withinMigrationDeadline } from '../migration-job-worker'
 
 function database(overrides: Partial<ProviderMigrationJob> = {}) {
   const job = { id: 'job', company_id: 'company', user_id: 'user', consent_id: 'consent', provider: 'visma',
@@ -67,6 +69,43 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs() })
 describe('bounded durable worker', () => {
+  it.each(['salesInvoices', 'supplierInvoices'] as const)('isolates %s with inconsistent VAT rows before writing an invoice', async resource => {
+    const db = database({ phase: 'import', resources: [resource] })
+    const raw = { id: 'invoice', customerRef: { id: 'customer', name: 'Customer' },
+      supplierRef: { id: 'supplier', name: 'Supplier' }, totalAmount: 125, totalTax: 25,
+      lineItems: [{ description: 'Test', quantity: 1, unitPrice: 100, taxRate: 25 }] }
+    const dto = resource === 'salesInvoices' ? mapBokioToSalesInvoice(raw) : mapBokioToSupplierInvoice(raw)
+    const mapper = resource === 'salesInvoices' ? mapSalesInvoice : mapSupplierInvoice
+    vi.mocked(mapper).mockReturnValueOnce({
+      invoice: { subtotal: 100, vat_amount: 25, total_sek: 125 },
+      items: [{ line_total: 100, vat_amount: 0 }],
+      fxUnresolved: null, vatUnresolved: false, creditNoteUnlinked: false,
+    })
+    db.rows.push({ id: dto.id, source_id: dto.id, resource, state: 'pending', ...sealMigrationPayload(dto) })
+    mocks.hydrate.mockResolvedValueOnce({ invoices: [dto], unhydratedIds: new Set(), hydration: {} })
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.rpc).toHaveBeenCalledWith('commit_provider_migration_records', expect.objectContaining({
+      p_records: [{ id: dto.id, error: 'MIGRATION_ROWS_MISMATCH' }],
+    }))
+    expect(db.job.state).toBe('needs_attention')
+  })
+  it('keeps same-named Bokio customers and suppliers separate through their source references', () => {
+    for (const id of ['party-a', 'party-b']) {
+      expect(invoicePartySourceId('bokio', 'salesInvoices', mapBokioToSalesInvoice({
+        id: 'invoice', customerRef: { id, name: 'Same name' },
+      }))).toBe(id)
+      expect(invoicePartySourceId('bokio', 'supplierInvoices', mapBokioToSupplierInvoice({
+        id: 'invoice', supplierRef: { id, name: 'Same name' },
+      }))).toBe(id)
+    }
+  })
+  it('does not identify unknown invoice parties by their shared name', () => {
+    const first = mapBokioToSalesInvoice({ id: 'invoice-a', customerRef: { name: 'Same name' } })
+    const second = mapBokioToSalesInvoice({ id: 'invoice-b', customerRef: { name: 'Same name' } })
+    const identity = invoicePartySourceId('bokio', 'salesInvoices', first)
+    expect(identity).toBe(invoicePartySourceId('bokio', 'salesInvoices', first))
+    expect(identity).not.toBe(invoicePartySourceId('bokio', 'salesInvoices', second))
+  })
   it('pauses without persisting snapshots when the encryption key is missing', async () => {
     vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', undefined)
     const db = database()

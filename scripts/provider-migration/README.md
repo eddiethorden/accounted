@@ -40,6 +40,14 @@ No live provider account, hosted scheduler, deployed function runtime or large
 SIE ledger was exercised. The changes are in the feature worktree and are not
 deployed. Hosted cron recovery still needs verification after deployment.
 
+PR review follow-up: after requiring explicit encryption keys and removing
+name-only party adoption, another 300-invoice worker run passed for each provider
+with process termination, lost acknowledgement, rate limiting and exact-count
+checks. Each imported 900 lines and 250 customers without duplicates. Results
+are in [`results-2026-09-19-pr-review.json`](./results-2026-09-19-pr-review.json).
+The staging SQL test also verifies that same-named parties remain separate,
+source-ID retries remain stable and register writes cannot target journal tables.
+
 ## Results recorded on 2026-09-18
 
 The database-only benchmark passed for both providers:

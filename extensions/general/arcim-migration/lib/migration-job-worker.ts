@@ -57,17 +57,20 @@ export async function withinMigrationDeadline<T>(promise: PromiseLike<T>, deadli
   } finally { if (timer) clearTimeout(timer) }
 }
 
-/** Stable source party ids when the invoice names them; a conservative fallback otherwise. */
+/** Prefer provider identity; an unidentified party is scoped to its invoice. */
 export function invoicePartySourceId(provider: string, resource: MigrationResource, dto: InvoiceDto): string {
   const sales = resource === 'salesInvoices'
   const raw = dto._raw ?? {}
   const explicit = provider === 'visma' ? raw[sales ? 'CustomerId' : 'SupplierId']
     : provider === 'fortnox' ? raw[sales ? 'CustomerNumber' : 'SupplierNumber']
-    : provider === 'briox' ? raw[sales ? 'customernumber' : 'suppliernumber'] : undefined
+    : provider === 'briox' ? raw[sales ? 'customernumber' : 'suppliernumber']
+    : provider === 'bokio' ? (raw[sales ? 'customerRef' : 'supplierRef'] as { id?: unknown } | undefined)?.id
+    : undefined
   if ((typeof explicit === 'string' || typeof explicit === 'number') && String(explicit).trim()) return String(explicit)
   const party = sales ? (dto as SalesInvoiceDto).customer : (dto as SupplierInvoiceDto).supplier
-  const identity = party.identifications.find(id => id.schemeId === 'SE:ORGNR')?.id ?? party.name
-  if (!identity) throw new Error('MIGRATION_PARTY_ID_MISSING')
+  const orgNumber = party.identifications.find(id => id.schemeId === 'SE:ORGNR')?.id.replace(/[^a-z0-9]/gi, '')
+  if (!orgNumber && !dto.id) throw new Error('MIGRATION_PARTY_ID_MISSING')
+  const identity = orgNumber ? `org:${orgNumber}` : `invoice:${dto.id}`
   return 'invoice-party:' + createHash('sha256').update(identity).digest('hex')
 }
 

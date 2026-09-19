@@ -59,10 +59,18 @@ BEGIN
   ASSERT n=2,'healthy rows dropped, duplicated, or failed row left a partial write';
   SELECT count(*) INTO n FROM migration_job_chunks WHERE job_id=j.id AND state='needs_attention';
   ASSERT n=1,'bad row did not get an explicit outcome';
-  -- Invoices lacking a provider party ID reuse an unambiguous imported party.
+  -- A display name is not identity, even when it matches only one party.
   SELECT target_id INTO customer FROM migration_source_records WHERE company_id=company AND source_id='c1';
   same_customer:=resolve_provider_migration_party(j.id,'customers','invoice-party:fallback','{"name":"First","customer_type":"swedish_business"}');
-  ASSERT customer=same_customer,'invoice fallback duplicated the register party';
+  ASSERT customer<>same_customer,'same-named unidentified party was silently merged';
+  ASSERT same_customer=resolve_provider_migration_party(j.id,'customers','invoice-party:fallback','{"name":"First","customer_type":"swedish_business"}'),
+    'retry changed the source party identity';
+  customer:=resolve_provider_migration_party(j.id,'suppliers','supplier-name-a','{"name":"Same supplier"}');
+  same_customer:=resolve_provider_migration_party(j.id,'suppliers','supplier-name-b','{"name":"Same supplier"}');
+  ASSERT customer<>same_customer,'distinct supplier IDs merged by name';
+  customer:=resolve_provider_migration_party(j.id,'customers','org-party','{"name":"Verified party","org_number":"556000-0000","customer_type":"swedish_business"}');
+  same_customer:=resolve_provider_migration_party(j.id,'customers','invoice-party:verified','{"name":"Different display name","org_number":"5560000000","customer_type":"swedish_business"}');
+  ASSERT customer=same_customer,'normalized organization identity did not reuse the party';
   FOR n IN 1..4 LOOP PERFORM advance_provider_migration_job(j.id,worker,j.attempt); END LOOP;
   ASSERT (SELECT state='needs_attention' FROM migration_jobs WHERE id=j.id),'failed records falsely marked completed';
   PERFORM retry_provider_migration_job(j.id,company,u);

@@ -40,6 +40,9 @@ candidates in different batches cannot each consume the same voucher.
 - One active job per company. Retry preserves successful records. Source identity
   includes company, provider, provider account, resource and provider record ID;
   display invoice numbers do not serve as retry keys.
+- Party matching uses provider IDs or an organization identity, never a display
+  name alone. When neither is available, the placeholder is scoped to its source
+  invoice rather than silently merging different people with the same name.
 - Transient provider failures back off. Exhausted detail failures and malformed
   records get explicit attention outcomes while healthy records continue.
   Authorization failures pause the job and expose reconnect in the wizard.
@@ -100,7 +103,7 @@ number-less draft invoices, supplier credit notes sharing display numbers,
 atomic row completion and payment contention across batches. The matching
 `provider-migration-jobs.pg.test.ts` runs the same assertions in pg-real CI.
 
-The three migrations in this branch have been applied to staging and verified
+The four migrations in this branch have been applied to staging and verified
 byte-for-byte against its migration history. The application and scheduler are
 not deployed by this worktree. Browser testing with a real provider account is
 still the joint local verification step. Production rollout requires merging and
