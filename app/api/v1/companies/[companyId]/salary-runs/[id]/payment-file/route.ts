@@ -16,9 +16,13 @@
  *
  * Idempotent at the call level (Idempotency-Key required) and harmless to
  * repeat: every call rebuilds the file from the run and re-stamps the
- * generated-at timestamp. A dry run validates every precondition, runs the
- * pure generator so the preview is truthful, and returns the preview
- * without the content and without stamping.
+ * generated-at timestamp. Every live call also archives the exact file as an
+ * immutable salary_payment_files row (BFL 7 kap. 1 §) before returning it;
+ * `payment_file_id` and `sha256` identify that archived copy, and
+ * GET /salary-runs/{id}/payment-files lists them. A dry run validates every
+ * precondition, runs the pure generator so the preview is truthful, and
+ * returns the preview without the content, without archiving and without
+ * stamping.
  */
 
 import { z } from 'zod'
@@ -47,10 +51,14 @@ const PaymentFileRequest = z
 
 const SalaryPaymentFile = z.object({
   salary_run_id: z.string().uuid(),
+  /** Id of the archived copy (salary_payment_files); listable via GET /salary-runs/{id}/payment-files. */
+  payment_file_id: z.string().uuid(),
   format: PaymentFileFormat,
   filename: z.string(),
   content_type: z.enum(['application/xml', 'text/plain']),
   content: z.string(),
+  /** Lowercase hex SHA-256 over the file bytes as encoded for the bank (UTF-8 for pain001, ISO 8859-1 for bg_lb). */
+  sha256: z.string(),
   payment_date: z.string(),
   employee_count: z.number().int(),
   total_amount: z.number(),
@@ -65,7 +73,7 @@ registerEndpoint({
   path: '/api/v1/companies/:companyId/salary-runs/:id/payment-file',
   summary: 'Generate the bank payment file (pain.001 or Bankgirot LB) for a salary run.',
   description:
-    'Builds the salary batch payment file for an approved (or paid / booked) run and returns it inline as a string: ISO 20022 pain.001.001.03 XML (`pain001`, default) or the legacy Bankgirot LB text file (`bg_lb`). One credit transfer per employee with a positive net payout, dated on the run\'s payment_date, category purpose SALA. Stamps salary_runs.payment_file_format and payment_file_generated_at. Same preconditions and output as the dashboard\'s payment-file download.',
+    'Builds the salary batch payment file for an approved (or paid / booked) run and returns it inline as a string: ISO 20022 pain.001.001.03 XML (`pain001`, default) or the legacy Bankgirot LB text file (`bg_lb`). One credit transfer per employee with a positive net payout, dated on the run\'s payment_date, category purpose SALA. Every generated file is archived as an immutable salary_payment_files row (BFL 7 kap. 1 §, seven-year retention) before it is returned; `payment_file_id` and `sha256` identify that copy and GET /salary-runs/{id}/payment-files lists them. Stamps salary_runs.payment_file_format and payment_file_generated_at. Same preconditions and output as the dashboard\'s payment-file download.',
   useWhen:
     'The salary run is approved and you (or an external payroll operator) need the file to upload in the bank\'s corporate file channel to pay the salaries.',
   doNotUseFor:
@@ -76,20 +84,23 @@ registerEndpoint({
     'The file comes back inline as `content` (a string). Write it to disk under `filename` (pain001 as UTF-8, bg_lb as ISO 8859-1 with CRLF line endings, exactly as returned) and upload it in the bank\'s file channel. Nothing is transmitted to the bank by this call.',
     'Generating the file does NOT mark the run paid and moves no money. Call :mark-paid once the bank has executed the batch, then :book to post the verifikationer.',
     'Bankgirot LB is being retired by the banks during 2026: prefer pain001. `format` defaults to company_settings.preferred_payment_format, which is pain001 unless the company changed it.',
-    'Employees with a zero net payout (nollkörning, or net consumed by a nettolöneavdrag) are left out of the file and need no bank account; employee_count and total_amount cover only the paid lines. Regenerating is harmless: each call rebuilds the file and re-stamps payment_file_generated_at.',
+    'Employees with a zero net payout (nollkörning, or net consumed by a nettolöneavdrag) are left out of the file and need no bank account; employee_count and total_amount cover only the paid lines. Regenerating is harmless: each call rebuilds the file, archives it as a new salary_payment_files row and re-stamps payment_file_generated_at.',
+    'Every generated file is archived and listable: the response carries payment_file_id (the archived row) and sha256 (over the bytes as encoded for the bank: UTF-8 for pain001, ISO 8859-1 for bg_lb). Compare it with the checksum of what you uploaded, and use GET /salary-runs/{id}/payment-files to retrieve exactly what was generated earlier instead of regenerating: a regeneration after a bank-detail change (new employee account, changed company IBAN) is a different file, and the archive is the record of what the bank actually received. An archive failure returns an error and no file.',
     'The file always uses the run\'s payment_date as the requested execution date; the body accepts no execution date (unknown fields return 400). Change the run\'s payment_date (PATCH while draft) if the transfer day must move.',
-    'Dry run (?dry_run=true) validates every precondition and returns format, filename, payment_date, employee_count, total_amount and warnings without the content and without stamping the run.',
+    'Dry run (?dry_run=true) validates every precondition and returns format, filename, payment_date, employee_count, total_amount and warnings without the content, without archiving and without stamping the run.',
   ],
   example: {
     request: { format: 'pain001' },
     response: {
       data: {
         salary_run_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        payment_file_id: 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0',
         format: 'pain001',
         filename: 'pain001_lon_2026-05.xml',
         content_type: 'application/xml',
         content:
           '<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"><CstmrCdtTrfInitn>…</CstmrCdtTrfInitn></Document>',
+        sha256: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
         payment_date: '2026-05-25',
         employee_count: 3,
         total_amount: 76500,
@@ -145,6 +156,14 @@ function paymentFileError(result: SalaryPaymentFileError, ctx: ApiV1Context) {
         reason: String(result.details.message ?? ''),
         details: { format: result.format, ...result.details },
       })
+    case 'ARCHIVE_FAILED':
+      // The file is räkenskapsinformation and is never handed out
+      // unarchived: the archive INSERT failure is the response.
+      ctx.log.error('payment file archive failed; file withheld', {
+        format: result.format,
+        error: result.cause,
+      })
+      return v1ErrorResponse(result.cause, ctx.log, base)
     case 'DB_ERROR':
       return v1ErrorResponse(result.cause, ctx.log, base)
   }
@@ -184,6 +203,7 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
     const result = await buildSalaryPaymentFile(ctx.supabase, {
       companyId: ctx.companyId!,
       runId: salaryRunId,
+      userId: ctx.userId,
       format: parsed.data.format,
       dryRun: ctx.dryRun,
     })
@@ -210,17 +230,18 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
             payment_file_format: result.format,
             payment_file_generated_at: 'now (server time) on the live call',
           },
-          note: 'Preconditions validated and the file built in memory; nothing was stored or stamped. The live call returns the file as `content`.',
+          note: 'Preconditions validated and the file built in memory; nothing was archived or stamped. The live call archives the file as a salary_payment_files row and returns it as `content`.',
         },
         { requestId: ctx.requestId, log: ctx.log },
       )
     }
 
     if (!result.stamped) {
-      // The file is räkenskapsinformation either way; the stamp is bookkeeping
-      // about the run, so a failed UPDATE is logged, never fatal.
+      // The archived row is the record; the stamp is bookkeeping about the
+      // run, so a failed UPDATE is logged, never fatal.
       ctx.log.warn('payment file stamp failed; file returned anyway', {
         salaryRunId,
+        paymentFileId: result.paymentFileId,
         format: result.format,
       })
     }
@@ -228,7 +249,9 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
     return ok(
       {
         ...summary,
+        payment_file_id: result.paymentFileId,
         content: result.content,
+        sha256: result.sha256,
         generated_at: result.generatedAt ?? new Date().toISOString(),
       },
       { requestId: ctx.requestId },

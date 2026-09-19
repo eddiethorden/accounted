@@ -50,6 +50,12 @@ function legacyError(result: SalaryPaymentFileError): NextResponse {
       }, { status: 400 })
     case 'GENERATOR_FAILED':
       return NextResponse.json({ error: result.details.message as string }, { status: 400 })
+    case 'ARCHIVE_FAILED':
+      // The file is räkenskapsinformation: never handed out unarchived.
+      return NextResponse.json(
+        { error: 'Betalfilen kunde inte arkiveras och lämnades därför inte ut. Försök igen.' },
+        { status: 500 },
+      )
     case 'DB_ERROR':
       // A failed read used to look like a missing row; keep that mapping.
       if (stage === 'run') return NextResponse.json({ error: 'Lönekörning hittades inte' }, { status: 404 })
@@ -65,9 +71,14 @@ export const GET = withRouteContext<{ params: Promise<{ id: string }> }>(
   'salary.run.payment.pain001',
   async (_request, ctx, { params }) => {
     const { id } = await params
-    const { supabase, companyId } = ctx
+    const { supabase, companyId, user } = ctx
 
-    const result = await buildSalaryPaymentFile(supabase, { companyId, runId: id, format: 'pain001' })
+    const result = await buildSalaryPaymentFile(supabase, {
+      companyId,
+      runId: id,
+      userId: user.id,
+      format: 'pain001',
+    })
     if (!result.ok) return legacyError(result)
 
     return new Response(result.content, {

@@ -591,15 +591,14 @@ export async function validateVoucherForInvoiceLink(
 
   if (unconvertibleLineCurrency !== undefined) {
     // SEK-booked settlement fallback, mirroring the RPC gate byte-for-byte:
-    // accrual only, zero readable lines, every unreadable line SEK-booked, a
-    // sane invoice exchange_rate, and the voucher's SEK total within 10% of
-    // remaining * rate. The RPC then settles the FULL remaining and books the
-    // FX residual to 7960/3960 as its own verifikat; here the validation
-    // outcome only has to agree, so the staging path stops refusing what the
-    // commit RPC accepts.
+    // zero readable lines, every unreadable line SEK-booked, a sane invoice
+    // exchange_rate, and the voucher's SEK total within 10% of remaining *
+    // rate. The RPC settles the full remaining; on accrual it also books the
+    // FX residual to 7960/3960. Kontantmetoden takes the same road since
+    // 20260919110000: with no receivable there is no residual to book, only
+    // an invoice to mark paid against the verifikat that holds the money.
     const exchangeRate = Number(invoice.exchange_rate)
     const fallbackEligible =
-      !isCash &&
       readableCount === 0 &&
       foreignLabelCount === 0 &&
       sekSideTotal > 0 &&

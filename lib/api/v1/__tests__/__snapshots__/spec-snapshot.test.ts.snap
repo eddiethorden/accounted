@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`v1 spec snapshot > matches the recorded endpoint count > endpoint-count 1`] = `159`;
+exports[`v1 spec snapshot > matches the recorded endpoint count > endpoint-count 1`] = `169`;
 
 exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-keys 1`] = `
 [
@@ -8,6 +8,8 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "DELETE /api/v1/companies/:companyId/dimensions/:id/values/:valueId",
   "DELETE /api/v1/companies/:companyId/employees/:id",
   "DELETE /api/v1/companies/:companyId/employees/:id/absence",
+  "DELETE /api/v1/companies/:companyId/employees/:id/benefits/:benefitId",
+  "DELETE /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId",
   "DELETE /api/v1/companies/:companyId/employees/:id/worked-days",
   "DELETE /api/v1/companies/:companyId/invoices/:id",
   "DELETE /api/v1/companies/:companyId/journal-entries/:id",
@@ -33,7 +35,9 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "GET /api/v1/companies/:companyId/employees",
   "GET /api/v1/companies/:companyId/employees/:id",
   "GET /api/v1/companies/:companyId/employees/:id/absence",
+  "GET /api/v1/companies/:companyId/employees/:id/benefits",
   "GET /api/v1/companies/:companyId/employees/:id/opening-balances",
+  "GET /api/v1/companies/:companyId/employees/:id/recurring-lines",
   "GET /api/v1/companies/:companyId/employees/:id/vacation-balance",
   "GET /api/v1/companies/:companyId/employees/:id/worked-days",
   "GET /api/v1/companies/:companyId/fiscal-periods",
@@ -67,6 +71,7 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "GET /api/v1/companies/:companyId/salary-runs/:id",
   "GET /api/v1/companies/:companyId/salary-runs/:id/employees",
   "GET /api/v1/companies/:companyId/salary-runs/:id/employees/:employeeId",
+  "GET /api/v1/companies/:companyId/salary-runs/:id/payment-files",
   "GET /api/v1/companies/:companyId/salary-runs/:id/payslips/:employeeId/pdf",
   "GET /api/v1/companies/:companyId/salary/settings",
   "GET /api/v1/companies/:companyId/skatteverket/vat-declarations",
@@ -85,6 +90,8 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "PATCH /api/v1/companies/:companyId/customers/:id",
   "PATCH /api/v1/companies/:companyId/dimensions/:id/values/:valueId",
   "PATCH /api/v1/companies/:companyId/employees/:id",
+  "PATCH /api/v1/companies/:companyId/employees/:id/benefits/:benefitId",
+  "PATCH /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId",
   "PATCH /api/v1/companies/:companyId/invoices/:id",
   "PATCH /api/v1/companies/:companyId/salary-runs/:id",
   "PATCH /api/v1/companies/:companyId/salary-runs/:id/employees/:employeeId",
@@ -104,6 +111,8 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "POST /api/v1/companies/:companyId/documents",
   "POST /api/v1/companies/:companyId/documents/:id/link",
   "POST /api/v1/companies/:companyId/employees",
+  "POST /api/v1/companies/:companyId/employees/:id/benefits",
+  "POST /api/v1/companies/:companyId/employees/:id/recurring-lines",
   "POST /api/v1/companies/:companyId/fiscal-periods/:id/close",
   "POST /api/v1/companies/:companyId/fiscal-periods/:id/currency-revaluation",
   "POST /api/v1/companies/:companyId/fiscal-periods/:id/lock",
@@ -135,6 +144,7 @@ exports[`v1 spec snapshot > matches the recorded endpoint key set > endpoint-key
   "POST /api/v1/companies/:companyId/salary-runs/:id/approve",
   "POST /api/v1/companies/:companyId/salary-runs/:id/book",
   "POST /api/v1/companies/:companyId/salary-runs/:id/calculate",
+  "POST /api/v1/companies/:companyId/salary-runs/:id/correct",
   "POST /api/v1/companies/:companyId/salary-runs/:id/employees",
   "POST /api/v1/companies/:companyId/salary-runs/:id/employees/:employeeId/lines",
   "POST /api/v1/companies/:companyId/salary-runs/:id/generate-agi",

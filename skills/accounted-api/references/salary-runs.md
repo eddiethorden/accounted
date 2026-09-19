@@ -2,7 +2,7 @@
 
 # Salary runs endpoints
 
-Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips and draft-only line edits.
+Swedish payroll runs: create -> calculate -> approve -> payment-file (pain.001 / LB) -> mark-paid -> book -> generate-agi (arbetsgivardeklaration), with per-employee payslips, draft-only line edits and :correct (rättelsekörning) for a booked run.
 
 Conventions (auth, envelope, pagination, dry-run, idempotency, standard errors)
 are in SKILL.md and are not repeated per endpoint.
@@ -593,6 +593,84 @@ Example response `200`:
     "total_employer_cost": 137991,
     "warnings": [
       "Läkarintyg krävs från och med dag 8: Anna Andersson. Kontrollera att läkarintyg finns innan lönekörningen godkänns."
+    ]
+  },
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `POST /api/v1/companies/{companyId}/salary-runs/{id}/correct`
+
+**Correct a booked salary run (rättelsekörning): storno its verifikat and open a new draft for the same period.**
+`scope:payroll:write · risk:high · idempotent · dry-run`
+
+Per Bokföringslagen 5 kap 5 § a booked salary run is never edited: this verb reverses every verifikation the run posted (salary, arbetsgivaravgifter, semesterlöneskuld, pension) with storno entries, marks the original `corrected`, revokes the payslip links that were emailed for it, and inserts a fresh `draft` run for the same period with `is_correction = true` and `corrects_run_id` pointing back. The roster and line items are copied onto the correction run so the operator edits a populated draft. Idempotent. Dry-runnable.
+
+**Use when:** A booked (and usually paid) month turns out wrong: a missing line, a wrong salary, a benefit that was not on the payslip. Call this first, then edit the correction run's lines and walk it through calculate, approve, mark-paid, book and generate-agi.
+**Do not use for:** Runs that are not booked yet (draft, review, approved, paid): delete or edit them instead, nothing is posted. Fixing a single verifikation outside the salary lifecycle (POST /journal-entries/{id}/correct). Re-issuing payslips without changing amounts.
+
+**Pitfalls:**
+- Only `booked` runs can be corrected: any other status returns 409 SALARY_RUN_CORRECT_NOT_BOOKED with `details.current_status`.
+- The original's verifikat are reversed with storno (new reversing entries in the same series); nothing is edited or deleted. All reversed entry IDs are returned in `reversed_entry_ids`.
+- The correction run is a fresh draft for the same period: it must be attached (roster is copied for you), calculated, approved, paid, booked and its AGI regenerated. Nothing is posted by this verb.
+- A second call on the same run returns 409 SALARY_RUN_ALREADY_CORRECTED with `details.correction_run_id`: continue in that run instead.
+- Payslip links of the original are revoked immediately (employees see "ersatt"); fresh links are issued when the correction run's payslips are sent.
+- The arbetsgivardeklaration (AGI) for the period must be re-filed after the correction run books; Skatteverket receives the corrected figures, not a delta.
+- The storno entries land in the original payment_date's period: a locked period returns PERIOD_LOCKED and nothing is written. If the failure happens after the first storno, `valid_alternatives.reversed_entry_ids` names the entries already reversed and `valid_alternatives.remaining_entry_ids` the ones still posted; the run stays `booked`; call this verb again once the cause is fixed: the retry skips the entries already reversed and continues with the remaining ones.
+- Idempotency-Key is mandatory.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `dry_run` | query | `string` | no | true (any case) previews the write without committing it, like the X-Dry-Run: true header. Any other value commits. |
+
+Response `200`:
+```ts
+{
+  data: {
+    original_run_id: string,
+    original_status: "corrected",
+    correction_run: { id: string, period_year: number, period_month: number, payment_date: string, status: "draft", is_correction: true, corrects_run_id: string, deviation_period_start: string | null, deviation_period_end: string | null },
+    reversed_entry_ids: string[]
+  },
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": {
+    "original_run_id": "run_a8f1…",
+    "original_status": "corrected",
+    "correction_run": {
+      "id": "run_c0rr…",
+      "period_year": 2026,
+      "period_month": 5,
+      "payment_date": "2026-05-25",
+      "status": "draft",
+      "is_correction": true,
+      "corrects_run_id": "run_a8f1…",
+      "deviation_period_start": "2026-04-01",
+      "deviation_period_end": "2026-04-30"
+    },
+    "reversed_entry_ids": [
+      "je_salary…",
+      "je_avg…",
+      "je_vac…"
     ]
   },
   "meta": {
@@ -1308,7 +1386,7 @@ Example response `200`:
 **Generate the bank payment file (pain.001 or Bankgirot LB) for a salary run.**
 `scope:payroll:write · risk:medium · idempotent · dry-run · reversible`
 
-Builds the salary batch payment file for an approved (or paid / booked) run and returns it inline as a string: ISO 20022 pain.001.001.03 XML (`pain001`, default) or the legacy Bankgirot LB text file (`bg_lb`). One credit transfer per employee with a positive net payout, dated on the run's payment_date, category purpose SALA. Stamps salary_runs.payment_file_format and payment_file_generated_at. Same preconditions and output as the dashboard's payment-file download.
+Builds the salary batch payment file for an approved (or paid / booked) run and returns it inline as a string: ISO 20022 pain.001.001.03 XML (`pain001`, default) or the legacy Bankgirot LB text file (`bg_lb`). One credit transfer per employee with a positive net payout, dated on the run's payment_date, category purpose SALA. Every generated file is archived as an immutable salary_payment_files row (BFL 7 kap. 1 §, seven-year retention) before it is returned; `payment_file_id` and `sha256` identify that copy and GET /salary-runs/{id}/payment-files lists them. Stamps salary_runs.payment_file_format and payment_file_generated_at. Same preconditions and output as the dashboard's payment-file download.
 
 **Use when:** The salary run is approved and you (or an external payroll operator) need the file to upload in the bank's corporate file channel to pay the salaries.
 **Do not use for:** Marking the run paid (use :mark-paid after the bank has executed the batch), posting the verifikationer (use :book), paying supplier invoices (use the supplier-invoice payment batch), or sending anything to the bank: this call only produces the file.
@@ -1319,9 +1397,10 @@ Builds the salary batch payment file for an approved (or paid / booked) run and 
 - The file comes back inline as `content` (a string). Write it to disk under `filename` (pain001 as UTF-8, bg_lb as ISO 8859-1 with CRLF line endings, exactly as returned) and upload it in the bank's file channel. Nothing is transmitted to the bank by this call.
 - Generating the file does NOT mark the run paid and moves no money. Call :mark-paid once the bank has executed the batch, then :book to post the verifikationer.
 - Bankgirot LB is being retired by the banks during 2026: prefer pain001. `format` defaults to company_settings.preferred_payment_format, which is pain001 unless the company changed it.
-- Employees with a zero net payout (nollkörning, or net consumed by a nettolöneavdrag) are left out of the file and need no bank account; employee_count and total_amount cover only the paid lines. Regenerating is harmless: each call rebuilds the file and re-stamps payment_file_generated_at.
+- Employees with a zero net payout (nollkörning, or net consumed by a nettolöneavdrag) are left out of the file and need no bank account; employee_count and total_amount cover only the paid lines. Regenerating is harmless: each call rebuilds the file, archives it as a new salary_payment_files row and re-stamps payment_file_generated_at.
+- Every generated file is archived and listable: the response carries payment_file_id (the archived row) and sha256 (over the bytes as encoded for the bank: UTF-8 for pain001, ISO 8859-1 for bg_lb). Compare it with the checksum of what you uploaded, and use GET /salary-runs/{id}/payment-files to retrieve exactly what was generated earlier instead of regenerating: a regeneration after a bank-detail change (new employee account, changed company IBAN) is a different file, and the archive is the record of what the bank actually received. An archive failure returns an error and no file.
 - The file always uses the run's payment_date as the requested execution date; the body accepts no execution date (unknown fields return 400). Change the run's payment_date (PATCH while draft) if the transfer day must move.
-- Dry run (?dry_run=true) validates every precondition and returns format, filename, payment_date, employee_count, total_amount and warnings without the content and without stamping the run.
+- Dry run (?dry_run=true) validates every precondition and returns format, filename, payment_date, employee_count, total_amount and warnings without the content, without archiving and without stamping the run.
 
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
@@ -1346,10 +1425,12 @@ Response `200`:
 {
   data: {
     salary_run_id: string,
+    payment_file_id: string,
     format: "pain001" | "bg_lb",
     filename: string,
     content_type: "application/xml" | "text/plain",
     content: string,
+    sha256: string,
     payment_date: string,
     employee_count: number,
     total_amount: number,
@@ -1373,10 +1454,12 @@ Example response `200`:
 {
   "data": {
     "salary_run_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "payment_file_id": "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0",
     "format": "pain001",
     "filename": "pain001_lon_2026-05.xml",
     "content_type": "application/xml",
     "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.03\"><CstmrCdtTrfInitn>…</CstmrCdtTrfInitn></Document>",
+    "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "payment_date": "2026-05-25",
     "employee_count": 3,
     "total_amount": 76500,
@@ -1387,6 +1470,73 @@ Example response `200`:
   "meta": {
     "request_id": "req_…",
     "api_version": "2026-05-12"
+  }
+}
+```
+
+---
+
+### `GET /api/v1/companies/{companyId}/salary-runs/{id}/payment-files`
+
+**List the archived bank payment files of a salary run.**
+`scope:payroll:read · risk:low · idempotent`
+
+Returns every payment file generated for the run (ISO 20022 pain.001 or Bankgirot LB), newest first, with the file content inline. Each row is an immutable archive copy written when the file was generated (BFL 7 kap. 1 §, seven-year retention): what was handed to the bank, byte for byte. sha256 and byte_size are over `content` encoded as `charset` (UTF-8 for pain001, ISO 8859-1 for bg_lb). Cursor pagination on (generated_at, id), newest first.
+
+**Use when:** You need the file that was actually generated earlier (to re-upload, to verify a checksum against the bank portal, or to audit what the bank received) rather than a fresh build from the run's current data.
+**Do not use for:** Generating a file: use POST /salary-runs/{id}/payment-file. Marking the run paid (:mark-paid) or booking it (:book). Supplier payment batches: use the supplier-invoice payment batch endpoints.
+
+**Pitfalls:**
+- An empty list means no file has been generated for the run yet (or the run predates the archive): generate one with POST /salary-runs/{id}/payment-file.
+- Rows are immutable and never deleted; a regeneration adds a new row. The newest row is not necessarily the one uploaded to the bank: compare sha256 with the checksum of the file you actually sent.
+- Write `content` to disk in `charset` (pain001 as UTF-8, bg_lb as ISO 8859-1 with CRLF line endings, exactly as returned); sha256 and byte_size describe those bytes, not the JSON string.
+- Every row carries the full file content, so page size matters for runs with many regenerations: use `limit` and the cursor.
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `companyId` | path | `string` | yes |  |
+| `id` | path | `string` | yes |  |
+| `cursor` | query | `string` | no | Opaque cursor from the previous page's meta.next_cursor. Omit for the first page. |
+| `limit` | query | `number` | no | Page size, 1-100 (default 50). Larger values are clamped to 100. |
+
+Response `200`:
+```ts
+{
+  data: { payment_file_id: string, format: "pain001" | "bg_lb", filename: string, content_type: "application/xml" | "text/plain", charset: "utf-8" | "iso-8859-1", sha256: string, byte_size: number, payment_date: string, employee_count: number, total_amount: number, generated_at: string, content: string }[],
+  meta: {
+    request_id: string,
+    api_version: string,
+    next_cursor?: string | null,
+    audit?: { voucher_number?: string, voucher_url?: string, audit_trail_url?: string, immutable_at?: string },
+    partial_expansions?: string[],
+    coverage?: Record<string, unknown>
+  }
+}
+```
+
+Example response `200`:
+```json
+{
+  "data": [
+    {
+      "payment_file_id": "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0",
+      "format": "pain001",
+      "filename": "pain001_lon_2026-05.xml",
+      "content_type": "application/xml",
+      "charset": "utf-8",
+      "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "byte_size": 2731,
+      "payment_date": "2026-05-25",
+      "employee_count": 3,
+      "total_amount": 76500,
+      "generated_at": "2026-05-20T08:00:00.000Z",
+      "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.03\"><CstmrCdtTrfInitn>…</CstmrCdtTrfInitn></Document>"
+    }
+  ],
+  "meta": {
+    "request_id": "req_…",
+    "api_version": "2026-05-12",
+    "next_cursor": null
   }
 }
 ```

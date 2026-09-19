@@ -1152,6 +1152,9 @@ export const MASTER_DATA_DUMP_TABLES: MasterDataTableSpec[] = [
   { name: 'vacation_year_closures', file: 'vacation_year_closures.json' },
   { name: 'salary_worked_days', file: 'salary_worked_days.json' },
   { name: 'salary_payslip_links', file: 'salary_payslip_links.json' },
+  // Archived bank payment files (pain.001 / Bankgirot LB) exactly as handed
+  // to the bank: underlag for the salary payments, BFL 7 kap. 1 §.
+  { name: 'salary_payment_files', file: 'salary_payment_files.json', orderBy: 'generated_at' },
   { name: 'shift_premium_rules', file: 'shift_premium_rules.json' },
   { name: 'agi_declarations', file: 'agi_declarations.json', orderBy: 'created_at' },
   // Körjournal: trip log underlag for milersättning verifikat (BFL 7-year

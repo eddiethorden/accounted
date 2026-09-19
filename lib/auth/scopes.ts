@@ -272,6 +272,24 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   'PUT /api/v1/companies/:companyId/employees/:id/worked-days': 'payroll:write',
   'DELETE /api/v1/companies/:companyId/employees/:id/worked-days': 'payroll:write',
   'POST /api/v1/companies/:companyId/salary-runs/:id/payment-file': 'payroll:write',
+  // Payroll gap-closure 5 (2026-09-19): the remaining employee-side inputs and
+  // the one lifecycle verb an operator needs after booking. Benefits
+  // (bilförmån, kost, friskvård...) and recurring lines (standing monthly
+  // rows) are per-employee registers the engine reads at calculate time;
+  // :correct is the rättelsekörning (storno of the booked verifikat, a new
+  // draft for the same period).
+  'GET /api/v1/companies/:companyId/employees/:id/benefits': 'payroll:read',
+  'POST /api/v1/companies/:companyId/employees/:id/benefits': 'payroll:write',
+  'PATCH /api/v1/companies/:companyId/employees/:id/benefits/:benefitId': 'payroll:write',
+  'DELETE /api/v1/companies/:companyId/employees/:id/benefits/:benefitId': 'payroll:write',
+  'GET /api/v1/companies/:companyId/employees/:id/recurring-lines': 'payroll:read',
+  'POST /api/v1/companies/:companyId/employees/:id/recurring-lines': 'payroll:write',
+  'PATCH /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId': 'payroll:write',
+  'DELETE /api/v1/companies/:companyId/employees/:id/recurring-lines/:lineId': 'payroll:write',
+  'POST /api/v1/companies/:companyId/salary-runs/:id/correct': 'payroll:write',
+  // The archived payment files of a run (issue #2724): every generated
+  // pain.001 / LB file is räkenskapsinformation and kept 7 years.
+  'GET /api/v1/companies/:companyId/salary-runs/:id/payment-files': 'payroll:read',
 
   // Dimensions (kostnadsställe/projekt): dimensions PR2. Reads ride
   // reports:read (registry data feeds report filters/pickers); value creation

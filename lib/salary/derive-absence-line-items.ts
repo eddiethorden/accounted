@@ -34,7 +34,11 @@ import {
  *     window (inclusive of the new one). The 11th is suppressed.
  *
  * For VAB and parental leave, days are aggregated within the pay period and
- * forwarded to the existing calculators with YTD context.
+ * forwarded to the existing calculators with YTD context. The 120-date
+ * semestergrundande cap (SemL 17 § for VAB, 17 a § for parental leave) is
+ * applied per date: when the 120th date falls inside the period, the dates
+ * up to and including it form one row that is semestergrundande and the
+ * dates after it a second row that is not.
  */
 
 export type AbsenceType =
@@ -91,6 +95,35 @@ interface SjukloneperiodSegment {
 }
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+/** SemL 17 § (VAB) and 17 a § (parental leave): calendar dates per
+ *  intjänandeår, respectively per pregnancy, that stay semesterlönegrundande. */
+const VACATION_BASIS_CAP_DATES = 120
+
+interface VacationBasisPart {
+  rows: AbsenceDay[]
+  qualifies: boolean
+}
+
+/**
+ * Split a period's VAB or parental rows at the 120-date cap. The cap counts
+ * whole dates, not weighted hours, and the YTD figure is a date count too:
+ * walking the rows in date order, the ones whose position (YTD + index) is
+ * at most 120 are semestergrundande, the rest are not. Returns only the
+ * non-empty parts, qualifying first, so a period that lies entirely on one
+ * side of the cap still yields a single row.
+ */
+function splitAtVacationBasisCap(rows: AbsenceDay[], daysYtd: number): VacationBasisPart[] {
+  const sorted = [...rows].sort((a, b) =>
+    a.absence_date < b.absence_date ? -1 : a.absence_date > b.absence_date ? 1 : 0,
+  )
+  const room = Math.max(0, VACATION_BASIS_CAP_DATES - daysYtd)
+  const parts: VacationBasisPart[] = [
+    { rows: sorted.slice(0, room), qualifies: true },
+    { rows: sorted.slice(room), qualifies: false },
+  ]
+  return parts.filter(p => p.rows.length > 0)
+}
 
 function dateOnly(s: string): Date {
   return new Date(`${s}T00:00:00Z`)
@@ -369,46 +402,56 @@ export function deriveAbsenceLineItems(input: DeriveInput): DeriveResult {
     }
   }
 
+  // The calculators' own semesterGrundande verdict is ignored: it judges the
+  // period as a whole, while the part a row belongs to decides its flag.
+  // A row past the cap says so in its description, so the payslip explains
+  // why the vacation basis is lower that month.
+  const vacationBasisSuffix = (qualifies: boolean) => (qualifies ? '' : ', ej semestergrundande')
+
   // ── VAB ────────────────────────────────────────────────────────────────
+  // SemL 17 §: 120 calendar dates per intjänandeår are semestergrundande;
+  // the split is by date, the deduction by weighted hours.
   const vabCount = vabDays.length
   if (vabCount > 0) {
-    const vabEquivalentDays = sumDays(vabDays)
-    const vab = calculateVabDeduction(monthlySalary, vabEquivalentDays, input.vabDaysYtd, input.dailyDivisor)
-    lineItems.push({
-      item_type: 'vab',
-      description: `VAB (${vabCount} dagar)`,
-      quantity: r(vabEquivalentDays),
-      amount: -vab.deduction,
-      is_taxable: true,
-      is_avgift_basis: true,
-      // SemL 17 §: the 120-day cap counts calendar dates, not weighted hours;
-      // the YTD figure is a date count too.
-      is_vacation_basis: input.vabDaysYtd + vabCount <= 120,
-      is_gross_deduction: true,
-    })
+    for (const part of splitAtVacationBasisCap(vabDays, input.vabDaysYtd)) {
+      const vabEquivalentDays = sumDays(part.rows)
+      const vab = calculateVabDeduction(monthlySalary, vabEquivalentDays, input.vabDaysYtd, input.dailyDivisor)
+      lineItems.push({
+        item_type: 'vab',
+        description: `VAB (${part.rows.length} dagar${vacationBasisSuffix(part.qualifies)})`,
+        quantity: r(vabEquivalentDays),
+        amount: -vab.deduction,
+        is_taxable: true,
+        is_avgift_basis: true,
+        is_vacation_basis: part.qualifies,
+        is_gross_deduction: true,
+      })
+    }
   }
 
   // ── Parental leave ─────────────────────────────────────────────────────
+  // SemL 17 a §: 120 calendar dates per pregnancy, split as above.
   const parentalCount = parentalDays.length
   if (parentalCount > 0) {
-    const parentalEquivalentDays = sumDays(parentalDays)
-    const parental = calculateParentalLeaveDeduction(
-      monthlySalary,
-      parentalEquivalentDays,
-      input.parentalDaysPregnancyYtd,
-      input.dailyDivisor,
-    )
-    lineItems.push({
-      item_type: 'parental_leave',
-      description: `Föräldraledighet (${parentalCount} dagar)`,
-      quantity: r(parentalEquivalentDays),
-      amount: -parental.deduction,
-      is_taxable: true,
-      is_avgift_basis: true,
-      // SemL 17 a §: 120 calendar dates per pregnancy, whole dates as above.
-      is_vacation_basis: input.parentalDaysPregnancyYtd + parentalCount <= 120,
-      is_gross_deduction: true,
-    })
+    for (const part of splitAtVacationBasisCap(parentalDays, input.parentalDaysPregnancyYtd)) {
+      const parentalEquivalentDays = sumDays(part.rows)
+      const parental = calculateParentalLeaveDeduction(
+        monthlySalary,
+        parentalEquivalentDays,
+        input.parentalDaysPregnancyYtd,
+        input.dailyDivisor,
+      )
+      lineItems.push({
+        item_type: 'parental_leave',
+        description: `Föräldraledighet (${part.rows.length} dagar${vacationBasisSuffix(part.qualifies)})`,
+        quantity: r(parentalEquivalentDays),
+        amount: -parental.deduction,
+        is_taxable: true,
+        is_avgift_basis: true,
+        is_vacation_basis: part.qualifies,
+        is_gross_deduction: true,
+      })
+    }
   }
 
   // ── Unpaid leave (tjänstledighet utan lön) ─────────────────────────────

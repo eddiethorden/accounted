@@ -4,6 +4,8 @@ import { withRouteContext } from '@/lib/api/with-route-context'
 import { validateBody } from '@/lib/api/validate'
 import { BatchUpsertWorkedDaysSchema } from '@/lib/api/schemas'
 import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-message'
+import { getErrorEntry } from '@/lib/errors/structured-errors'
+import { findRunLockingDates } from '@/lib/salary/register-locks'
 import { assertWorkedDaysEmployee, mapWorkedDaysWriteError } from '@/lib/salary/worked-days'
 
 ensureInitialized()
@@ -45,6 +47,25 @@ export const POST = withRouteContext<{ params: Promise<{ id: string }> }>(
     // Dedupe dates so the user can pass an array with accidental duplicates
     // (e.g. shift-clicking over the same date twice).
     const uniqueDates = Array.from(new Set(body.dates))
+
+    // This route keeps its own write algorithm, so it asks the register lock
+    // itself: dates a run in review, approved, paid or booked has already
+    // read are refused as one 409 before anything is prefetched or deleted.
+    const lock = await findRunLockingDates(supabase, companyId, uniqueDates)
+    if (!lock.ok) {
+      return NextResponse.json({ error: getUserErrorMessage(lock.details) }, { status: 500 })
+    }
+    if (lock.lock) {
+      const entry = getErrorEntry('SALARY_REGISTER_DATES_LOCKED_BY_RUN')
+      return NextResponse.json(
+        {
+          error: entry?.message_sv ?? 'Datumen är låsta av en lönekörning',
+          code: 'SALARY_REGISTER_DATES_LOCKED_BY_RUN',
+          details: lock.lock,
+        },
+        { status: entry?.httpStatus ?? 409 },
+      )
+    }
 
     // Read the rows we are about to replace BEFORE deleting them. The batch
     // carries one shared value for N dates, so it cannot express per-day notes,

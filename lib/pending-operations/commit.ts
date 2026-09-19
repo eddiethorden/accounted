@@ -6595,6 +6595,20 @@ async function commitUpdateEmployee(
   }
 }
 
+/**
+ * The run a register lock names, as a sentence to append to the registry
+ * message: the MCP caller only sees `error`, and needs the run id to revert
+ * it to draft or make a correction run. Undefined for every other code.
+ */
+function registerLockDetail(result: { code: string; details?: Record<string, unknown> }): string | undefined {
+  if (result.code !== 'SALARY_REGISTER_DATES_LOCKED_BY_RUN' || !result.details) return undefined
+  const d = result.details
+  const period = `${d.period_year}-${String(d.period_month).padStart(2, '0')}`
+  const dates = Array.isArray(d.locked_dates) ? (d.locked_dates as string[]) : []
+  const span = dates.length > 1 ? `${dates[0]} till ${dates[dates.length - 1]}` : (dates[0] ?? '')
+  return `Lönekörning ${d.salary_run_id} (${period}, ${d.status}) läser ${dates.length} av datumen: ${span}.`
+}
+
 async function commitRegisterAbsence(
   supabase: SupabaseClient,
   companyId: string,
@@ -6636,7 +6650,9 @@ async function commitRegisterAbsence(
       })
       const entry = getErrorEntry(result.code)
       return {
-        error: entry?.message_sv ?? `Kunde inte registrera frånvaron: ${result.code}`,
+        error: [entry?.message_sv ?? `Kunde inte registrera frånvaron: ${result.code}`, registerLockDetail(result)]
+          .filter(Boolean)
+          .join(' '),
         errorCode: result.code,
         status: entry?.httpStatus ?? 500,
       }
@@ -6743,7 +6759,9 @@ async function commitDeleteAbsence(
       })
       const entry = getErrorEntry(result.code)
       return {
-        error: entry?.message_sv ?? `Kunde inte ta bort frånvaron: ${result.code}`,
+        error: [entry?.message_sv ?? `Kunde inte ta bort frånvaron: ${result.code}`, registerLockDetail(result)]
+          .filter(Boolean)
+          .join(' '),
         errorCode: result.code,
         status: entry?.httpStatus ?? 500,
       }

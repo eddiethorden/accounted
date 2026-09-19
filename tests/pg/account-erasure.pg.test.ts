@@ -129,6 +129,7 @@ const RETAINED = new Set([
   'expense_claims.user_id',
   'expense_payout_batches.user_id',
   'mileage_trips.user_id',
+  'salary_payment_files.user_id', // Archived bank payment files: BFL 7 kap. 1 §, seven-year retention.
   'salary_payslip_deliveries.user_id',
   'salary_payslip_links.user_id',
   'salary_runs.approved_by',

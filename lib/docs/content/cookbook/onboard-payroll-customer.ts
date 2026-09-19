@@ -111,7 +111,23 @@ curl -X PUT "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLO
   ] }'
 \`\`\`
 
-**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`. Förmåner (bilförmån, kost) are configured on the employee and land on the payslip automatically.
+**Standing rows and benefits** live on the employee and are re-derived on every run whose payment date falls inside their validity:
+
+\`\`\`bash
+# A monthly allowance that recurs until further notice
+curl "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLOYEE_ID/recurring-lines" \\
+  -H "Authorization: Bearer gnubok_sk_..." -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \\
+  -d '{ "item_type": "allowance", "description": "Friskvårdsbidrag", "amount": 416.67, "valid_from": "2026-09-01" }'
+
+# Bilförmån at the Skatteverket schablon value
+curl "https://app.gnubok.se/api/v1/companies/$COMPANY_ID/employees/$EMPLOYEE_ID/benefits" \\
+  -H "Authorization: Bearer gnubok_sk_..." -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \\
+  -d '{ "benefit_type": "car", "description": "Volvo XC40 2025", "monthly_value": 4210, "valid_from": "2026-09-01" }'
+\`\`\`
+
+Deductions carry a negative amount and the API rejects the wrong sign for the item type. The förmånsvärde is added to the tax and avgifter basis at \`:calculate\`; supply the schablon figure, the API does not compute it from the car.
+
+**One-off lines** (bonus, deduction, reimbursement) go on the run itself once it exists: \`POST /salary-runs/{id}/employees/{employeeId}/lines\`. A different base salary for one month: \`PATCH /salary-runs/{id}/employees/{employeeId}\` with \`monthly_salary\`.
 
 ## 6. Run payroll
 
@@ -136,6 +152,8 @@ The file comes back inline as \`data.content\` with \`data.filename\`; write it 
 ## 8. Book and file
 
 \`POST /salary-runs/{id}/book\` posts the verifikat (gross, tax, net, avgifter, vacation accrual) under the run's voucher series, and \`POST /salary-runs/{id}/generate-agi\` returns the arbetsgivardeklaration XML for the payout month. Uploading the AGI to Skatteverket requires BankID signing by the company's ombud; that is deliberate. Subscribe to \`salary_run.approved\`, \`salary_run.booked\` and \`agi.generated\` via [webhooks](/docs/api/cookbook/webhooks) to drive your own workflow.
+
+A booked month that turns out wrong is corrected with \`POST /salary-runs/{id}/correct\`: the run's verifikat are reversed by storno (BFL 5 kap 5 §, nothing is edited or deleted), the original is marked \`corrected\`, and a fresh draft for the same period is returned as \`correction_run\`, already carrying the original's roster and lines. Edit its lines, then calculate, approve, pay and book it like any run, and regenerate the AGI for the period. Dates inside a calculated, approved, paid or booked run's avvikelseperiod are locked for absence and worked-days writes (\`409 SALARY_REGISTER_DATES_LOCKED_BY_RUN\`); register the days once the correction run exists.
 
 ## 9. Year end
 

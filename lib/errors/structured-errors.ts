@@ -2477,6 +2477,16 @@ const BANK_FILE: Record<string, StructuredErrorEntry> = {
     message_sv: 'Kunde inte skapa importpost.',
     message_en: 'Failed to create the bank file import record.',
   },
+  BANK_FILE_SETTLEMENT_ACCOUNT_INVALID: {
+    httpStatus: 400,
+    message_sv: 'Bankkontot måste vara ett konto i intervallet 1920-1999.',
+    message_en: 'The bank account must be an account in the 1920-1999 range.',
+  },
+  BANK_FILE_SETTLEMENT_ACCOUNT_FAILED: {
+    httpStatus: 500,
+    message_sv: 'Kunde inte skapa bankkontot för importen. Inga transaktioner lästes in.',
+    message_en: 'The bank account for this import could not be created. No transactions were imported.',
+  },
   BANK_FILE_EXECUTE_FAILED: {
     httpStatus: 500,
     message_sv: 'Bankfilsimporten misslyckades.',
@@ -3553,6 +3563,27 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     httpStatus: 409,
     message_sv: 'En lönekörning för perioden finns redan.',
     message_en: 'A salary run for that period already exists.',
+  },
+  SALARY_RUN_CORRECT_NOT_BOOKED: {
+    httpStatus: 409,
+    message_sv: 'Bara bokförda lönekörningar kan korrigeras (rättelsekörning).',
+    message_en: 'Only booked salary runs can be corrected (rättelsekörning).',
+  },
+  SALARY_RUN_ALREADY_CORRECTED: {
+    httpStatus: 409,
+    message_sv: 'Lönekörningen är redan korrigerad; arbeta vidare i korrigeringskörningen.',
+    message_en: 'The salary run is already corrected; continue in its correction run.',
+  },
+  SALARY_REGISTER_DATES_LOCKED_BY_RUN: {
+    httpStatus: 409,
+    message_sv:
+      'Datumen ingår i avvikelseperioden för en lönekörning som redan är beräknad, godkänd eller bokförd. Återställ körningen till utkast, eller gör en rättelsekörning, innan frånvaro eller arbetade timmar ändras.',
+    message_en:
+      'The dates fall inside the deviation period of a salary run that is already calculated, approved or booked. Revert that run to draft, or run a correction, before changing absence or worked hours.',
+    remediation: {
+      description:
+        'details.salary_run_id names the run and details.locked_dates the dates it reads. Draft runs never lock; a run in review can be reverted from the dashboard.',
+    },
   },
   SALARY_RUN_DEVIATION_PERIOD_INVALID: {
     httpStatus: 400,
