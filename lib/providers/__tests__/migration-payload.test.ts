@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openMigrationPayload, sealMigrationPayload } from '../migration-payload'
 
- afterEach(() => vi.unstubAllEnvs())
+afterEach(() => vi.unstubAllEnvs())
 describe('persisted source payloads', () => {
   it('encrypts personal data with randomized authenticated ciphertext and a stable digest', () => {
     vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', 'test-key')
@@ -16,8 +16,14 @@ describe('persisted source payloads', () => {
     vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', 'different-key')
     expect(() => openMigrationPayload(a.payload)).toThrow()
   })
-  it('refuses an unconfigured production key', () => {
-    vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', '')
-    expect(() => sealMigrationPayload({ id: '1' })).toThrow('PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED')
+  it.each(['development', 'test', 'production'])('requires an explicit key in %s, even after a key was cached', mode => {
+    vi.stubEnv('NODE_ENV', mode)
+    vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', 'test-key')
+    const { payload } = sealMigrationPayload({ id: '1' })
+    for (const missing of [undefined, '']) {
+      vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', missing)
+      expect(() => sealMigrationPayload({ id: '2' })).toThrow('PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED')
+      expect(() => openMigrationPayload(payload)).toThrow('PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED')
+    }
   })
 })

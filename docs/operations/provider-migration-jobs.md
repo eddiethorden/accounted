@@ -44,8 +44,9 @@ candidates in different batches cannot each consume the same voucher.
   records get explicit attention outcomes while healthy records continue.
   Authorization failures pause the job and expose reconnect in the wizard.
 - Snapshot encryption uses `PERSONNUMMER_ENCRYPTION_KEY`. All workers sharing the
-  staging database must use the same configured key. Production refuses to work
-  without it. Job state is operational; source-ID mappings are included in the
+  staging database must use the same configured key. Every runtime refuses to
+  work without it; test harnesses explicitly supply their own fixture key.
+  Job state is operational; source-ID mappings are included in the
   company archive alongside the imported registers.
 
 ## Local session with staging

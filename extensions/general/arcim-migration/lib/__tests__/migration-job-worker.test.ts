@@ -62,10 +62,20 @@ const customer = (id: number) => ({ id: `customer-${id}`, active: true, party: {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', 'provider-worker-unit-test-only')
   mocks.resolve.mockResolvedValue({ accessToken: 'token', consent: { provider: 'visma', org_number: '556000-0000' } })
 })
-afterEach(() => vi.useRealTimers())
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs() })
 describe('bounded durable worker', () => {
+  it('pauses without persisting snapshots when the encryption key is missing', async () => {
+    vi.stubEnv('PERSONNUMMER_ENCRYPTION_KEY', undefined)
+    const db = database()
+    mocks.page.mockResolvedValue({ items: [customer(1)], nextPage: null, total: 1 })
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.job).toMatchObject({ state: 'needs_attention', error_code: 'PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED' })
+    expect(db.rows).toEqual([])
+    expect(db.rpc.mock.calls.some(([name]) => name === 'save_provider_migration_page')).toBe(false)
+  })
   it('resumes the saved page after a rate limit and commits a large register in bounded groups', async () => {
     const db = database()
     mocks.page.mockResolvedValueOnce({ items: Array.from({ length: 351 }, (_, i) => customer(i)), nextPage: 2, total: 352 })

@@ -5,7 +5,6 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync }
 let cached: { secret: string; key: Buffer } | undefined
 function key(): Buffer {
   const secret = process.env.PERSONNUMMER_ENCRYPTION_KEY
-    ?? (process.env.NODE_ENV !== 'production' ? 'provider-migration-development-only' : '')
   if (!secret) throw new Error('PERSONNUMMER_ENCRYPTION_NOT_CONFIGURED')
   if (cached?.secret !== secret) cached = { secret, key: scryptSync(secret, 'accounted-provider-migration-v1', 32) }
   return cached.key
