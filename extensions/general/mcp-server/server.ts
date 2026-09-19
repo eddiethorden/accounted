@@ -1,4 +1,4 @@
-import { readSIEImportStatus, SIE_IMPORT_STATUS_SCHEMA } from './sie-import-status'
+import { isImportId, listRecentSIEImports, readSIEImportStatus, SIE_IMPORT_STATUS_TOOL_SCHEMA } from './sie-import-status'
 import { SIELegacyReviewRequiredError } from '@/lib/import/sie-legacy-recovery'
 import { UUID_RE } from '@/lib/invariants/uuid'
 import {
@@ -277,6 +277,7 @@ import { matchPairs } from '@/lib/reconciliation/actions'
 import { signOffAccount } from '@/lib/reconciliation/signoff'
 import { bookResidualAndLink, RESIDUAL_MAX_AMOUNT } from '@/lib/reconciliation/residual'
 import { parseAccountKey, type ReconciliationItemBucket } from '@/lib/reconciliation/schemas'
+import { unknownAccountKeyError } from './reconciliation-key-error'
 import { decryptPersonnummer, maskEmployeeForResponse, maskPersonnummer } from '@/lib/salary/personnummer'
 import {
   deriveAgiFilingState,
@@ -9468,8 +9469,11 @@ export const tools: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        account_class: { type: 'number', description: 'Filter by class (1-8)' },
-        active_only: { type: 'boolean', description: 'Only active accounts (default: true)' },
+        account_class: { type: 'number', description: '1-8' },
+        active_only: { type: 'boolean', description: 'Default true' },
+        detail: { type: 'string', enum: ['full', 'compact'], description: 'compact: number, name, class, active, momskod' },
+        limit: { type: 'integer' },
+        offset: { type: 'integer' },
       },
     },
     outputSchema: {
@@ -9478,13 +9482,25 @@ export const tools: McpTool[] = [
       properties: {
         accounts: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
+        total: { type: 'number' },
       },
-      required: ['accounts', 'count'],
+      required: ['accounts', 'count', 'total'],
     },
     annotations: ANNOTATIONS_READ_ONLY,
     async execute(args, companyId, userId, supabase) {
       const activeOnly = args.active_only !== false
       const accountClass = args.account_class as number | undefined
+      // A 379-account chart is 88 kB in full detail (Easy Online Stores,
+      // 2026-09-16): compact keeps what an agent needs to pick or check a
+      // konto, and limit/offset page the rest. Both are opt-in so every
+      // existing caller sees the same rows as before, plus `total`.
+      const compact = args.detail === 'compact'
+      const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) && args.limit >= 1 ? args.limit : undefined
+      if (args.limit !== undefined && limit === undefined) throw new Error('limit must be a positive integer')
+      if (args.offset !== undefined && (typeof args.offset !== 'number' || !Number.isInteger(args.offset) || args.offset < 0)) {
+        throw new Error('offset must be a non-negative integer')
+      }
+      const offset = (args.offset as number | undefined) ?? 0
 
       // Paginated (fetchAllRows): PostgREST silently caps un-ranged selects at
       // 1000 rows and a full BAS 2026 chart holds ~1290 accounts. Paging is on
@@ -9501,13 +9517,14 @@ export const tools: McpTool[] = [
         normal_balance: string
         is_active: boolean
         description: string | null
+        default_vat_treatment: string | null
       }
       let accounts: ChartAccountRow[]
       try {
         accounts = await fetchAllRows<ChartAccountRow>(({ from, to }) => {
           let query = supabase
             .from('chart_of_accounts')
-            .select('account_number, account_name, account_class, account_group, account_type, normal_balance, is_active, description')
+            .select('account_number, account_name, account_class, account_group, account_type, normal_balance, is_active, description, default_vat_treatment')
             .eq('company_id', companyId)
           if (activeOnly) query = query.eq('is_active', true)
           if (accountClass !== undefined) query = query.eq('account_class', accountClass)
@@ -9517,7 +9534,15 @@ export const tools: McpTool[] = [
         throw dbError(error)
       }
 
-      return { accounts, count: accounts.length }
+      const total = accounts.length
+      const page = limit === undefined && offset === 0 ? accounts : accounts.slice(offset, limit === undefined ? undefined : offset + limit)
+      // One literal select for both modes (the phantom-column scanner cannot
+      // read a dynamic column list); compact is a projection of the same rows.
+      const rows = compact
+        ? page.map(({ account_number, account_name, account_class, is_active, default_vat_treatment }) =>
+            ({ account_number, account_name, account_class, is_active, default_vat_treatment }))
+        : page
+      return { accounts: rows, count: rows.length, total }
     },
   },
 
@@ -12750,20 +12775,20 @@ export const tools: McpTool[] = [
     name: 'gnubok_get_reconciliation_status',
     keywords: ['avstämning', 'skattekonto', 'bankavstämning', 'stäm av'],
     title: 'Reconciliation Status',
-    description: 'Reconciliation bridge. account_key: "skattekonto", "bank:<cash_account_id>" or "manual:<BAS>" (any other balance account, see its manual block). Without it: legacy bank status for account_number. Judge on unexplained_difference.',
+    description: 'Reconciliation bridge for one account_key: "skattekonto", "bank:<cash_account_id>" or "manual:<BAS>". Without it: legacy bank status for account_number. Judge on unexplained_difference.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         account_key: {
           type: 'string',
-          description: '"skattekonto", "bank:<cash_account_id>" or "manual:<BAS>"; for manual keys date_to is the balansdag.',
+          description: 'For manual keys date_to is the balansdag.',
         },
         date_from: { type: 'string', description: 'Start date YYYY-MM-DD' },
         date_to: { type: 'string', description: 'End date YYYY-MM-DD' },
         account_number: {
           type: 'string',
-          description: 'Legacy: BAS code, default "1930". Ignored when account_key is set.',
+          description: 'Legacy: BAS code, default "1930".',
         },
       },
     },
@@ -12779,7 +12804,7 @@ export const tools: McpTool[] = [
           windowFrom: dateFrom ?? null,
           windowTo: dateTo ?? null,
         })
-        if (!status) throw new Error(`Unknown account_key "${accountKey}" for this company`)
+        if (!status) throw await unknownAccountKeyError(supabase, companyId, accountKey)
         // The skattekonto engine also returns its item lists; this tool is the
         // bridge. Items live in gnubok_list_reconciliation_items.
         const { items: _items, ...rest } = status as typeof status & { items?: unknown }
@@ -12808,7 +12833,7 @@ export const tools: McpTool[] = [
     name: 'gnubok_list_reconciliation_items',
     keywords: ['avstämning', 'skattekonto', 'avstämningsposter'],
     title: 'Reconciliation Items',
-    description: 'Rows behind one account\'s reconciliation bridge, by bucket: side, qualified id, amount, proposal with confidence + reasons, allowed actions. Link via gnubok_reconcile_match.',
+    description: 'Rows behind one account\'s reconciliation bridge, by bucket: side, qualified id, amount, proposal, allowed actions. Link via gnubok_reconcile_match.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -12847,7 +12872,7 @@ export const tools: McpTool[] = [
         limit: args.limit as number | undefined,
         offset: args.offset as number | undefined,
       })
-      if (!result) throw new Error(`Unknown account_key "${accountKey}" for this company`)
+      if (!result) throw await unknownAccountKeyError(supabase, companyId, accountKey)
       return result
     },
   },
@@ -12856,7 +12881,7 @@ export const tools: McpTool[] = [
     name: 'gnubok_reconcile_match',
     keywords: ['avstämning', 'skattekonto', 'matcha'],
     title: 'Reconcile: Link Pairs',
-    description: 'Link outside rows (bank or skattekonto) to existing verifikat on one account; no new bokföring. Pass pairs, or use_proposals to apply the persisted proposals. Stages. dry_run previews.',
+    description: 'Link outside rows (bank or skattekonto) to existing verifikat on one account; no new bokföring. Pass pairs, or use_proposals. Stages. dry_run previews.',
     // Default catalog since E2E #12: the onboarding efterkontroll instructs
     // matching SIE-covered bank rows against existing verifikat, and
     // Claude.ai cannot call search-only tools: the agent misread the
@@ -12926,7 +12951,7 @@ export const tools: McpTool[] = [
         { pairs, use_proposals: useProposals, confidence_threshold: confidenceThreshold },
         { dryRun: true },
       )
-      if (!preview) throw new Error(`Unknown account_key "${accountKey}" for this company`)
+      if (!preview) throw await unknownAccountKeyError(supabase, companyId, accountKey)
       // Rebuild the staged pairs from the preview. The dry run flattens every
       // pair into one link per outside row, so the grouping must be put back:
       // the links of an N:1 pair (several rows, one verifikat, no
@@ -13092,7 +13117,7 @@ export const tools: McpTool[] = [
         },
         { dryRun: true },
       )
-      if (!preview) throw new Error(`Unknown account_key "${accountKey}" for this company`)
+      if (!preview) throw await unknownAccountKeyError(supabase, companyId, accountKey)
       const previewData: Record<string, unknown> = preview.dry_run
         ? { ...preview.would_sign }
         : { account_key: accountKey, through_date: throughDate }
@@ -13167,7 +13192,7 @@ export const tools: McpTool[] = [
         description: args.description as string | undefined,
       }
       const preview = await bookResidualAndLink(supabase, companyId, userId, accountKey, input, { dryRun: true })
-      if (!preview) throw new Error(`Unknown account_key "${accountKey}" for this company`)
+      if (!preview) throw await unknownAccountKeyError(supabase, companyId, accountKey)
       if (!preview.dry_run) throw new Error('Unexpected live result from a dry run')
       const wouldBook = preview.would_book
       return stagePendingOperation(
@@ -19860,7 +19885,7 @@ export const tools: McpTool[] = [
     keywords: ['sie', 'sie-fil', 'importera bokföring'],
     title: 'Create SIE Upload',
     description:
-      'The SIE-file intake: on claude.ai/Desktop this renders a DRAG-AND-DROP card that reads exact bytes, preflights and imports: call it as soon as an SIE import is next. Elsewhere: PUT raw bytes (max 50 MB) to upload_url, then pass upload_id + sha256 to preflight/import.',
+      'The SIE-file intake: on claude.ai/Desktop this renders a DRAG-AND-DROP card that reads exact bytes, preflights and imports: call it first. Elsewhere: PUT raw bytes (max 50 MB) to upload_url, then pass upload_id + sha256 to preflight/import. reports:read suffices.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -20239,11 +20264,16 @@ export const tools: McpTool[] = [
   {
     name:'gnubok_sie_import_status',title:'SIE Import Status',keywords:['sie','importstatus'],catalogVisibility:'search',
     description:'Read durable SIE job progress or a read-only legacy recovery assessment. Legacy counts describe the whole year, not entry ownership; review_required never permits undo, reset or retry. Poll durable jobs after approval until completed or undone.',
-    inputSchema:{type:'object',additionalProperties:false,properties:{import_id:{type:'string',format:'uuid'}},required:['import_id']},
-    outputSchema:SIE_IMPORT_STATUS_SCHEMA,
+    inputSchema:{type:'object',additionalProperties:false,properties:{import_id:{type:'string',format:'uuid',description:'Omit to list the company\'s recent imports.'}}},
+    outputSchema:SIE_IMPORT_STATUS_TOOL_SCHEMA,
     annotations:ANNOTATIONS_READ_ONLY,
     async execute(args,companyId,_userId,supabase) {
-      return readSIEImportStatus(supabase,companyId,args.import_id as string)
+      const importId = args.import_id
+      if (importId === undefined || importId === null || importId === '') return listRecentSIEImports(supabase, companyId)
+      if (!isImportId(importId)) {
+        throw new Error(`import_id must be the UUID of a sie_imports row (got ${JSON.stringify(importId)}). Omit it to list recent imports.`)
+      }
+      return readSIEImportStatus(supabase,companyId,importId)
     },
   },
   {
@@ -21121,7 +21151,7 @@ export const tools: McpTool[] = [
     keywords: ['periodisering', 'upplupna kostnader', 'förutbetalda intäkter'],
     title: 'Propose Accruals (Periodiseringar)',
     description:
-      'Read-only proposal of periodiseringar (förutbetalda/upplupna kostnader); currently surfaces the vacation-liability change. No dedicated MCP poster: stage accrual entries via gnubok_create_voucher (or the web accruals form).',
+      'Read-only proposal of periodiseringar (förutbetalda/upplupna kostnader); today the vacation-liability change. `notices` says why one was withheld (2920 balance, no employees). Stage via gnubok_create_voucher or the web form.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
