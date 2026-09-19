@@ -59,7 +59,9 @@ export async function fetchMigrationPage(
     try {
       result = await bokioClient.getPage(accessToken, providerCompanyId!, config.listEndpoint, { page });
     } catch (error) {
-      if (resource === 'supplierInvoices' && error instanceof BokioApiError && error.statusCode === 404) {
+      // Preserve the direct importer's handling of optional Bokio AP endpoints.
+      if ((resource === 'suppliers' || resource === 'supplierInvoices')
+        && error instanceof BokioApiError && error.statusCode === 404) {
         return { items: [], nextPage: null, total: 0 };
       }
       throw error;

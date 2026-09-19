@@ -5,6 +5,11 @@ vi.mock('../fortnox/client', () => ({ FortnoxClient: class { getPage = page } })
 vi.mock('../briox/client', () => ({ BrioxClient: class { getPage = page } }))
 vi.mock('../bjornlunden/client', () => ({ BjornLundenClient: class { getPage = page } }))
 vi.mock('../wint/client', () => ({ WintClient: class { getPage = page } }))
+vi.mock('../bokio/client', async importOriginal => {
+  const actual = await importOriginal<typeof import('../bokio/client')>()
+  return { ...actual, BokioClient: class { getPage = page } }
+})
+import { BokioApiError } from '../bokio/client'
 import { fetchMigrationPage } from '../provider-data-fetcher'
 beforeEach(() => vi.clearAllMocks())
 describe('durable provider listing', () => {
@@ -28,5 +33,20 @@ describe('durable provider listing', () => {
     const error = Object.assign(new Error('rate limited'), { statusCode: 429 })
     page.mockRejectedValue(error)
     await expect(fetchMigrationPage('visma', 'token', undefined, 'customers', 1)).rejects.toBe(error)
+  })
+  it.each(['suppliers', 'supplierInvoices'] as const)('continues past an unavailable Bokio %s endpoint', async resource => {
+    page.mockRejectedValue(new BokioApiError('not found', 404))
+    await expect(fetchMigrationPage('bokio', 'token', 'tenant', resource, 1))
+      .resolves.toEqual({ items: [], nextPage: null, total: 0 })
+  })
+  it.each([401, 403, 429, 500])('preserves Bokio supplier failures with HTTP %s for recovery', async status => {
+    const error = new BokioApiError('provider failed', status)
+    page.mockRejectedValue(error)
+    await expect(fetchMigrationPage('bokio', 'token', 'tenant', 'suppliers', 1)).rejects.toBe(error)
+  })
+  it.each(['customers', 'salesInvoices'] as const)('does not mistake a missing Bokio %s endpoint for an empty register', async resource => {
+    const error = new BokioApiError('not found', 404)
+    page.mockRejectedValue(error)
+    await expect(fetchMigrationPage('bokio', 'token', 'tenant', resource, 1)).rejects.toBe(error)
   })
 })
