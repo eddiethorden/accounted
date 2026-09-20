@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
+  isCustomerPaymentSourceType,
   isPaymentSourceType,
   loadPaymentEntryLinks,
   syncInvoiceStatusFromPaymentEntry,
@@ -63,6 +64,28 @@ describe('isPaymentSourceType', () => {
       expect(isPaymentSourceType(sourceType)).toBe(false)
     }
   )
+})
+
+// The DELETE voucher route syncs only these in TS. Supplier payments and
+// utlägg are reverted inside delete_last_voucher; syncing them again here
+// would revert a part payment twice and wipe the payment that should stand.
+describe('isCustomerPaymentSourceType', () => {
+  it.each(['invoice_paid', 'invoice_cash_payment'])('recognises %s as a customer payment', (sourceType) => {
+    expect(isCustomerPaymentSourceType(sourceType)).toBe(true)
+  })
+
+  it.each([
+    'supplier_invoice_paid',
+    'supplier_invoice_cash_payment',
+    'expense_claim',
+    'manual',
+    'invoice_created',
+    '',
+    null,
+    undefined,
+  ])('rejects %s', (sourceType) => {
+    expect(isCustomerPaymentSourceType(sourceType)).toBe(false)
+  })
 })
 
 describe('syncInvoiceStatusFromPaymentEntry', () => {

@@ -19,6 +19,19 @@ export function isPaymentSourceType(sourceType: string | null | undefined): bool
 }
 
 /**
+ * Customer-side payment vouchers only. The DELETE voucher route syncs these in
+ * TS; supplier payments and utlägg are reverted inside delete_last_voucher
+ * itself (migration 20260920190000), in the same transaction as the delete.
+ * Running this module's supplier branch after that RPC would apply the
+ * reversal a second time: on a part payment it takes paid_amount from the
+ * already-reverted value down to zero and wipes the payment that should stand.
+ */
+export function isCustomerPaymentSourceType(sourceType: string | null | undefined): boolean {
+  if (!sourceType || !isPaymentSourceType(sourceType)) return false
+  return !sourceType.startsWith('supplier_invoice')
+}
+
+/**
  * The subledger rows a payment voucher is tied to, read while the voucher still
  * exists. Everything below is addressed by these ids, never by journal_entry_id:
  * supplier_invoice_payments.journal_entry_id, invoice_payments.journal_entry_id

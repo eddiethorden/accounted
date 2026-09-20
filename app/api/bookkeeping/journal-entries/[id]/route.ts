@@ -3,14 +3,17 @@ import { ensureInitialized } from '@/lib/init'
 import { eventBus } from '@/lib/events/bus'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
 import { createLogger } from '@/lib/logger'
-import { loadPaymentEntryLinks, syncInvoiceStatusFromPaymentEntry } from '@/lib/bookkeeping/payment-sync'
+import {
+  isCustomerPaymentSourceType,
+  loadPaymentEntryLinks,
+  syncInvoiceStatusFromPaymentEntry,
+} from '@/lib/bookkeeping/payment-sync'
 import { withRouteContext } from '@/lib/api/with-route-context'
 import { validateBody } from '@/lib/api/validate'
 import { CreateJournalEntrySchema } from '@/lib/api/schemas'
 import { updateDraftEntry } from '@/lib/bookkeeping/engine'
 import { bookkeepingErrorResponse } from '@/lib/bookkeeping/errors'
 import { reanchorOrphanedSupplierInvoiceDocuments } from '@/lib/core/documents/supplier-invoice-underlag'
-import { discardExpenseClaimForDeletedVoucher } from '@/lib/expenses/expense-claims-service'
 
 const logger = createLogger('journal-entries')
 
@@ -46,11 +49,18 @@ export const DELETE = withRouteContext<{ params: Promise<{ id: string }> }>(
   async (_request, { supabase, companyId, user }, { params }) => {
     const { id } = await params
 
-  // Read source_type/source_id BEFORE deleting so we can revert the linked
-  // invoice/supplier_invoice status afterwards. The GL row gets cancelled by
-  // delete_last_voucher but the invoice's paid status lives outside the GL
-  // and would otherwise stay stuck on "paid" after the user deletes the
-  // payment voucher.
+  // Registers that hang on a verifikat live outside the GL, and their FKs are
+  // ON DELETE SET NULL: without a revert they keep asserting a verifikat that
+  // is gone. Who reverts what:
+  //   - utlägg, supplier payment rows and the supplier invoice's paid state:
+  //     delete_last_voucher itself (migration 20260920190000), in the same
+  //     transaction as the delete, found by FK. It REFUSES the delete while an
+  //     utlägg carries payout state, which a step running after the RPC never
+  //     could. Nothing in this route may touch those registers afterwards: a
+  //     second revert of a part payment wipes the payment that should stand.
+  //   - customer invoice payments: the TS sync below. Their remaining_amount
+  //     is the ROT/RUT customer share defined once in
+  //     lib/invoices/customer-share.ts, which is not duplicated into SQL.
   const { data: entryBefore } = await supabase
     .from('journal_entries')
     .select('id, source_type, source_id')
@@ -58,13 +68,16 @@ export const DELETE = withRouteContext<{ params: Promise<{ id: string }> }>(
     .eq('company_id', companyId)
     .single()
 
+  const customerPaymentEntry =
+    entryBefore && isCustomerPaymentSourceType(entryBefore.source_type) ? entryBefore : null
+
   // The payment rows and bank rows are read now, while the entry exists: their
   // journal_entry_id FKs are ON DELETE SET NULL, so after the RPC they can no
   // longer be found by entry id, and the sync would leave the payment row in
   // the invoice's history and revert the whole paid_amount instead of this
   // payment's share.
-  const paymentLinks = entryBefore
-    ? await loadPaymentEntryLinks(supabase, companyId, entryBefore)
+  const paymentLinks = customerPaymentEntry
+    ? await loadPaymentEntryLinks(supabase, companyId, customerPaymentEntry)
     : null
 
   // delete_last_voucher clears journal_entry_id on every document hanging on
@@ -93,49 +106,11 @@ export const DELETE = withRouteContext<{ params: Promise<{ id: string }> }>(
     )
   }
 
-  if (entryBefore) {
+  if (customerPaymentEntry) {
     try {
-      await syncInvoiceStatusFromPaymentEntry(supabase, companyId, entryBefore, paymentLinks)
+      await syncInvoiceStatusFromPaymentEntry(supabase, companyId, customerPaymentEntry, paymentLinks)
     } catch (syncError) {
       logger.warn('payment status sync failed after delete', { entryId: id, error: syncError })
-    }
-  }
-
-  // An utlägg is the same shape of problem as the invoice status above: the
-  // register row lives outside the GL and the FK is ON DELETE SET NULL, so
-  // deleting the voucher strands a claim that still counts toward "att betala"
-  // and that the register cannot remove, because its delete works by reversing
-  // the entry that no longer exists. entryBefore.source_id is the claim: the
-  // forward link is already cleared by the time we get here.
-  if (entryBefore?.source_type === 'expense_claim' && entryBefore.source_id) {
-    try {
-      const discarded = await discardExpenseClaimForDeletedVoucher(
-        supabase,
-        companyId,
-        entryBefore.source_id,
-      )
-      if (!discarded.ok) {
-        // Payout state outranks the voucher delete: leave the row and say so.
-        // The claim is visible in the register, so this is recoverable by hand
-        // rather than a silent loss.
-        logger.warn('expense claim kept after voucher delete', {
-          entryId: id,
-          claimId: entryBefore.source_id,
-          code: discarded.code,
-          detail: discarded.detail,
-        })
-      } else if (discarded.deleted) {
-        logger.info('expense claim removed with its voucher', {
-          entryId: id,
-          claimId: entryBefore.source_id,
-        })
-      }
-    } catch (claimError) {
-      logger.warn('expense claim cleanup failed after delete', {
-        entryId: id,
-        claimId: entryBefore.source_id,
-        error: claimError,
-      })
     }
   }
 

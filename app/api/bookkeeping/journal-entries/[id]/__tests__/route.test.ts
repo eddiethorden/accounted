@@ -28,7 +28,10 @@ vi.mock('@/lib/events/bus', () => ({
   eventBus: { emit: vi.fn().mockResolvedValue(undefined) },
 }))
 
-vi.mock('@/lib/bookkeeping/payment-sync', () => ({
+// The source-type predicate stays real: which vouchers the route syncs in TS
+// is the contract under test. Only the I/O is mocked.
+vi.mock('@/lib/bookkeeping/payment-sync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/bookkeeping/payment-sync')>()),
   loadPaymentEntryLinks: vi.fn().mockResolvedValue(null),
   syncInvoiceStatusFromPaymentEntry: vi.fn().mockResolvedValue(undefined),
 }))
@@ -37,12 +40,7 @@ vi.mock('@/lib/core/documents/supplier-invoice-underlag', () => ({
   reanchorOrphanedSupplierInvoiceDocuments: vi.fn().mockResolvedValue(0),
 }))
 
-vi.mock('@/lib/expenses/expense-claims-service', () => ({
-  discardExpenseClaimForDeletedVoucher: vi.fn().mockResolvedValue({ ok: true, deleted: true }),
-}))
-
 import { reanchorOrphanedSupplierInvoiceDocuments } from '@/lib/core/documents/supplier-invoice-underlag'
-import { discardExpenseClaimForDeletedVoucher } from '@/lib/expenses/expense-claims-service'
 import { loadPaymentEntryLinks, syncInvoiceStatusFromPaymentEntry } from '@/lib/bookkeeping/payment-sync'
 
 import { DELETE } from '../route'
@@ -113,57 +111,41 @@ describe('DELETE /api/bookkeeping/journal-entries/[id]', () => {
     )
   })
 
-  // The utlägg register lives outside the GL and its FK is ON DELETE SET NULL,
-  // so without this the row survives the voucher with no way to remove it.
-  it('discards the utlägg whose verifikat was deleted', async () => {
-    enqueue({ data: { id: 'je-1', source_type: 'expense_claim', source_id: 'claim-1' } })
+  // Utlägg and the supplier side are reverted INSIDE delete_last_voucher, in
+  // the same transaction as the delete (tests/pg/voucher-delete-registers).
+  // The route must not revert them a second time: on a part payment the TS
+  // sync would take the already-reverted paid_amount down to zero and wipe
+  // the payment that should stand.
+  it.each([
+    ['an utlägg voucher', 'expense_claim', 'claim-1'],
+    ['a supplier payment voucher', 'supplier_invoice_paid', 'si-1'],
+    ['a supplier cash payment voucher', 'supplier_invoice_cash_payment', 'si-1'],
+  ])('leaves %s to the RPC: no TS load, no TS sync', async (_label, sourceType, sourceId) => {
+    enqueue({ data: { id: 'je-1', source_type: sourceType, source_id: sourceId } })
     enqueue({ data: [] })
     enqueue({ data: { deleted: true, voucher_series: 'A', voucher_number: 44 } })
 
     const { status } = await parseJsonResponse(await run())
 
     expect(status).toBe(200)
-    expect(discardExpenseClaimForDeletedVoucher).toHaveBeenCalledWith(
-      expect.anything(),
-      'company-1',
-      'claim-1',
-    )
+    expect(loadPaymentEntryLinks).not.toHaveBeenCalled()
+    expect(syncInvoiceStatusFromPaymentEntry).not.toHaveBeenCalled()
   })
 
-  it('leaves other source types alone', async () => {
-    enqueue({ data: { id: 'je-1', source_type: 'supplier_invoice', source_id: 'si-1' } })
-    enqueue({ data: [] })
-    enqueue({ data: { deleted: true, voucher_series: 'A', voucher_number: 7 } })
-
-    await parseJsonResponse(await run())
-
-    expect(discardExpenseClaimForDeletedVoucher).not.toHaveBeenCalled()
-  })
-
-  it('does not touch the utlägg when the RPC refused the delete', async () => {
+  // The RPC refuses BEFORE deleting when the utlägg carries payout state. Its
+  // message is already user-facing Swedish and must reach the user as written.
+  it('answers 400 with the RPC refusal verbatim when the utlägg is already paid out', async () => {
+    const refusal =
+      'Verifikatet kan inte raderas: utlägget är redan utbetalt eller ligger i en utbetalning. Ångra utbetalningen först.'
     enqueue({ data: { id: 'je-1', source_type: 'expense_claim', source_id: 'claim-1' } })
     enqueue({ data: [] })
-    enqueue({ error: { message: 'Kan bara radera det sista verifikatet i serien.' } })
+    enqueue({ error: { message: refusal, code: 'P0001' } })
 
-    const { status } = await parseJsonResponse(await run())
+    const { status, body } = await parseJsonResponse<{ error: string }>(await run())
 
     expect(status).toBe(400)
-    expect(discardExpenseClaimForDeletedVoucher).not.toHaveBeenCalled()
-  })
-
-  it('still answers 200 when the claim is kept because it is already paid', async () => {
-    vi.mocked(discardExpenseClaimForDeletedVoucher).mockResolvedValueOnce({
-      ok: false,
-      code: 'ALREADY_PAID',
-    })
-    enqueue({ data: { id: 'je-1', source_type: 'expense_claim', source_id: 'claim-1' } })
-    enqueue({ data: [] })
-    enqueue({ data: { deleted: true, voucher_series: 'A', voucher_number: 44 } })
-
-    const { status } = await parseJsonResponse(await run())
-
-    // The voucher is already gone; refusing the response would misreport it.
-    expect(status).toBe(200)
+    expect(body.error).toBe(refusal)
+    expect(reanchorOrphanedSupplierInvoiceDocuments).not.toHaveBeenCalled()
   })
 
   // The payment row and bank rows are linked by ON DELETE SET NULL FKs, so the
@@ -172,7 +154,7 @@ describe('DELETE /api/bookkeeping/journal-entries/[id]', () => {
   // invoice's history.
   it('loads the payment links before the delete and passes them to the sync', async () => {
     const links = {
-      paymentRows: [{ id: 'sip-1', amount: 1500, transaction_id: null }],
+      paymentRows: [{ id: 'ip-1', amount: 1500, transaction_id: null }],
       transactionIds: [],
     }
     const order: string[] = []
@@ -181,9 +163,9 @@ describe('DELETE /api/bookkeeping/journal-entries/[id]', () => {
       return links
     })
     const rpc = mockSupabase.rpc
-    enqueue({ data: { id: 'je-1', source_type: 'supplier_invoice_paid', source_id: 'si-1' } })
+    enqueue({ data: { id: 'je-1', source_type: 'invoice_paid', source_id: 'inv-1' } })
     enqueue({ data: [] })
-    enqueue({ data: { deleted: true, voucher_series: 'E', voucher_number: 67 } })
+    enqueue({ data: { deleted: true, voucher_series: 'K', voucher_number: 67 } })
     vi.mocked(syncInvoiceStatusFromPaymentEntry).mockImplementationOnce(async () => {
       order.push('sync')
     })
@@ -198,7 +180,7 @@ describe('DELETE /api/bookkeeping/journal-entries/[id]', () => {
     expect(syncInvoiceStatusFromPaymentEntry).toHaveBeenCalledWith(
       expect.anything(),
       'company-1',
-      { id: 'je-1', source_type: 'supplier_invoice_paid', source_id: 'si-1' },
+      { id: 'je-1', source_type: 'invoice_paid', source_id: 'inv-1' },
       links,
     )
   })
@@ -207,7 +189,7 @@ describe('DELETE /api/bookkeeping/journal-entries/[id]', () => {
     vi.mocked(loadPaymentEntryLinks).mockRejectedValueOnce(
       Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }),
     )
-    enqueue({ data: { id: 'je-1', source_type: 'supplier_invoice_paid', source_id: 'si-1' } })
+    enqueue({ data: { id: 'je-1', source_type: 'invoice_paid', source_id: 'inv-1' } })
 
     const { status } = await parseJsonResponse(await run())
 
