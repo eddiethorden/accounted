@@ -38,6 +38,7 @@ import {
   DATE_PROXIMITY_BUMP,
   DEFAULT_DATE_WINDOW_DAYS,
   EXCLUDED_SOURCE_TYPES,
+  candidateAmountBand,
   isDateWithinDays,
   round2,
   type FiscalPeriodRow,
@@ -171,11 +172,10 @@ export async function findMatchingVouchersForInvoice(
   // behaves exactly as it did before this change.
   const invoiceCurrency = documentCurrency(invoice.currency)
   const isForeignInvoice = invoiceCurrency !== 'SEK'
-  const hiAmount = Math.max(remainingAmount, invoice.total)
-  const loAmount = Math.min(remainingAmount, invoice.total)
-  const amountPad = Math.min(hiAmount * 0.01, 500) + 0.02
-  const amountFloor = Math.max(0, loAmount - amountPad)
-  const amountCeil = hiAmount + amountPad
+  const { floor: amountFloor, ceil: amountCeil } = candidateAmountBand(
+    remainingAmount,
+    invoice.total,
+  )
 
   // Drive the query from journal_entries, embedding the matched lines, NOT
   // from journal_entry_lines joined up to the entry. PostgREST executes the

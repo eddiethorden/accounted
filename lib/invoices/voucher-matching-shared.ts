@@ -2,8 +2,9 @@
  * Row shapes, tolerances and helpers shared by the customer-side
  * (voucher-matching.ts) and supplier-side (supplier-voucher-matching.ts)
  * "link an existing verifikat as the payment" flows. Both files read the same
- * journal tables and rank candidates the same way; only the account side
- * (151x credits vs 244x debits) and the invoice type differ.
+ * journal tables and rank candidates the same way; only the settlement side
+ * (customer: 151x credit, or 19xx debit on kontantmetoden; supplier: 244x
+ * debit, or 19xx credit on kontantmetoden) and the invoice type differ.
  */
 
 /** ±90 days from the invoice's due_date as the default search window. */
@@ -52,6 +53,24 @@ export const EXCLUDED_SOURCE_TYPES = ['opening_balance', 'storno']
 
 export function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/**
+ * The amount band a bank-side (19xx) candidate search is pre-filtered to. On
+ * kontantmetoden every receipt (customer) or payout (supplier) moves 19xx, so
+ * the unfiltered set is the company's whole bank history in the window. The
+ * band is a superset of every single-line case the scorers accept: exact
+ * remaining, exact total, and fuzzy (±1% capped at 500). Both inputs are in the
+ * INVOICE's currency; the caller applies the band to the column quoted in it.
+ */
+export function candidateAmountBand(
+  remainingAmount: number,
+  invoiceTotal: number,
+): { floor: number; ceil: number } {
+  const hi = Math.max(remainingAmount, invoiceTotal)
+  const lo = Math.min(remainingAmount, invoiceTotal)
+  const pad = Math.min(hi * 0.01, 500) + 0.02
+  return { floor: Math.max(0, lo - pad), ceil: hi + pad }
 }
 
 export function isDateWithinDays(a: string, b: string, days: number): boolean {
