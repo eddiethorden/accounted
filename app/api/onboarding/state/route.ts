@@ -4,6 +4,7 @@ import { validateBody } from '@/lib/api/validate'
 import { UpdateInitialSetupStateSchema } from '@/lib/api/schemas'
 import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
+import { companyAdminRequiredResponse } from '@/lib/auth/require-write'
 
 const INITIAL_SETUP_SELECT =
   'initial_setup_path, initial_setup_completed_at, initial_setup_dismissed_at' as const
@@ -105,7 +106,7 @@ export const PATCH = withRouteContext(
       .update(update)
       .eq('company_id', companyId)
       .select(INITIAL_SETUP_SELECT)
-      .single()
+      .maybeSingle()
 
     if (error) {
       log.error('initial setup state update failed', error)
@@ -114,8 +115,20 @@ export const PATCH = withRouteContext(
         details: { reason: getErrorMessage(error) },
       })
     }
+    // The row was read a moment ago, so an UPDATE that matches nothing was
+    // refused by row-level security (company_settings_update is owner/admin
+    // only): a refusal, not a server fault. `.single()` used to turn it into
+    // PGRST116 and a 500. requireAdmin below asks the same predicate first, so
+    // this is the backstop for a policy the gate does not know about.
+    if (!data) {
+      log.warn('initial setup state update matched no row: refused by row-level security')
+      return companyAdminRequiredResponse(log, requestId)
+    }
 
     return NextResponse.json({ data: toResponse(data) })
   },
-  { requireWrite: true },
+  // company_settings is writable by owner/admin only (RLS,
+  // user_is_company_admin). requireWrite would let a `member` through and
+  // the UPDATE would then match zero rows.
+  { requireAdmin: true },
 )

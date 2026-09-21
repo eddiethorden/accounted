@@ -21,9 +21,16 @@ vi.mock('@/lib/company/context', () => ({
 }))
 
 const requireWriteMock = vi.fn()
-vi.mock('@/lib/auth/require-write', () => ({
-  requireWritePermission: (...args: unknown[]) => requireWriteMock(...args),
-}))
+const isAdminMock = vi.fn()
+// The real envelope builder stays: only the database predicate is mocked.
+vi.mock('@/lib/auth/require-write', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth/require-write')>()
+  return {
+    requireWritePermission: (...args: unknown[]) => requireWriteMock(...args),
+    isCompanyAdmin: (...args: unknown[]) => isAdminMock(...args),
+    companyAdminRequiredResponse: actual.companyAdminRequiredResponse,
+  }
+})
 
 const deadlineMocks = vi.hoisted(() => ({
   regenerate: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +57,7 @@ describe('PUT /api/settings', () => {
     reset()
     requireAuthMock.mockResolvedValue({ user: { id: 'user-1' }, supabase, error: null })
     requireWriteMock.mockResolvedValue({ ok: true })
+    isAdminMock.mockResolvedValue(true)
   })
 
   it('returns 401 when not authenticated', async () => {
@@ -69,11 +77,11 @@ describe('PUT /api/settings', () => {
     expect(status).toBe(401)
   })
 
-  it('returns 403 for a viewer without write permission', async () => {
-    requireWriteMock.mockResolvedValue({
-      ok: false,
-      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
-    })
+  // company_settings is owner/admin only in RLS. The route used to gate on
+  // requireWrite: a `member` reached the UPDATE, matched zero rows and was
+  // told 404 "Inställningarna hittades inte."
+  it('returns 403 for anyone who is not owner or admin, before touching the table', async () => {
+    isAdminMock.mockResolvedValue(false)
 
     const request = createMockRequest('/api/settings', {
       method: 'PUT',
@@ -83,6 +91,8 @@ describe('PUT /api/settings', () => {
     const { status } = await parseJsonResponse(response)
 
     expect(status).toBe(403)
+    expect(isAdminMock).toHaveBeenCalledWith(supabase, 'company-1')
+    expect(supabase.from).not.toHaveBeenCalled()
   })
 
   it('updates the settings on the happy path', async () => {
