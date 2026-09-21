@@ -18,6 +18,7 @@ import {
   insertAuthUser,
   insertCompanyMember,
   insertDraftJournalEntry,
+  insertFiscalPeriod,
   insertPostedJournalEntry,
   seedCompany,
   type PostedJournalEntryLine,
@@ -475,6 +476,116 @@ describe('attach_supplier_invoice_settlement_voucher', () => {
     expect(await attach({ company, invoiceId, voucherId, notes: 'x'.repeat(2001) })).toMatchObject({
       ok: false, code: 'ATTACH_SI_SETTLEMENT_NOTES_TOO_LONG', details: { max_length: 2000, length: 2001 },
     })
+  })
+})
+
+describe('attach_supplier_invoice_settlement_voucher: closed years and a posted cut-off', () => {
+  /** The payable half of a posted kontantmetoden cut-off for the seeded 2026 year. */
+  async function seedPostedPayableCutoff(company: Seeded, kind = 'payable'): Promise<string> {
+    const entryId = await insertPostedJournalEntry({
+      userId: company.userId,
+      companyId: company.companyId,
+      fiscalPeriodId: company.fiscalPeriodId,
+      voucherNumber: Math.floor(Math.random() * 1_000_000),
+      entryDate: '2026-12-31',
+      description: 'Leverantörsskulder bokslut (kontantmetoden)',
+      sourceType: 'year_end',
+      sourceId: company.fiscalPeriodId,
+      lines: [
+        { accountNumber: '5410', debitAmount: 1000, creditAmount: 0 },
+        { accountNumber: '2440', debitAmount: 0, creditAmount: 1000 },
+      ],
+    })
+    await getPool().query(
+      `INSERT INTO public.kontantmetod_cutoff_entries
+         (company_id, fiscal_period_id, kind, journal_entry_id)
+       VALUES ($1, $2, $3, $4)`,
+      [company.companyId, company.fiscalPeriodId, kind, entryId],
+    )
+    return entryId
+  }
+
+  it('a closed year alone does not refuse: nothing in the journal is written', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const invoiceId = await seedSupplierInvoice({ company })
+    const voucherId = await seedVoucher({ company, lines: cashPaymentLines(1000) })
+    // Closed after the verifikat was posted, as an imported year is.
+    await getPool().query(
+      `UPDATE public.fiscal_periods SET is_closed = true, closed_at = now(), locked_at = now() WHERE id = $1`,
+      [company.fiscalPeriodId],
+    )
+
+    expect((await attach({ company, invoiceId, voucherId })).ok).toBe(true)
+    expect(await paymentRows(invoiceId)).toHaveLength(1)
+  })
+
+  it('refuses evidence that a posted cut-off for that year would contradict', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const invoiceId = await seedSupplierInvoice({ company })
+    const voucherId = await seedVoucher({ company, lines: cashPaymentLines(1000), entryDate: '2026-05-05' })
+    await seedPostedPayableCutoff(company)
+
+    expect(await attach({ company, invoiceId, voucherId })).toMatchObject({
+      ok: false,
+      code: 'ATTACH_SI_SETTLEMENT_CUTOFF_ALREADY_POSTED',
+      details: { voucher_date: '2026-05-05', invoice_date: '2026-04-01' },
+    })
+    // The dry run says the same, so a preview never promises what apply refuses.
+    expect((await attach({ company, invoiceId, voucherId, dryRun: true })).code)
+      .toBe('ATTACH_SI_SETTLEMENT_CUTOFF_ALREADY_POSTED')
+    expect(await paymentRows(invoiceId)).toHaveLength(0)
+  })
+
+  it('passes evidence dated after that year: the invoice WAS a skuld at its end, the cut-off stands', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const nextYear = await insertFiscalPeriod({
+      userId: company.userId,
+      companyId: company.companyId,
+      name: '2027',
+      periodStart: '2027-01-01',
+      periodEnd: '2027-12-31',
+    })
+    const invoiceId = await seedSupplierInvoice({ company })
+    const paidInJanuary = await insertPostedJournalEntry({
+      userId: company.userId,
+      companyId: company.companyId,
+      fiscalPeriodId: nextYear,
+      voucherNumber: Math.floor(Math.random() * 1_000_000),
+      entryDate: '2027-01-08',
+      description: 'Betalning leverantör',
+      sourceType: 'import',
+      lines: cashPaymentLines(1000),
+    })
+    await seedPostedPayableCutoff(company)
+
+    expect(await attach({ company, invoiceId, voucherId: paidInJanuary })).toMatchObject({
+      ok: true, payment_date: '2027-01-08',
+    })
+  })
+
+  it('reads a stornoed cut-off as absent, and ignores the receivable half', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const invoiceId = await seedSupplierInvoice({ company })
+    const voucherId = await seedVoucher({ company, lines: cashPaymentLines(1000) })
+    // reverseEntry() leaves the cancelled verifikat at 'reversed' with its
+    // marker behind; that is how the wrong cut-off is cleared before evidence.
+    const cancelled = await seedPostedPayableCutoff(company)
+    await getPool().query(`UPDATE public.journal_entries SET status = 'reversed' WHERE id = $1`, [cancelled])
+    await seedPostedPayableCutoff(company, 'receivable')
+
+    expect((await attach({ company, invoiceId, voucherId })).ok).toBe(true)
+  })
+
+  it('refuses a verifikat that has been reversed', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const invoiceId = await seedSupplierInvoice({ company })
+    const voucherId = await seedVoucher({ company, lines: cashPaymentLines(1000) })
+    await getPool().query(`UPDATE public.journal_entries SET status = 'reversed' WHERE id = $1`, [voucherId])
+
+    expect(await attach({ company, invoiceId, voucherId })).toMatchObject({
+      ok: false, code: 'ATTACH_SI_SETTLEMENT_NOT_POSTED', details: { status: 'reversed' },
+    })
+    expect(await paymentRows(invoiceId)).toHaveLength(0)
   })
 })
 

@@ -35,7 +35,10 @@
 --     pointing at it can never add up to more than its settlement side;
 --   - the verifikat must cover the whole unexplained amount. An instalment is
 --     not told apart from a mistyped voucher number, so it is refused, not
---     guessed at.
+--     guessed at;
+--   - a closed or locked period does not refuse (nothing in the journal is
+--     written), but a posted kontantmetoden cut-off that the evidence would
+--     contradict does: that cut-off is corrected first.
 --
 -- Deliberately narrow: SEK invoices only, no credit notes. Both are refused
 -- with their own code rather than handled on a guess; the first company this
@@ -171,6 +174,36 @@ BEGIN
       'details', jsonb_build_object('reason', 'source_type', 'source_type', v_voucher.source_type));
   END IF;
 
+  -- A closed or locked period is NOT a reason to refuse: the row is reskontra,
+  -- no verifikat is written or changed, and the payments this exists for sit in
+  -- imported years that are closed by nature (link_supplier_invoice_to_voucher
+  -- allows a locked period on the same ground). What must not happen is that a
+  -- figure already ACTED ON shifts silently. A posted kontantmetoden cut-off for
+  -- a year ending on E counted this invoice as a skuld when the invoice is
+  -- dated on or before E and no payment on or before E was known. Evidence
+  -- dated on or before E would make a recomputation disagree with that posted
+  -- verifikat, with no rättelse to say why. So it is refused: the wrong cut-off
+  -- is corrected first (storno the pair, which then reads as absent here exactly
+  -- as it does in inspectKontantmetodCutoffPostings, and post it again).
+  -- Evidence dated after E leaves that cut-off right and passes.
+  IF EXISTS (
+    SELECT 1
+    FROM public.kontantmetod_cutoff_entries k
+    JOIN public.journal_entries cje ON cje.id = k.journal_entry_id
+    JOIN public.fiscal_periods fp ON fp.id = k.fiscal_period_id
+    WHERE k.company_id = p_company_id
+      AND k.kind = 'payable'
+      AND cje.status = 'posted'
+      AND fp.period_end >= v_voucher.entry_date
+      AND fp.period_end >= v_invoice.invoice_date
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'code', 'ATTACH_SI_SETTLEMENT_CUTOFF_ALREADY_POSTED',
+      'details', jsonb_build_object(
+        'voucher_date', v_voucher.entry_date,
+        'invoice_date', v_invoice.invoice_date
+      ));
+  END IF;
+
   -- What stands as settled. 'paid' means the whole total by definition of the
   -- status, and the total is also what the cut-off measures the rows against;
   -- 'partially_paid' is settled to the extent paid_amount says.
@@ -286,6 +319,6 @@ REVOKE ALL ON FUNCTION public.attach_supplier_invoice_settlement_voucher(uuid, u
 GRANT EXECUTE ON FUNCTION public.attach_supplier_invoice_settlement_voucher(uuid, uuid, uuid, uuid, text, boolean) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.attach_supplier_invoice_settlement_voucher(uuid, uuid, uuid, uuid, text, boolean) IS
-  'Attach the posted verifikat that paid an ALREADY settled supplier invoice (status paid or partially_paid) as the evidence for the part of the settled amount no supplier_invoice_payments row explains yet. Writes one payment row dated at the verifikat and nothing else: the invoice row and the journal are never touched. Accounting-method aware (19xx credit on kontantmetoden, 244x debit on faktureringsmetoden); one verifikat may settle several invoices up to its settlement side. SEK invoices only, no credit notes. p_dry_run runs every check without writing. For an OPEN invoice use link_supplier_invoice_to_voucher, which records the payment.';
+  'Attach the posted verifikat that paid an ALREADY settled supplier invoice (status paid or partially_paid) as the evidence for the part of the settled amount no supplier_invoice_payments row explains yet. Writes one payment row dated at the verifikat and nothing else: the invoice row and the journal are never touched. Accounting-method aware (19xx credit on kontantmetoden, 244x debit on faktureringsmetoden); one verifikat may settle several invoices up to its settlement side. SEK invoices only, no credit notes. A closed period does not refuse; a posted kontantmetoden cut-off that the evidence would contradict does. p_dry_run runs every check without writing. For an OPEN invoice use link_supplier_invoice_to_voucher, which records the payment.';
 
 NOTIFY pgrst, 'reload schema';
