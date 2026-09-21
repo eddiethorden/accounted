@@ -1478,6 +1478,7 @@
     "title": "{count} steg så är bokföringen igång",
     "step_books_title": "Få in din bokföring",
     "step_books_description": "Importera från ett annat system eller ladda upp en SIE-fil. Ny verksamhet?",
+    "step_books_description_member": "Importera från ett annat system eller ladda upp en SIE-fil. Är verksamheten ny väljer företagets ägare eller en administratör att starta från början.",
     "step_books_fresh_link": "Starta från början",
     "step_books_fresh_suffix": "i stället.",
     "step_books_action": "Flytta bokföringen",

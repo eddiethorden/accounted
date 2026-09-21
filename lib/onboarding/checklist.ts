@@ -71,6 +71,24 @@ export function completionPatchBody(
 }
 
 /**
+ * Whether this member may record the company's setup state (path, completed,
+ * dismissed). The state lives in company_settings, which RLS lets only
+ * `owner` and `admin` write (user_is_company_admin), and PATCH
+ * /api/onboarding/state is gated on that same predicate. A `member` can do
+ * every step of the checklist (import, connect the bank, connect
+ * Skatteverket, send in receipts) but cannot record the marker, so the
+ * checklist must never make a step wait for a write the role cannot perform:
+ * that left a member with dead buttons and a server error on each click.
+ *
+ * A null or unknown role (rendered outside a CompanyProvider) answers true:
+ * this only decides what the checklist offers, the route is the enforcement.
+ */
+export function canRecordInitialSetup(role: string | null | undefined): boolean {
+  if (role == null) return true
+  return role === 'owner' || role === 'admin'
+}
+
+/**
  * Done-state for the "Anslut till Claude" step. The only thing that means
  * "connected" is a live API key minted by the MCP OAuth token route: it
  * exists exactly when a client (claude.ai, Claude Desktop, Claude Code)
