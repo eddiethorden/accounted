@@ -12,8 +12,8 @@ import { downloadDocumentObject } from '@/lib/core/documents/document-service'
 type Call = { table: string; op: string; payload?: unknown; filters: Record<string, unknown> }
 
 // A minimal chainable Supabase double that records every write and answers
-// the unread-batch select with the rows given.
-function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<Record<string, unknown>> = []) {
+// the three backfill selects (rollout unread, retry, everyone's unread) with the rows given.
+function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<Record<string, unknown>> = [], rollout: Array<Record<string, unknown>> = []) {
   const calls: Call[] = []
   const chain = (table: string) => {
     const state: Call = { table, op: '', filters: {} }
@@ -28,9 +28,19 @@ function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<
       return api
     }
     api.is = () => api
-    api.in = () => { state.op = 'select-retry'; return api }
+    api.in = (k: string, v: unknown) => {
+      state.filters[k] = v
+      if (k === 'read_error') state.op = 'select-retry'
+      else if (state.op !== 'select-retry') state.op = 'select-rollout'
+      return api
+    }
     api.order = () => api
-    api.limit = () => { calls.push(state); return Promise.resolve({ data: state.op === 'select-retry' ? retry : unread, error: null }) }
+    api.limit = (n: number) => {
+      state.filters.limit = n
+      calls.push(state)
+      const rows = state.op === 'select-retry' ? retry : state.op === 'select-rollout' ? rollout : unread
+      return Promise.resolve({ data: rows.slice(0, n), error: null })
+    }
     return api
   }
   return { supabase: { from: (t: string) => chain(t) } as never, calls }
@@ -141,13 +151,39 @@ describe('storableText', () => {
 describe('readUnreadDocuments', () => {
   beforeEach(() => { vi.clearAllMocks(); process.env.ARKIV_COMPANY_IDS = 'co-1' })
 
-  it('retries gated rows only for companies now in the rollout, after the unread batch', async () => {
+  it('retries gated rows of the rollout companies, asking only for theirs', async () => {
     asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
     asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'claude_vision', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'claude_vision', hasTextLayer: false }] })
-    const { supabase } = makeSupabase([], [{ ...doc, id: 'r1', mime_type: 'image/jpeg' }, { ...doc, id: 'r2', company_id: 'other', mime_type: 'image/jpeg' }])
+    const { supabase, calls } = makeSupabase([], [{ ...doc, id: 'r1', mime_type: 'image/jpeg' }])
     expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 1, read: 1, skipped: 0, errors: 0 })
     expect(readDocumentBytes).toHaveBeenCalledTimes(1)
     expect(readDocumentBytes).toHaveBeenCalledWith(expect.any(Buffer), 'image/jpeg', { allowModel: true })
+    expect(calls.find((c) => c.op === 'select-retry')?.filters.company_id).toEqual(['co-1'])
+  })
+
+  it('reads the rollout companies before everyone else, so a company switched on today is not behind the platform', async () => {
+    asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
+    asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'pdf_text', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'pdf_text', hasTextLayer: true }] })
+    const others = [{ ...doc, id: 'o1', company_id: 'other' }, { ...doc, id: 'o2', company_id: 'other' }, { ...doc, id: 'o3', company_id: 'other' }]
+    const { supabase, calls } = makeSupabase(others, [], [{ ...doc, id: 'mine-1' }, { ...doc, id: 'mine-2' }])
+    expect(await readUnreadDocuments(supabase, 3)).toEqual({ processed: 3, read: 3, skipped: 0, errors: 0 })
+    const stamped = calls.filter((c) => c.table === 'document_attachments' && c.op === 'update').map((c) => c.filters.id)
+    expect(stamped).toEqual(['mine-1', 'mine-2', 'o1'])
+    expect(calls.find((c) => c.op === 'select-rollout')?.filters.company_id).toEqual(['co-1'])
+  })
+
+  it('asks for no rollout or retry rows when nobody is in the rollout', async () => {
+    delete process.env.ARKIV_COMPANY_IDS
+    const { supabase, calls } = makeSupabase([{ ...doc, mime_type: 'application/xml' }])
+    expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 1, read: 0, skipped: 1, errors: 0 })
+    expect(calls.filter((c) => c.op.startsWith('select')).map((c) => c.op)).toEqual(['select'])
+  })
+
+  it('stops between documents once the time budget is spent', async () => {
+    asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
+    asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'pdf_text', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'pdf_text', hasTextLayer: true }] })
+    const { supabase } = makeSupabase([], [], [{ ...doc, id: 'mine-1' }, { ...doc, id: 'mine-2' }])
+    expect(await readUnreadDocuments(supabase, 10, { budgetMs: 0 })).toEqual({ processed: 0, read: 0, skipped: 0, errors: 0 })
   })
 
   it('walks the unread batch and counts outcomes', async () => {

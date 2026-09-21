@@ -29,6 +29,6 @@ describe('GET /api/documents/read/cron', () => {
     const { status, body } = await parseJsonResponse(await GET(new Request('http://localhost/api/documents/read/cron')))
     expect(status).toBe(200)
     expect(body).toMatchObject({ ok: true, processed: 3, read: 2 })
-    expect(readUnreadDocuments).toHaveBeenCalledWith({ tag: 'service' }, 12)
+    expect(readUnreadDocuments).toHaveBeenCalledWith({ tag: 'service' }, 40, { budgetMs: 180_000 })
   })
 })

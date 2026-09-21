@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { downloadDocumentObject } from '@/lib/core/documents/document-service'
 import { getAiStatus } from '@/lib/ai'
-import { isArkivEnabled } from '@/lib/arkiv/flag'
+import { arkivRollout, isArkivEnabled } from '@/lib/arkiv/flag'
 import { createLogger } from '@/lib/logger'
 import { readDocumentBytes } from './router'
 import { READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
@@ -116,49 +116,68 @@ async function stamp(supabase: SupabaseClient, documentId: string, outcome: Stor
 }
 
 /**
- * Backfill: the newest unread documents first; when that batch is not full,
- * documents whose model pages were gated or unconfigured last time, but only
- * for companies now in the rollout and only when a model is configured.
+ * Backfill, in the order someone is waiting: unread documents of the companies
+ * in the rollout, then their documents whose model pages were gated or
+ * unconfigured last time (only when a model is configured), then the newest
+ * unread documents of everyone else. The platform holds far more unread files
+ * than one run reads, so without that order a company switched on today waits
+ * behind every other archive. budgetMs stops the batch between documents.
  */
-export async function readUnreadDocuments(supabase: SupabaseClient, limit: number): Promise<{ processed: number; read: number; skipped: number; errors: number }> {
+export async function readUnreadDocuments(
+  supabase: SupabaseClient,
+  limit: number,
+  opts: { budgetMs?: number } = {},
+): Promise<{ processed: number; read: number; skipped: number; errors: number }> {
   const counts = { processed: 0, read: 0, skipped: 0, errors: 0 }
-  const tally = (out: StoreOutcome) => {
-    counts.processed++
-    if (out.status === 'read') counts.read++
-    else if (out.status === 'skipped') counts.skipped++
-    else counts.errors++
+  const startedAt = Date.now()
+  const spent = () => counts.processed >= limit || (opts.budgetMs !== undefined && Date.now() - startedAt >= opts.budgetMs)
+  // False when the reader is missing: that fails every document the same way, so stop and try again next run.
+  const walk = async (docs: ReadableDocumentRow[], readOpts?: { allowModel?: boolean }): Promise<boolean> => {
+    for (const doc of docs) {
+      if (spent()) return true
+      const out = await readAndStoreDocument(supabase, doc, readOpts)
+      counts.processed++
+      if (out.status === 'read') counts.read++
+      else if (out.status === 'skipped') counts.skipped++
+      else counts.errors++
+      if (isReaderUnavailable(out)) return false
+    }
+    return true
   }
+  const rollout = arkivRollout()
+  const companies = rollout === 'all' ? null : rollout
+
+  if (companies && companies.length > 0) {
+    const { data, error } = await supabase
+      .from('document_attachments')
+      .select('id, company_id, storage_path, mime_type')
+      .is('pages_read_at', null)
+      .in('company_id', companies)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (error) throw new Error(`fetch rollout documents failed: ${error.message}`)
+    if (!(await walk((data ?? []) as ReadableDocumentRow[]))) return counts
+  }
+
+  if (!spent() && getAiStatus().configured && (companies === null || companies.length > 0)) {
+    let retry = supabase
+      .from('document_attachments')
+      .select('id, company_id, storage_path, mime_type')
+      .in('read_error', RETRY_REASONS)
+    if (companies) retry = retry.in('company_id', companies)
+    const { data, error } = await retry.order('pages_read_at', { ascending: true }).limit(limit - counts.processed)
+    if (error) throw new Error(`fetch retry documents failed: ${error.message}`)
+    if (!(await walk((data ?? []) as ReadableDocumentRow[], { allowModel: true }))) return counts
+  }
+
+  if (spent()) return counts
   const { data, error } = await supabase
     .from('document_attachments')
     .select('id, company_id, storage_path, mime_type')
     .is('pages_read_at', null)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .limit(limit - counts.processed)
   if (error) throw new Error(`fetch unread documents failed: ${error.message}`)
-  for (const doc of (data ?? []) as ReadableDocumentRow[]) {
-    const out = await readAndStoreDocument(supabase, doc)
-    tally(out)
-    // A missing reader fails every document the same way: stop, leave the rest unread, try again next run.
-    if (isReaderUnavailable(out)) return counts
-  }
-
-  const room = limit - counts.processed
-  if (room <= 0 || !getAiStatus().configured) return counts
-  const { data: retry, error: retryError } = await supabase
-    .from('document_attachments')
-    .select('id, company_id, storage_path, mime_type')
-    .in('read_error', RETRY_REASONS)
-    .order('pages_read_at', { ascending: true })
-    .limit(room * 4)
-  if (retryError) throw new Error(`fetch retry documents failed: ${retryError.message}`)
-  let taken = 0
-  for (const doc of (retry ?? []) as ReadableDocumentRow[]) {
-    if (taken >= room) break
-    if (!isArkivEnabled(doc.company_id)) continue
-    taken++
-    const out = await readAndStoreDocument(supabase, doc, { allowModel: true })
-    tally(out)
-    if (isReaderUnavailable(out)) return counts
-  }
+  await walk((data ?? []) as ReadableDocumentRow[])
   return counts
 }
