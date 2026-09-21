@@ -112,6 +112,78 @@ export function isScopedTool(toolName: string): boolean {
   return SCOPED_TOOLS.has(toolName)
 }
 
+/**
+ * Tools that only earn their place when the key reaches several companies:
+ * the company switch and the cross-company tools. Hidden from tools/list and
+ * tool search in simple company mode; still callable by name, where they
+ * simply answer for the one company.
+ */
+export function isMultiCompanyOnlyTool(toolName: string): boolean {
+  return toolName === 'gnubok_list_companies' || isScopedTool(toolName)
+}
+
+// ── Simple company mode ──────────────────────────────────────
+// Nine users in ten have one company. For them everything the multi-company
+// surface adds is noise: a company block on every result, a company_id
+// property on every tool schema (~3K tokens of tools/list), a company switch
+// and cross-company tools they cannot use. The server therefore shows two
+// faces, chosen per request from how many companies the key reaches.
+
+const REACHABLE_COUNT_TTL_MS = 60_000
+const REACHABLE_COUNT_CACHE_MAX = 5_000
+const reachableCountCache = new Map<string, { count: number; expiresAt: number }>()
+
+/** Test hook: the cache is module state and would leak between cases. */
+export function resetReachableCompanyCountCache(): void {
+  reachableCountCache.clear()
+}
+
+/**
+ * How many non-archived companies the user is a member of, optionally
+ * intersected with a restriction (a key allowlist). null = unknown (the
+ * lookup failed), which callers read as multi-company: the informative face
+ * is the safe fallback. Cached in-process for a minute per user and
+ * restriction, so a session pays one lookup, not one per call; a stale count
+ * only delays the switch between the two faces by that minute. Unknown is
+ * never cached.
+ */
+export async function getReachableCompanyCount(
+  supabase: SupabaseClient,
+  userId: string,
+  restrictTo?: readonly string[] | null,
+  now: () => number = Date.now
+): Promise<number | null> {
+  if (!userId) return 0
+  const key = `${userId}|${restrictTo ? [...restrictTo].map((id) => id.toLowerCase()).sort().join(',') : '*'}`
+  const cached = reachableCountCache.get(key)
+  if (cached && cached.expiresAt > now()) return cached.count
+  try {
+    type MembershipRow = {
+      company_id: string
+      companies: { archived_at: string | null } | Array<{ archived_at: string | null }> | null
+    }
+    const memberships = (await getUserCompanies(supabase, userId)) as unknown as MembershipRow[]
+    const allowed = restrictTo ? new Set(restrictTo.map((id) => id.toLowerCase())) : null
+    const count = memberships.filter((membership) => {
+      const company = Array.isArray(membership.companies)
+        ? membership.companies[0]
+        : membership.companies
+      if (!company || company.archived_at !== null) return false
+      return allowed ? allowed.has(String(membership.company_id).toLowerCase()) : true
+    }).length
+    if (reachableCountCache.size >= REACHABLE_COUNT_CACHE_MAX) reachableCountCache.clear()
+    reachableCountCache.set(key, { count, expiresAt: now() + REACHABLE_COUNT_TTL_MS })
+    return count
+  } catch {
+    return null
+  }
+}
+
+/** One company or none: the single-company face. Unknown stays multi-company. */
+export function isSimpleCompanyMode(reachableCount: number | null): boolean {
+  return reachableCount !== null && reachableCount <= 1
+}
+
 const COMPANY_ID_INPUT_PROPERTY = {
   type: 'string',
   format: 'uuid',
@@ -258,7 +330,14 @@ export function isTenantWriteScope(scope: ApiKeyScope | undefined): boolean {
   return scope !== undefined && scopeKind(scope) === 'write'
 }
 
-export function projectToolInputSchema(tool: ToolSchemaSource): Record<string, unknown> {
+export function projectToolInputSchema(
+  tool: ToolSchemaSource,
+  options: { omitCompanyId?: boolean } = {}
+): Record<string, unknown> {
+  // Simple company mode (the key reaches at most one company): no tool gains
+  // company_id, there is nothing to choose between. The dispatcher still
+  // tolerates the argument, so a caller that sends it anyway keeps working.
+  if (options.omitCompanyId) return tool.inputSchema
   if (!isCompanyDependentTool(tool.name) && !isOptionalCompanyTool(tool.name)) return tool.inputSchema
 
   const properties =

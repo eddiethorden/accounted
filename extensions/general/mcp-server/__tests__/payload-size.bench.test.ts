@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { tools, deriveToolMeta, isDefaultCatalogTool } from '../server'
-import { projectToolInputSchema } from '../company-routing'
+import { isMultiCompanyOnlyTool, projectToolInputSchema } from '../company-routing'
+
+// Ceiling for the catalog a single-company key is served (see the second case).
+const SIMPLE_CATALOG_CEILING = 58_900
 import { projectToolReferences } from '../tool-namespace'
 
 // Mirror the real tools/list serializer, including the derived staging _meta
@@ -8,14 +11,21 @@ import { projectToolReferences } from '../tool-namespace'
 // _meta: otherwise the guard under-measures the wire payload.
 const canonicalToolNames = new Set(tools.map((t) => t.name))
 
-function serializeCatalog(namespace: 'gnubok' | 'accounted'): string {
-  const projection = tools.filter(isDefaultCatalogTool).map((t) => {
+function serializeCatalog(
+  namespace: 'gnubok' | 'accounted',
+  options: { simpleCompanyMode?: boolean } = {}
+): string {
+  const simple = options.simpleCompanyMode === true
+  const listed = tools
+    .filter(isDefaultCatalogTool)
+    .filter((t) => !(simple && isMultiCompanyOnlyTool(t.name)))
+  const projection = listed.map((t) => {
     const meta = { ...(deriveToolMeta(t) ?? {}), ...(t._meta ?? {}) }
     const projected = {
       name: t.name,
       ...(t.title ? { title: t.title } : {}),
       description: t.description,
-      inputSchema: projectToolInputSchema(t),
+      inputSchema: projectToolInputSchema(t, { omitCompanyId: simple }),
       ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
       annotations: t.annotations,
       ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
@@ -27,8 +37,8 @@ function serializeCatalog(namespace: 'gnubok' | 'accounted'): string {
   return JSON.stringify({ tools: projection })
 }
 
-const tokensFor = (namespace: 'gnubok' | 'accounted') =>
-  Math.round(serializeCatalog(namespace).length / 4)
+const tokensFor = (namespace: 'gnubok' | 'accounted', options: { simpleCompanyMode?: boolean } = {}) =>
+  Math.round(serializeCatalog(namespace, options).length / 4)
 
 describe('tools/list payload size guard', () => {
   it('keeps the projected tools/list payload under the context-budget ceiling', () => {
@@ -510,6 +520,24 @@ describe('tools/list payload size guard', () => {
     //     description was cut to one clause (measured 63 073 after the trim,
     //     ~130 headroom).
     expect(approxTokens).toBeLessThan(63_200)
+  })
+
+  it('serves a single-company key a smaller catalog than the multi-company one', () => {
+    // Simple company mode (the key reaches at most one company): no
+    // company_id property on any tool and no company switch or cross-company
+    // tools. Nine users in ten are here, so this is the payload most sessions
+    // actually pay. Pinned as a saving against the full catalog (so it cannot
+    // silently erode) and as its own ceiling.
+    const full = Math.max(tokensFor('gnubok'), tokensFor('accounted'))
+    const simple = Math.max(
+      tokensFor('gnubok', { simpleCompanyMode: true }),
+      tokensFor('accounted', { simpleCompanyMode: true })
+    )
+    expect(full - simple).toBeGreaterThan(3_500)
+    // Measured 58 574 on 2026-09-21 against 63 073 for the full catalog and
+    // 61 975 before the multi-company work: a single-company session now
+    // starts ~3 400 tokens lighter than it did before. ~300 headroom.
+    expect(simple).toBeLessThan(SIMPLE_CATALOG_CEILING)
   })
 
   /**

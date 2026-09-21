@@ -254,8 +254,11 @@ import {
   companyEchoFromContext,
   companyEchoPayload,
   extractRequestedCompany,
+  getReachableCompanyCount,
   isCompanyDependentTool,
+  isMultiCompanyOnlyTool,
   isOperationScopedTool,
+  isSimpleCompanyMode,
   isOptionalCompanyTool,
   isScopedTool,
   listAccessibleCompanies,
@@ -3976,6 +3979,10 @@ export const tools: McpTool[] = [
       const detail = ((args.detail as string) || 'summary') as 'name' | 'summary' | 'full'
       const scopeFilter = args.scope as string | undefined
       const limit = Math.min(Math.max(1, Number(args.limit) || 20), 50)
+      // Injected by the dispatcher: the key reaches at most one company, so
+      // the company switch, the cross-company tools and the company_id
+      // property stay out of the results like they stay out of tools/list.
+      const simpleCompanyMode = args.__simpleCompanyMode === true
 
       // Filter results to tools the caller is actually authorized to invoke.
       //
@@ -3992,6 +3999,7 @@ export const tools: McpTool[] = [
       const scopesInjected = Array.isArray(rawKeyScopes)
 
       let candidates = tools.filter((t) => {
+        if (simpleCompanyMode && isMultiCompanyOnlyTool(t.name)) return false
         const required = TOOL_SCOPE_MAP[t.name]
         if (required) {
           // Scoped tool: visible only if scopes were injected AND the caller has it.
@@ -4065,7 +4073,7 @@ export const tools: McpTool[] = [
               description: t.description,
               scope: requiredScope,
               ...reach,
-              inputSchema: projectToolInputSchema(t),
+              inputSchema: projectToolInputSchema(t, { omitCompanyId: simpleCompanyMode }),
               ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
               annotations: t.annotations,
               ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
@@ -24301,6 +24309,27 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         client,
       }
 
+  // ── Simple company mode ──
+  // A key that reaches at most one company gets the single-company face: no
+  // company block on results, no company_id property on tool schemas, no
+  // company switch or cross-company tools in tools/list, and one short line
+  // about companies in the instructions (see company-routing.ts). Resolved
+  // lazily and at most once per request; the count behind it is cached per
+  // user for a minute. A failed lookup reads as multi-company, the
+  // informative face. So does an anonymous caller: nothing is known about
+  // them yet, and a client that keeps the pre-connect tools/list for the
+  // session must not leave a byrå user without the cross-company tools
+  // (extra tools are noise, missing tools are a loss).
+  let simpleCompanyModeMemo: Promise<boolean> | null = null
+  const resolveSimpleCompanyMode = (): Promise<boolean> => {
+    if (!simpleCompanyModeMemo) {
+      simpleCompanyModeMemo = isAnonymous
+        ? Promise.resolve(false)
+        : getReachableCompanyCount(supabase, userId).then(isSimpleCompanyMode)
+    }
+    return simpleCompanyModeMemo
+  }
+
   // ── Stateless core (spec 2026-07-28) ──
   // New-style clients carry their protocol version in _meta on every request
   // instead of an initialize handshake. Requests without the key come from
@@ -24405,6 +24434,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       const clientVersion = (params as Record<string, unknown>)?.protocolVersion as string | undefined
       const negotiatedVersion =
         clientVersion && HANDSHAKE_VERSIONS.has(clientVersion) ? clientVersion : PROTOCOL_VERSION
+      const simpleCompanyMode = await resolveSimpleCompanyMode()
       const instructions = projectToolReferencesInText([
             'Accounted: Swedish double-entry bookkeeping via conversation.',
             '',
@@ -24417,9 +24447,17 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
             'Discovery:',
             '• tools/list returns common tool schemas. Call gnubok_search_tools(query="…") for specialized tools: it ranks all capabilities; pass detail="name"|"summary"|"full" to control payload size. If your client cannot invoke a tool that is not in tools/list, reach any READ tool through gnubok_call_tool({tool, arguments}); a WRITE outside tools/list is then out of reach (the bridge refuses writes), so check callable_via on each search hit before planning around it.',
             '• gnubok_get_agent_briefing returns recommended_tools: ordered per-workflow tool loadouts (categorize_month, close_period, invoice_run, vat_declaration, payroll_month). If your harness defers tool loading, batch-load a whole workflow in one call (e.g. Claude Code ToolSearch select:a,b,c) instead of searching cluster by cluster. Each loadout tool carries callable; when false, blocked_by and note say why (missing scope or search-only write).',
-            `• Companies: ${companyId ? `the default company is ${companyId}; omit company_id to use it` : 'this account has no company yet. Create it with gnubok_create_company (preview first, then confirm=true); the "onboarding" skill walks the whole setup'}. gnubok_list_companies lists every company this key reaches (default first, then most recently used; query narrows by name or org number). A wrong company_id answers with candidates. gnubok_approve_pending_operation and gnubok_reject_pending_operation need only the operation_id: the company follows the operation.`,
-            '• Many companies at once: gnubok_client_overview (unbooked, inbox, next deadline per company; filter by deadline kind and window), gnubok_run_across_companies (any read tool once per company, one summarised answer) and gnubok_stage_across_companies (one write staged per company under a batch_id; approve the batch or each operation). scope = { companies: "all" | "team" | [ids] }; "team" is the byrå team\'s clients.',
-            '• MCP resources use the default company. For another company read Accounted://company/{company_id}/context (resource template) or call gnubok_get_agent_briefing with company_id.',
+            ...(simpleCompanyMode
+              ? [
+                  companyId
+                    ? '• Company: this account has one company and every tool runs for it; company_id is never needed.'
+                    : '• Company: this account has no company yet. Create it with gnubok_create_company (preview first, then confirm=true); the "onboarding" skill walks the whole setup.',
+                ]
+              : [
+                `• Companies: ${companyId ? `the default company is ${companyId}; omit company_id to use it` : 'this account has no company yet. Create it with gnubok_create_company (preview first, then confirm=true); the "onboarding" skill walks the whole setup'}. gnubok_list_companies lists every company this key reaches (default first, then most recently used; query narrows by name or org number). A wrong company_id answers with candidates. gnubok_approve_pending_operation and gnubok_reject_pending_operation need only the operation_id: the company follows the operation.`,
+                '• Many companies at once: gnubok_client_overview (unbooked, inbox, next deadline per company; filter by deadline kind and window), gnubok_run_across_companies (any read tool once per company, one summarised answer) and gnubok_stage_across_companies (one write staged per company under a batch_id; approve the batch or each operation). scope = { companies: "all" | "team" | [ids] }; "team" is the byrå team\'s clients.',
+                '• MCP resources use the default company. For another company read Accounted://company/{company_id}/context (resource template) or call gnubok_get_agent_briefing with company_id.',
+                ]),
             '• When the user asks "how do I do X" or you\'re unsure of the correct sequence (month-end close, VAT review, year-end, invoicing, payroll), call gnubok_list_skills first: domain workflows are documented as loadable skills with tool references.',
             '• When a tool is missing, a description misled you, a result looks wrong, or something worked unusually well, call gnubok_feedback (context + suggestion, optional tool_name). It is read by the product team and has fixed real bugs; include ids and what you expected. Rate-limited 1/min/key, so batch a session\'s findings into one call.',
             '',
@@ -24480,8 +24518,12 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
     case 'tools/list': {
       const listStartedAt = Date.now()
+      const simpleCompanyMode = await resolveSimpleCompanyMode()
       const allowedTools = tools.filter((t) => {
         if (!isDefaultCatalogTool(t)) return false
+        // One company (or none): the company switch and the cross-company
+        // tools have nothing to work on.
+        if (simpleCompanyMode && isMultiCompanyOnlyTool(t.name)) return false
         // Not connected yet: the whole default catalog is listed so the agent
         // can pick the right tool; calling a protected one is what produces
         // the 401 challenge that starts the connect (and signup) flow.
@@ -24512,7 +24554,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
                 name: toPublicToolName(t.name, toolNamespace),
                 ...(t.title ? { title: t.title } : {}),
                 description: t.description,
-                inputSchema: projectToolInputSchema(t),
+                inputSchema: projectToolInputSchema(t, { omitCompanyId: simpleCompanyMode }),
                 ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
                 annotations: t.annotations,
                 ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
@@ -24882,12 +24924,17 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         const taskStartedAt = Date.now()
         emitAfterResponse(async () => {
           try {
+            // The company block is for keys that reach several companies; the
+            // lookup runs alongside the tool and is cached per user.
+            const simpleModeLookup = companyEcho ? resolveSimpleCompanyMode() : null
             const rawResult = await withSIEExternalReport(supabase,tenantId,toolName,()=>tool.execute(toolArgs,tenantId,userId,supabase,actor))
             const canonicalResult = effectiveCompanyId
               ? addCompanyToTopLevelNext(rawResult, effectiveCompanyId)
               : rawResult
             const result = projectMcpPayload(canonicalResult, toolNamespace)
-            const textPayload = companyEcho ? companyEchoPayload(result, companyEcho) : result
+            const echoedCompany =
+              companyEcho && simpleModeLookup && !(await simpleModeLookup) ? companyEcho : null
+              const textPayload = echoedCompany ? companyEchoPayload(result, echoedCompany) : result
             const stored: Record<string, unknown> = {
               resultType: 'complete',
               content: [{ type: 'text', text: JSON.stringify(textPayload, null, 2) }],
@@ -24896,7 +24943,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
               stored.structuredContent =
                 typeof result === 'object' && !Array.isArray(result) ? result : { value: result }
             }
-            if (companyEcho) stored._meta = { company: companyEcho }
+            if (echoedCompany) stored._meta = { company: echoedCompany }
             await resolveMcpTask(supabase, task.id, { status: 'completed', result: stored })
             emitToolCallTelemetry({
               tool: toolName,
@@ -24974,7 +25021,13 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         }
         if (toolName === 'gnubok_search_tools') {
           (toolArgs as Record<string, unknown>).__toolNamespace = toolNamespace
+          if (await resolveSimpleCompanyMode()) {
+            (toolArgs as Record<string, unknown>).__simpleCompanyMode = true
+          }
         }
+        // The company block is for keys that reach several companies; the
+        // lookup runs alongside the tool and is cached per user.
+        const simpleModeLookup = companyEcho ? resolveSimpleCompanyMode() : null
         const rawResult = await withSIEExternalReport(supabase,tenantId,toolName,()=>tool.execute(toolArgs,tenantId,userId,supabase,actor))
         const canonicalResult = effectiveCompanyId
           ? addCompanyToTopLevelNext(rawResult, effectiveCompanyId)
@@ -24984,7 +25037,9 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         // The text block (what the model reads) announces the company first;
         // structuredContent stays the tool's own shape so strict clients can
         // validate it against outputSchema (see companyEchoPayload).
-        const textPayload = companyEcho ? companyEchoPayload(result, companyEcho) : result
+        const echoedCompany =
+          companyEcho && simpleModeLookup && !(await simpleModeLookup) ? companyEcho : null
+          const textPayload = echoedCompany ? companyEchoPayload(result, echoedCompany) : result
         const response: Record<string, unknown> = {
           content: [{ type: 'text', text: JSON.stringify(textPayload, null, 2) }],
         }
@@ -25001,8 +25056,8 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         if (tool.uiResourceUri && (toolArgs as Record<string, unknown>).render_ui === true) {
           response._meta = { ui: { resourceUri: tool.uiResourceUri } }
         }
-        if (companyEcho) {
-          response._meta = { ...((response._meta as Record<string, unknown> | undefined) ?? {}), company: companyEcho }
+        if (echoedCompany) {
+          response._meta = { ...((response._meta as Record<string, unknown> | undefined) ?? {}), company: echoedCompany }
         }
         // Record the response's `next.tool` (when present) so the next call
         // from the same session can be matched against it.
