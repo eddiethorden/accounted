@@ -200,6 +200,12 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   'GET /api/v1/companies/:companyId/reports/general-ledger': 'reports:read',
   'GET /api/v1/companies/:companyId/reports/journal-register': 'reports:read',
   'GET /api/v1/companies/:companyId/reports/vat-declaration': 'reports:read',
+  // The company's own record of which VAT periods are filed (#2746). Marking a
+  // period is bookkeeping state, not a Skatteverket submission, so it rides
+  // bookkeeping:write rather than skatteverket:write.
+  'GET /api/v1/companies/:companyId/reports/vat-declaration/filings': 'reports:read',
+  'POST /api/v1/companies/:companyId/reports/vat-declaration/filings': 'bookkeeping:write',
+  'DELETE /api/v1/companies/:companyId/reports/vat-declaration/filings': 'bookkeeping:write',
   'GET /api/v1/companies/:companyId/reports/monthly-breakdown': 'reports:read',
   'GET /api/v1/companies/:companyId/reports/ar-ledger': 'reports:read',
   'GET /api/v1/companies/:companyId/reports/supplier-ledger': 'reports:read',
@@ -319,6 +325,8 @@ export const V1_ENDPOINT_SCOPES: Record<string, ApiKeyScope> = {
   'POST /api/v1/companies/:companyId/assets': 'bookkeeping:write',
   'GET /api/v1/companies/:companyId/assets/:id': 'reports:read',
   'PATCH /api/v1/companies/:companyId/assets/:id': 'bookkeeping:write',
+  // Removing a never-posted row is a register write like create/update.
+  'DELETE /api/v1/companies/:companyId/assets/:id': 'bookkeeping:write',
   'POST /api/v1/companies/:companyId/assets/:id/dispose': 'bookkeeping:write',
 
   // Webhooks (Phase 6 PR-1)

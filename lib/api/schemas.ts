@@ -2538,6 +2538,10 @@ export const UpdateCashAccountSchema = InvoicePaymentAccountSchema.extend({
   voucher_series: UpdateCashAccountVoucherSeriesSchema.shape.voucher_series.optional(),
   name: z.string().trim().min(1).max(100).nullable().optional(),
   invoice_payee: z.boolean().optional(),
+  // Accounts no bank connection holds only: a connection-held account's
+  // enabled state is owned by the AccountPickerDialog (enabled_uids), and
+  // setEnabled() refuses it (409), so the shape alone cannot say which.
+  enabled: z.boolean().optional(),
 }).strict().refine((body) => Object.keys(body).length > 0, {
   message: 'Inget att uppdatera',
 })
@@ -2854,6 +2858,47 @@ export const CreateDeadlineSchema = z.object({
   linked_report_type: z.string().nullish(),
   linked_report_period: z.record(z.string(), z.unknown()).nullish(),
 })
+
+// ============================================================
+// VAT filing record (issue #2746)
+// ============================================================
+
+/**
+ * A calendar VAT period: the two cadences whose deadline rows carry the
+ * filing record (lib/vat/filing-record.ts). Helårsmoms is deliberately not
+ * accepted: its deadline is labelled per räkenskapsår and is completed from
+ * the calendar instead.
+ */
+const vatFilingPeriodShape = {
+  period_type: z.enum(['monthly', 'quarterly']),
+  year: z.coerce.number().int().min(2000).max(2100),
+  period: z.coerce.number().int().min(1).max(12),
+}
+
+function refineVatFilingPeriod(
+  data: { period_type: 'monthly' | 'quarterly'; period: number },
+  ctx: z.RefinementCtx,
+) {
+  if (data.period_type === 'quarterly' && data.period > 4) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['period'],
+      message: 'For quarterly period_type, period must be 1-4.',
+    })
+  }
+}
+
+export const VatFilingPeriodSchema = z.object(vatFilingPeriodShape).superRefine(refineVatFilingPeriod)
+
+export const MarkVatFilingSchema = z
+  .object({
+    ...vatFilingPeriodShape,
+    /** Swedish calendar date the declaration was filed. */
+    filed_on: saneIsoDate,
+    /** Skatteverket's reference (kvittensnummer); null clears a stored one. */
+    reference: z.string().trim().max(200).nullable().optional(),
+  })
+  .superRefine(refineVatFilingPeriod)
 
 // ============================================================
 // Account schemas
