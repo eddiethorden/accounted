@@ -49,7 +49,7 @@ export function docTypeGroup(type: DocType | null | undefined): 'agreement' | 'a
 
 /** One paragraph per class, written the way the classifier reads it. */
 export const DOC_TYPE_DESCRIPTIONS: Record<DocType, string> = {
-  supplier_invoice: 'An invoice the company must pay: supplier, invoice number, due date, amounts, VAT. Includes payment notices and reminders for such invoices.',
+  supplier_invoice: 'An invoice the company must pay: supplier, invoice number, due date, amounts, VAT. Includes payment notices and reminders for such invoices, and recurring invoices for a subscription, a lease, rent or an insurance premium.',
   receipt: 'A receipt for a purchase already paid: merchant, date, total, VAT; often a photo of a paper receipt.',
   credit_note: 'A credit note that reduces an earlier invoice.',
   customer_invoice: 'An invoice the company has issued to a customer (a copy of its own sales invoice).',
@@ -63,7 +63,7 @@ export const DOC_TYPE_DESCRIPTIONS: Record<DocType, string> = {
   'agreement.shareholder': 'A shareholders agreement or an adherence agreement to one.',
   'agreement.investment': 'An investment or subscription agreement for a share issue, or an adherence agreement to one.',
   'agreement.customer': 'A contract where the company is the seller: the other party buys the company\'s goods or services. A programme, service or membership the company itself pays for is agreement.subscription or agreement.other.',
-  'agreement.subscription': 'Subscription or service terms the company is bound by (software, memberships, programmes with fees).',
+  'agreement.subscription': 'Subscription or service terms the company is bound by (software, memberships, programmes with fees): an order form, terms of service or a signed subscription contract. An invoice or receipt for a subscription period is not the agreement: classify it as supplier_invoice or receipt.',
   'agreement.other': 'Any other signed or to-be-signed agreement binding the company.',
   'registration.bolagsverket': 'A registreringsbevis or an extract issued by Bolagsverket describing the company.',
   'filing.bolagsverket': 'A form, application or notification the company sends to Bolagsverket (anmälan, ändringsanmälan).',
