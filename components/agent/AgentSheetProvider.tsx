@@ -28,6 +28,7 @@ import {
   type AgentStatus,
   type AgentStatusEvent,
 } from './agent-status'
+import { DEFAULT_AGENT_IDENTITY, type AgentIdentity } from './agent-identity'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // The sheet is a lazy chunk, and it used to have no loading state at all: a
@@ -117,15 +118,9 @@ function useSheetPrefetch() {
   }, [])
 }
 
-export interface AgentIdentity {
-  displayName: string | null
-  avatarId: string | null
-  // True only after the user has completed Phase B verification in
-  // /onboarding/agent. Consumers (AgentTrigger, page-level Sparkle
-  // buttons) should hide themselves when this is false so the FAB
-  // doesn't pop up before the agent build flow has run.
-  isVerified: boolean
-}
+// Defined in ./agent-identity (no 'use client') so the server layout can build
+// the value; re-exported here because this is where consumers look for it.
+export type { AgentIdentity }
 
 // Provider exposes a single imperative function: openAgentSheet({...}). Any
 // client component (top-nav button, transaction row "Fråga om" button, etc.)
@@ -346,7 +341,7 @@ export function AgentSheetProvider({
   }, [])
 
   const resolvedIdentity = useMemo<AgentIdentity>(
-    () => identity ?? { displayName: null, avatarId: null, isVerified: false },
+    () => identity ?? DEFAULT_AGENT_IDENTITY,
     [identity],
   )
 

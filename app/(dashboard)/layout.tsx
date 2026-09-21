@@ -9,6 +9,7 @@ import AnalyticsIdentify from '@/components/AnalyticsIdentify'
 import { computeIdentityHash } from '@/lib/analytics/identity-hash'
 import { AgentSheetProvider } from '@/components/agent/AgentSheetProvider'
 import AgentTrigger from '@/components/agent/AgentTrigger'
+import { resolveAgentIdentity } from '@/components/agent/agent-identity'
 import LazyCommandPalette from '@/components/common/LazyCommandPalette'
 import { SupportDialogHost } from '@/components/support/SupportDialogHost'
 import { SettingsHotkey } from '@/components/settings/SettingsHotkey'
@@ -553,11 +554,9 @@ export default async function DashboardLayout({
         }
       >
       <AgentSheetProvider
-        identity={{
-          displayName: agentProfileIdentity?.display_name ?? null,
-          avatarId: agentProfileIdentity?.avatar_id ?? null,
-          isVerified: Boolean(agentProfileIdentity?.verified_at),
-        }}
+        // No agent_profiles row is the common case and resolves to the default
+        // identity: the assistant's entry points never wait for a profile.
+        identity={resolveAgentIdentity(agentProfileIdentity)}
         // Server-seeded panel geometry (docked width / floating rect / mode)
         // so the assistant opens at the user's persisted size without a jump.
         initialPanelPrefs={uiState.agent_panel}

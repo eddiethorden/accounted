@@ -279,4 +279,46 @@ describe('POST /api/agent/invoke', () => {
     expect(args.userMessage).toBe('templated first turn')
     expect(args.userMessageHidden).toBe(true)
   })
+
+  it('runs a first turn for a company that has no agent_profiles row', async () => {
+    // Most onboarded companies never went through /onboarding/agent, and the
+    // assistant's entry points no longer wait for it, so the profile read
+    // coming back empty is the common case, not an error: the turn runs with a
+    // null summary (no "Företagets profil" block) instead of failing.
+    const promptTemplate = vi.fn().mockReturnValue('templated first turn')
+    getIntentMock.mockReturnValue({
+      id: 'general.help',
+      sheetTitle: 'Assistenten',
+      capture: vi.fn().mockResolvedValue({}),
+      promptTemplate,
+    })
+
+    // In the order the route reads: membership, company + user names, the
+    // conversation insert, then the first-turn profile and memory reads.
+    enqueuePreamble()
+    enqueueAcceptedTail()
+    enqueue({ data: { id: CONVERSATION_ID } }) // conversation insert
+    enqueue({ data: null }) // agent_profiles: maybeSingle() with no row
+    enqueue({ data: [] })   // agent_memory
+
+    const res = await POST(
+      createMockRequest('/api/agent/invoke', {
+        method: 'POST',
+        body: { intent_id: 'general.help' },
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    const lines = (await res.text()).trim().split('\n').map((l) => JSON.parse(l))
+    expect(lines[0]).toEqual({ kind: 'conversation', conversation_id: CONVERSATION_ID })
+    expect(lines.some((l) => l.kind === 'error')).toBe(false)
+
+    expect(promptTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ profileSummary: null, activeMemory: [] }),
+    )
+    expect(runChatTurnMock).toHaveBeenCalledTimes(1)
+    const args = runChatTurnMock.mock.calls[0]![0] as { preloadedProfileSummary?: string | null }
+    // null, not undefined: the turn must not re-read a row that is not there.
+    expect(args.preloadedProfileSummary).toBeNull()
+  })
 })

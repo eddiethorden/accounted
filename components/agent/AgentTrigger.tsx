@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Loader2, X } from 'lucide-react'
 import AgentAvatar from './AgentAvatar'
 import { collapsedStatusLabel } from './agent-status'
+import { decideAgentTrigger } from './agent-trigger-visibility'
 import { routeToIntent } from '@/lib/agent/intents/route-mapping'
 import { useAssistantAvailable, useCapability } from '@/contexts/CompanyContext'
 import { CAPABILITY } from '@/lib/entitlements/keys'
@@ -15,10 +16,14 @@ import { CAPABILITY } from '@/lib/entitlements/keys'
 //
 // Desktop-only for a FRESH open (founder call 2026-08-06). On mobile the pill
 // landed on top of the bottom nav and covered page content, and the bottom nav
-// already carries an "Assistent" tab to /chat behind the very same
-// identity.isVerified gate used here, so the pill was pure redundancy. A
-// COLLAPSED session keeps its handle on every viewport and on every page except
-// /chat: see the page-suppression block and the visibility class below.
+// already carries an "Assistent" tab to /chat, so the pill was pure redundancy.
+// A COLLAPSED session keeps its handle on every viewport and on every page
+// except /chat: see decideAgentTrigger and the visibility class below.
+//
+// Whether the trigger renders at all, and as what (ask / upsell / resume), is
+// decided in ./agent-trigger-visibility (pure, table-tested). The agent profile
+// is deliberately not part of that decision: a company with no agent_profiles
+// row gets the same door, with the default name and avatar.
 //
 // Route-aware: routeToIntent(pathname) picks the right intent + intentArgs so
 // clicking the FAB on /invoices/abc-123 opens invoice.draft with that invoice
@@ -27,8 +32,8 @@ import { CAPABILITY } from '@/lib/entitlements/keys'
 // a glance that the agent is going to know which entity they're on.
 //
 // Reads the agent's display_name + avatar_id from the AgentSheet context so
-// the button reads "Fråga Anna" (with Anna's face) rather than the generic
-// "Fråga min assistent".
+// the button reads "Fråga Anna" (with Anna's face) once the company has
+// personalized its assistant, and the generic "Fråga min assistent" before.
 //
 // Page-specific triggers (e.g. "Granska med assistent" on a supplier invoice)
 // still call useAgentSheet() directly from their own buttons because they
@@ -92,60 +97,18 @@ export default function AgentTrigger({ hidden = false }: { hidden?: boolean }) {
     }
   }, [isOpen, hasAi])
 
-  // User opt-out (Inställningar → Assistenten): the sidebar entry stays, the
-  // floating button goes. A collapsed session keeps its reopen handle even
-  // when hidden: it's the only way back to a minimized conversation, and its
-  // existence implies the user is actively using the assistant right now.
-  if (hidden && !collapsed) return null
-
-  // Dismissed upsell (non-payer clicked the pill's X, or closed the paywalled
-  // sheet): render nothing at all for the rest of the browser session. A
-  // collapsed session still shows its handle even then: it is the only way
-  // back to the minimized conversation, and its label is a resume action
-  // ("Fortsätt med ..."), not the upsell.
-  if (!hasAi && upsellDismissed && !collapsed) return null
-
-  // Sheet open AND visible → hide the FAB so the icon doesn't double up. When
-  // the session is merely collapsed we KEEP the FAB: it's the handle that
-  // brings the minimized conversation back.
-  if (isOpen && !collapsed) return null
-  // Page suppression, split by WHY the page suppresses. The split is the point:
-  // one rule is about redundancy (the page already IS the conversation), the
-  // other is about crowding (the page is dense and the pill would sit on top of
-  // it). Only the redundancy rule survives into the collapsed state, because
-  // only it leaves the user another route back to the conversation.
-  //
-  // /chat*: suppressed in BOTH states. Fresh open: the surface IS the chat, so
-  // a floating "Fråga …" pill is redundant and overlaps the input. Collapsed:
-  // the /chat layout lists every conversation in its sidebar and renders the
-  // selected one in the main pane, so navigating here IS the way back; a handle
-  // that re-expands the panel on top of it would put two chats on one screen.
-  // Safe because the session lives in AgentSheetProvider in the dashboard
-  // layout, one level above the page: it stays mounted (messages, streaming,
-  // pending approval cards intact) the whole time the user is on /chat, and the
-  // handle reappears the moment they navigate anywhere else, bottom nav
-  // included. Nothing is discarded, the handle is just hidden while the user is
-  // standing inside the surface it would lead to.
-  if (pathname?.startsWith('/chat')) return null
-  // /bookkeeping/[id]: FRESH open only. The verifikation editor is a dense
-  // regulatory surface (debits/credits, BAS codes, period locks) and a floating
-  // "Fråga … om denna verifikation" pill on top of it adds noise without
-  // earning its place. A COLLAPSED session keeps its handle here, and on every
-  // other page in the app: this page offers no other route back to a minimized
-  // conversation, and stranding a half-finished booking is a worse outcome than
-  // a pill over the editor. (/bookkeeping list, /bookkeeping/new and
-  // /bookkeeping/year-end are not the editor and keep the fresh-open FAB.)
-  if (!collapsed) {
-    const segs = pathname?.split('/').filter(Boolean) ?? []
-    if (segs[0] === 'bookkeeping' && segs[1] && segs[1] !== 'year-end' && segs[1] !== 'new') {
-      return null
-    }
-  }
-  // Pre-onboarding: no agent_profile.verified_at yet. The FAB would lead
-  // into a generic chat with no specialization. Better to hide it until
-  // the user has finished /onboarding/agent. (A collapsed session implies the
-  // agent is already in use, so this only gates fresh opens in practice.)
-  if (!identity.isVerified) return null
+  // Every rule (user opt-out, dismissed upsell, open sheet, the /chat and
+  // verifikation-editor suppressions, collapsed-handle exceptions) lives in
+  // decideAgentTrigger with its reasoning.
+  const mode = decideAgentTrigger({
+    hiddenByPreference: hidden,
+    hasAi,
+    upsellDismissed,
+    isOpen,
+    collapsed,
+    pathname,
+  })
+  if (mode === 'hidden') return null
 
   const name = identity.displayName?.trim() || 'min assistent'
   // Without the tool-loop runtime (OpenAI-compatible or unconfigured AI, #2204)
@@ -174,11 +137,11 @@ export default function AgentTrigger({ hidden = false }: { hidden?: boolean }) {
 
   const handleClick = () => {
     // Collapsed → bring the existing session back, don't start a new one.
-    if (collapsed) {
+    if (mode === 'resume') {
       expandAgentSheet()
       return
     }
-    if (!hasAi) {
+    if (mode === 'upsell') {
       router.push('/settings/billing')
       return
     }
@@ -211,7 +174,7 @@ export default function AgentTrigger({ hidden = false }: { hidden?: boolean }) {
   // The upsell pill (fresh state, no capability) carries its own dismiss so a
   // non-payer is never stuck with an undismissable ad in the corner. Payer and
   // collapsed states are unchanged: no X there, the pill is functional UI.
-  const dismissible = !hasAi && !collapsed
+  const dismissible = mode === 'upsell'
 
   return (
     // Wrapper div carries the pill shell; the two segments inside are separate

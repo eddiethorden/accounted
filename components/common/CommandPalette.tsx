@@ -148,10 +148,10 @@ export default function CommandPalette({ initialOpen = false }: { initialOpen?: 
   }, [q, allowedByCapability])
 
   // The hand-off-to-assistant entries use the agent name the user chose in
-  // /onboarding/agent, and hide entirely until that onboarding is done: the
-  // same gate as the nav entry and the FAB.
+  // /onboarding/agent when there is one. They never wait for that flow: a
+  // company without an agent profile has a working assistant too.
   const assistantName = identity.displayName?.trim() || 'assistenten'
-  const assistantFallback: Entry | null = !identity.isVerified || !q
+  const assistantFallback: Entry | null = !q
     ? null
     : filteredActions.length === 0 && filteredPages.length === 0
       ? {

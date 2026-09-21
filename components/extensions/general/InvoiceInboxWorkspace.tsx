@@ -427,7 +427,7 @@ export default function InvoiceInboxWorkspace(_props: WorkspaceComponentProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   // Its own input: sharing the header's would upload without the purchase.
   const purchaseFileInputRef = useRef<HTMLInputElement | null>(null)
-  const { openAgentSheet, identity } = useAgentSheet()
+  const { openAgentSheet } = useAgentSheet()
   // Both "Fråga assistenten" doors below open the tool-loop runtime
   // (/api/agent/invoke); hide them where the deployment cannot run it (#2204).
   const assistantAvailable = useAssistantAvailable()
@@ -1575,7 +1575,7 @@ export default function InvoiceInboxWorkspace(_props: WorkspaceComponentProps) {
               </Button>
               {/* Secondary actions: outlined, so they read as buttons */}
               <div className="flex items-center gap-2">
-                {identity.isVerified && assistantAvailable && (
+                {assistantAvailable && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1598,7 +1598,7 @@ export default function InvoiceInboxWorkspace(_props: WorkspaceComponentProps) {
                   size="sm"
                   className={cn(
                     'h-8 px-2 text-xs text-muted-foreground hover:text-destructive hover:border-destructive/40',
-                    identity.isVerified ? 'flex-none' : 'flex-1'
+                    assistantAvailable ? 'flex-none' : 'flex-1'
                   )}
                   onClick={handleBulkDelete}
                   disabled={isBulkDeleting}
@@ -1863,7 +1863,7 @@ export default function InvoiceInboxWorkspace(_props: WorkspaceComponentProps) {
                 await Promise.all([fetchItems(), handleSelect(targetId)])
               }}
               onAskAssistant={
-                identity.isVerified && assistantAvailable
+                assistantAvailable
                   ? (transactionId) => {
                       openAgentSheet({
                         intentId: 'transaction.categorization',

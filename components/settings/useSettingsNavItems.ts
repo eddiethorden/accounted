@@ -3,7 +3,6 @@
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useAgentSheet } from '@/components/agent/AgentSheetProvider'
 import { ENABLED_EXTENSION_IDS } from '@/lib/extensions/_generated/enabled-extensions'
 import { isEntityType, usesPersonnummerAsOrgNumber } from '@/lib/company/entity-type'
 
@@ -43,15 +42,16 @@ const GROUP_ORDER: SettingsGroupKey[] = ['account', 'company', 'accounting', 'sa
  * Single source of truth for the settings sections, their conditional
  * visibility, and their grouping. Consumed by both the full-page rail and the
  * routed settings modal so the two can never drift on which sections show for
- * AB vs EF, sandbox, identity-verified, or enabled extensions.
+ * AB vs EF, sandbox, or enabled extensions.
  *
  * Visibility is derived from client context (no extra fetch): `isSandbox`
- * comes from CompanyContext, identity from the agent sheet, and extension
- * availability from the generated enabled-extensions set.
+ * comes from CompanyContext, and extension availability from the generated
+ * enabled-extensions set. The Assistenten section is not gated on the agent
+ * profile: it holds the switch that hides the floating assistant button, so it
+ * has to be reachable for every company that sees that button.
  */
 export function useSettingsNavItems(): { items: SettingsNavItem[]; groups: SettingsNavGroup[] } {
   const { company, isSandbox, byraTeam } = useCompany()
-  const { identity } = useAgentSheet()
   const byraScope = useByraSettingsScope()
   const t = useTranslations('settings_nav')
 
@@ -85,7 +85,7 @@ export function useSettingsNavItems(): { items: SettingsNavItem[]; groups: Setti
     { id: 'templates', href: '/settings/templates', label: t('templates'), group: 'sales', show: hasCompany },
     { id: 'banking', href: '/settings/banking', label: t('banking'), group: 'tools', show: hasCompany && !isSandbox && hasBankingExtension },
     { id: 'whatsapp', href: '/settings/whatsapp', label: t('whatsapp'), group: 'tools', show: hasCompany && !isSandbox && hasWhatsAppExtension },
-    { id: 'assistant', href: '/settings/assistant', label: t('assistant'), group: 'tools', show: hasCompany && identity.isVerified },
+    { id: 'assistant', href: '/settings/assistant', label: t('assistant'), group: 'tools', show: hasCompany },
     { id: 'api', href: '/settings/api', label: t('api'), group: 'tools', show: hasCompany && hasMcpExtension },
   ]
 

@@ -1,10 +1,6 @@
 import { redirect } from 'next/navigation'
 import ChatSidebar from '@/components/agent/ChatSidebar'
-import {
-  getDashboardAuthContext,
-  getDashboardCompanyId,
-  getResolvedDashboardAgentProfile,
-} from '../request-context'
+import { getDashboardAuthContext, getDashboardCompanyId } from '../request-context'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,20 +8,20 @@ export const dynamic = 'force-dynamic'
 // conversation (or empty state) in the main panel. Both /chat and /chat/[id]
 // share this layout so the sidebar doesn't unmount on conversation switches.
 export default async function ChatLayout({ children }: { children: React.ReactNode }) {
-  const [{ supabase, user }, companyId, agent] = await Promise.all([
+  const [{ supabase, user }, companyId] = await Promise.all([
     getDashboardAuthContext(),
     getDashboardCompanyId(),
-    getResolvedDashboardAgentProfile(),
   ])
   if (!user) redirect('/login')
   if (!companyId) redirect('/onboarding')
 
-  // Block the chat surface until the agent is built. Without this a user
-  // who deep-links to /chat (bookmark, ⌘K, "+ Ny" elsewhere) lands on an
-  // empty conversations list with no Anna to talk to. The home route at /
-  // renders NewUserChecklist for the same state, so we forward there
-  // instead of duplicating the welcome screen here.
-  if (!agent?.verified_at) redirect('/')
+  // No agent-profile gate here. This layout used to bounce every company
+  // without a verified agent_profiles row to /, on the theory that Hem would
+  // walk them through the build flow; the checklist stopped doing that
+  // (#1971) and the bounce became a silent dead end for most companies. The
+  // chat runs without a profile (default name and avatar, no profile summary,
+  // no vertical atoms), and ChatEmptyState already handles the sandbox and
+  // non-payer states on its own.
 
   const { data: conversations } = await supabase
     .from('agent_conversations')

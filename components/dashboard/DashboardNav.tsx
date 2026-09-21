@@ -569,10 +569,9 @@ export default function DashboardNav({ companyName: _companyName, entityType, pa
     // (cockpitNavItems); in company mode the pinned back-to-clients link
     // replaces it, and non-byrå users never see it (WL-14).
     if (item.byraOnly) return false
-    // Hide the Assistent (/chat) tab until the agent is built: mirrors the
-    // floating AgentTrigger and avoids a nav entry that only bounces to the
-    // home checklist (chat/layout redirects unverified users to /).
-    if (item.href === '/chat' && !agentIdentity.isVerified) return false
+    // The Assistent (/chat) entry is never gated on the agent profile: a
+    // company without an agent_profiles row still has a working assistant
+    // (components/agent/agent-trigger-visibility.ts has the history).
     // Granskning stays in the top nav at all times now: the badge
     // surfaces the count when there are pending ops, but the link is
     // always present so users can navigate there manually.
@@ -617,7 +616,7 @@ export default function DashboardNav({ companyName: _companyName, entityType, pa
     return badgeFor(href)
   }
 
-  const allMobileNavItems: { href: string; labelKey: NavLabelKey; icon: typeof LayoutDashboard }[] = cockpitMode
+  const mobileNavItems: { href: string; labelKey: NavLabelKey; icon: typeof LayoutDashboard }[] = cockpitMode
     ? cockpitNavItems.map(({ href, labelKey, icon }) => ({ href, labelKey, icon }))
     : [
         // The phone bar names the page the way the sidebar does: Att göra.
@@ -625,10 +624,6 @@ export default function DashboardNav({ companyName: _companyName, entityType, pa
         { href: '/chat', labelKey: 'assistant', icon: Sparkles },
         { href: '/transactions', labelKey: 'transactions', icon: ArrowLeftRight },
       ]
-  // Same gate as the sidebar: no Assistent tab until the agent is built.
-  const mobileNavItems = allMobileNavItems.filter(
-    (item) => item.href !== '/chat' || agentIdentity.isVerified,
-  )
 
   const renderBadge = (item: { comingSoon?: boolean; devBadge?: boolean; betaBadge?: boolean }) => {
     const baseClass =
