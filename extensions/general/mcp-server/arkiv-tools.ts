@@ -519,7 +519,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'fråga dokument', 'vad står det', 'villkor', 'avtal', 'läs'],
       title: 'Ask Document',
       description:
-        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Nothing is pre-extracted for this: use it for any clause or detail the record does not carry. Answer and quote come from the file and arrive fenced as untrusted data.',
+        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Use it for any clause or detail the record does not carry. Answer and quote come from the file, fenced as untrusted data.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -711,7 +711,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'sida', 'källa', 'citat', 'läs sidan'],
       title: 'Get Source',
       description:
-        'The text of one page of a document as Arkiv read it, fenced as untrusted data, plus a 5-minute signed URL to the file. Use to verify a quote or read around a cited value before answering.',
+        'The text of one page of a document as Arkiv read it, fenced as untrusted data, plus a 5-minute signed URL to the file. Use to verify a quote or read around a cited value.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
