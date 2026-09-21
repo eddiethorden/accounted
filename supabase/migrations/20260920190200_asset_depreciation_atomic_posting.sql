@@ -370,6 +370,11 @@ COMMENT ON FUNCTION public.delete_never_posted_asset(uuid, uuid)
 -- assets_disposal_journal_entry_id_fkey, and that refusal rolls this unlink
 -- back with it: un-disposing an asset is not something a voucher delete does.
 --
+-- The unposted rows are added to the voucher's audit_log old_state (key
+-- unposted_depreciation_schedules), so the register change is traceable
+-- from the same entry that records the voucher delete. The description
+-- text is untouched.
+--
 -- Everything else in the function is byte-for-byte 20260908095907.
 
 CREATE OR REPLACE FUNCTION public.delete_last_voucher(p_company_id uuid, p_entry_id uuid)
@@ -387,6 +392,7 @@ DECLARE
   v_snapshot         jsonb;
   v_lines_snapshot   jsonb;
   v_is_period_ib     boolean := false;
+  v_unposted_schedules jsonb;
 BEGIN
   SELECT cm.role INTO v_caller_role
   FROM company_members cm
@@ -543,7 +549,18 @@ BEGIN
   WHERE journal_entry_id = p_entry_id;
 
   -- #2779: the planenlig avskrivning this voucher posted is no longer on the
-  -- books, so its register row goes back to an unposted proposal.
+  -- books, so its register row goes back to an unposted proposal. The rows
+  -- are snapshotted into the audit entry first: once unlinked, nothing else
+  -- records which register row this voucher had been linked to.
+  SELECT jsonb_agg(to_jsonb(ds)) INTO v_unposted_schedules
+  FROM depreciation_schedules ds
+  WHERE ds.company_id = p_company_id
+    AND ds.journal_entry_id = p_entry_id;
+
+  IF v_unposted_schedules IS NOT NULL THEN
+    v_snapshot := v_snapshot || jsonb_build_object('unposted_depreciation_schedules', v_unposted_schedules);
+  END IF;
+
   UPDATE depreciation_schedules
   SET journal_entry_id = NULL, posted_at = NULL
   WHERE company_id = p_company_id

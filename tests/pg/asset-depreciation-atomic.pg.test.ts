@@ -352,6 +352,25 @@ describe('commit_asset_depreciation: voucher and register link are one transacti
     expect(await lastVoucherNumber(seed)).toBe(before)
   })
 
+  it('refuses to post into a period locked after the draft was prepared', async () => {
+    // Period-lock enforcement is delegated to commit_journal_entry (the lock
+    // trigger fires on its draft-to-posted UPDATE). Pinned here because this
+    // RPC is now the only route a planenlig avskrivning takes to the books.
+    const seed = await seedCompany()
+    const assetId = await insertAsset(seed)
+    const entryId = await insertDepreciationDraft(seed)
+    await getPool().query(`UPDATE public.fiscal_periods SET locked_at = now() WHERE id = $1`, [
+      seed.fiscalPeriodId,
+    ])
+
+    await expect(commitDepreciation(getPool(), seed, assetId, entryId)).rejects.toThrow(
+      /locked\/closed fiscal period/,
+    )
+
+    expect(await entryState(entryId)).toEqual({ status: 'draft', voucher_number: 0 })
+    expect(await scheduleRows(assetId)).toHaveLength(0)
+  })
+
   it('only posts a year_end draft of this company and period', async () => {
     const seed = await seedCompany()
     const assetId = await insertAsset(seed)
@@ -547,6 +566,14 @@ describe('delete_last_voucher returns the schedule row to unposted', () => {
       const entry = await client.query(`SELECT 1 FROM public.journal_entries WHERE id = $1`, [
         posted.entryId,
       ])
+      // Two DELETE rows exist for the entry: the generic write_audit_log
+      // trigger's and the RPC's own. Only the RPC's carries the snapshot.
+      const audit = await client.query(
+        `SELECT old_state FROM public.audit_log
+          WHERE record_id = $1 AND table_name = 'journal_entries' AND action = 'DELETE'
+            AND description LIKE '%delete_last_voucher RPC%'`,
+        [posted.entryId],
+      )
       const deletable = await client.query(
         `SELECT public.delete_never_posted_asset($1::uuid, $2::uuid) AS outcome`,
         [posted.companyId, posted.assetId],
@@ -555,6 +582,7 @@ describe('delete_last_voucher returns the schedule row to unposted', () => {
         deleted: result.rows[0].result.deleted,
         row: row.rows[0],
         entryLeft: entry.rowCount,
+        audited: audit.rows[0]?.old_state?.unposted_depreciation_schedules,
         assetOutcome: deletable.rows[0].outcome,
       }
     })
@@ -566,6 +594,15 @@ describe('delete_last_voucher returns the schedule row to unposted', () => {
     expect(outcome.row.journal_entry_id).toBeNull()
     expect(outcome.row.posted_at).toBeNull()
     expect(Number(outcome.row.planned_depreciation)).toBe(20000)
+    // Traceable: once unlinked, only the voucher's audit entry still says
+    // which register row it had been linked to, and as it was when posted.
+    expect(outcome.audited).toHaveLength(1)
+    expect(outcome.audited[0]).toMatchObject({
+      id: posted.scheduleId,
+      asset_id: posted.assetId,
+      journal_entry_id: posted.entryId,
+    })
+    expect(outcome.audited[0].posted_at).not.toBeNull()
     // And the asset is back to "never reached the books".
     expect(outcome.assetOutcome).toBe('deleted')
   })
