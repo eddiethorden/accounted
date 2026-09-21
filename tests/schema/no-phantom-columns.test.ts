@@ -197,7 +197,12 @@ const KNOWN_STALE_ON_CONFLICT: Record<string, string> = {}
 // Phase 2 classification: the human-override UPDATE on document_attachments
 // is a partial patch (doc_type and admission columns), one literal per key
 // combination is not viable. 407 -> 408.
-const UNRESOLVED_CEILING = 408
+// Phase 3 extraction: the page-text INSERT is one row per page built by a
+// map, the extraction save carries the model's field payload, and the
+// provenance upsert names its conflict target from the row's own keys. The
+// columns are literal inside each callback; the scanner reads only object
+// and array literals. 408 -> 412.
+const UNRESOLVED_CEILING = 412
 
 /**
  * Floor on statically resolved column references. Guards the guard: if a change
