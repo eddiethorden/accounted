@@ -22,3 +22,14 @@ export function fenceDocumentText(text: string, attrs: Record<string, string | n
 export function fenceNullable(text: string | null | undefined): string | null {
   return text == null ? null : fenceDocumentText(text)
 }
+
+/**
+ * A file's name is written by whoever made the file, so it is data like the
+ * pages. Fenced on one line and cut short: a name helps a model place a
+ * document, it never needs to be long.
+ */
+export function fenceFileName(fileName: string): string {
+  const id = randomBytes(4).toString('hex')
+  const name = fileName.replace(/[\r\n]+/g, ' ').slice(0, 200)
+  return `<document-text-${id} field="file_name">${name}</document-text-${id}>`
+}
