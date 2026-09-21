@@ -192,7 +192,12 @@ const KNOWN_STALE_ON_CONFLICT: Record<string, string> = {}
 // the day's other merges (peppol, SIE set-based import) under the Motparter
 // page. Same escape hatch, same reason: one expression somewhere in the files
 // the branches do not share.
-const UNRESOLVED_CEILING = 407
+// 2026-09-21 rebase of the Arkiv chain onto main: main spent its headroom
+// (402 -> 407 since 2026-09-14), so the chain's own expressions now show.
+// Phase 2 classification: the human-override UPDATE on document_attachments
+// is a partial patch (doc_type and admission columns), one literal per key
+// combination is not viable. 407 -> 408.
+const UNRESOLVED_CEILING = 408
 
 /**
  * Floor on statically resolved column references. Guards the guard: if a change
