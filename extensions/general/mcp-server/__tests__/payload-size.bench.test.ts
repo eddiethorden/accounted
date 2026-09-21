@@ -3,7 +3,7 @@ import { tools, deriveToolMeta, isDefaultCatalogTool } from '../server'
 import { isMultiCompanyOnlyTool, projectToolInputSchema } from '../company-routing'
 
 // Ceiling for the catalog a single-company key is served (see the second case).
-const SIMPLE_CATALOG_CEILING = 58_900
+const SIMPLE_CATALOG_CEILING = 58_800
 import { projectToolReferences } from '../tool-namespace'
 
 // Mirror the real tools/list serializer, including the derived staging _meta
@@ -420,9 +420,13 @@ describe('tools/list payload size guard', () => {
     // forced gnubok_reconcile_match back into the default catalog on
     // 2026-08-26. Demote a read to search-only before proposing a bump.
     //
-    // Only READ tools may be demoted: gnubok_call_tool refuses writes, so a
-    // search-only WRITE is uncallable on Claude.ai. That is why the three
-    // bumps above happened instead of demotions.
+    // Until 2026-09-20 only READ tools could be demoted: gnubok_call_tool
+    // refuses writes, so a search-only WRITE was uncallable on Claude.ai, and
+    // that is why the three bumps above happened instead of demotions. Since
+    // issue #2800 gnubok_stage_tool carries a search-only write that only
+    // STAGES a pending operation, so a staging write may be demoted too. A
+    // write that commits directly still may not: no bridge carries it
+    // (connector-catalog-reach.test.ts refuses one).
     //
     //   * 2026-09-02, offert (#2163): gnubok_set_quote_status (a WRITE, so it
     //     must stay in the default catalog) plus document_type / valid_until /
@@ -505,11 +509,47 @@ describe('tools/list payload size guard', () => {
     //     with; the item and write schemas were trimmed to bare formats first
     //     (measured 61 849 after the trim; 61 975 once merged with the
     //     cutover-balance step above).
-    //   * 62.2K to 63.2K with "one connection, every company" (2026-09-19):
-    //     two entry tools ride the default catalog, gnubok_client_overview
-    //     (the byrå cockpit as a tool) and gnubok_run_across_companies (any
-    //     read tool once per company in one answer); the batch stager and
-    //     the readiness fan-out are search-only and named by those two.
+    //   * 2026-09-20, draft invoice edit/delete from the connector (#2748):
+    //     gnubok_update_invoice and gnubok_delete_draft_invoice were
+    //     search-only WRITES, so tools/list never showed them and
+    //     gnubok_call_tool refused them: the claude.ai connector could not
+    //     touch a draft at all. Both joined the default catalog (+1 763 before
+    //     trims). Paid for by the read-demotion rule above, six READ tools
+    //     to search-only, each reachable through the bridge: the two
+    //     missing-underlag lists (list_transactions_without_documents is a
+    //     strict subset of list_verifikat_without_documents, and the family
+    //     is already bridge-reached via gnubok_receipt_hunt_worklist), the
+    //     AR and AP aging ledgers (open items stay one hop away in
+    //     list_invoices / list_supplier_invoices), get_salary_journal (a
+    //     yearly rollup beside the listed get_salary_run) and export_sie
+    //     (named by no skill or loadout). The three listed places that named
+    //     a demoted read now say "via gnubok_call_tool". gnubok_get_invoice
+    //     stays search-only as a bridged READ, and update_invoice's text
+    //     names the bridge. Measured 62 082 on the accounted projection
+    //     (61 975 before). Ceiling unchanged.
+    //   * 2026-09-20, the write half of the bridge (#2800): gnubok_stage_tool
+    //     joins the default catalog (+981 chars) so the 20 search-only staging
+    //     writes become reachable without listing them (about 15 K tokens).
+    //     Trimming first (gnubok_call_tool's property notes restated the
+    //     schema) left it ~115 over. Paid for by the FIRST write demotion,
+    //     which the new bridge is what makes possible: gnubok_delete_absence
+    //     to search-only. Picked from 60 days of mcp.tool_called: zero calls,
+    //     and payroll is monthly, so the window holds two full cycles and the
+    //     zero is not seasonal (unlike the bokslut tools the 2026-08-31 entry
+    //     kept). Named by no listed tool, skill or loadout; the salary
+    //     calendar is its web door. Measured 61 844. Ceiling unchanged.
+    //   * 62.2K to 63.5K with "one connection, every company" (2026-09-19,
+    //     re-measured 2026-09-21 on top of #2748 and #2800): three tools ride
+    //     the default catalog, gnubok_client_overview (the byrå cockpit as a
+    //     tool), gnubok_run_across_companies (any read tool once per company
+    //     in one answer) and gnubok_stage_across_companies (a search-only
+    //     WRITE is out of reach on chat hosts, #2800, and its batch listing
+    //     is not the staged-operation contract gnubok_stage_tool carries);
+    //     the readiness fan-out is a search-only READ, bridged. This is the
+    //     FULL catalog, which only a key that reaches several companies is
+    //     served: simple company mode (next case) hides all of it from the
+    //     nine keys in ten that reach one company, so the payload most
+    //     sessions pay went DOWN, not up.
     //     Existing tools grew too: gnubok_list_companies (query, team,
     //     recency), gnubok_list_pending_operations (batch_id,
     //     all_companies) and gnubok_approve_pending_operation (batch_id).
@@ -517,9 +557,9 @@ describe('tools/list payload size guard', () => {
     //     declared as a bare object (its six fields are documented in a
     //     comment), the per-row result schema of run_across is a bare
     //     object, the team block lost its property list, and every new
-    //     description was cut to one clause (measured 63 073 after the trim,
-    //     ~130 headroom).
-    expect(approxTokens).toBeLessThan(63_200)
+    //     description was cut to one clause (measured 63 376, ~120
+    //     headroom; main alone measures 61 844).
+    expect(approxTokens).toBeLessThan(63_500)
   })
 
   it('serves a single-company key a smaller catalog than the multi-company one', () => {
@@ -534,9 +574,9 @@ describe('tools/list payload size guard', () => {
       tokensFor('accounted', { simpleCompanyMode: true })
     )
     expect(full - simple).toBeGreaterThan(3_500)
-    // Measured 58 574 on 2026-09-21 against 63 073 for the full catalog and
-    // 61 975 before the multi-company work: a single-company session now
-    // starts ~3 400 tokens lighter than it did before. ~300 headroom.
+    // Measured 58 521 on 2026-09-21 against 63 376 for the full catalog and
+    // 61 844 on main without any of this: a single-company session starts
+    // ~3 300 tokens lighter than it did before. ~280 headroom.
     expect(simple).toBeLessThan(SIMPLE_CATALOG_CEILING)
   })
 

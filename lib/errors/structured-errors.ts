@@ -1351,6 +1351,31 @@ const INVOICE: Record<string, StructuredErrorEntry> = {
       description: 'Välj ett av företagets bankkonton som är markerat "Visas på fakturor" och har betaluppgifter för fakturans valuta.',
     },
   },
+  CASH_ACCOUNT_DISABLE_PRIMARY: {
+    httpStatus: 400,
+    message_sv: 'Det här är företagets primära bankkonto och kan inte stängas av. Välj "Gör primärt" på ett annat bankkonto först.',
+    message_en: 'This is the company’s primary bank account and cannot be disabled. Choose "Make primary" on another bank account first.',
+  },
+  CASH_ACCOUNT_DISABLED_PAYEE: {
+    httpStatus: 409,
+    message_sv: 'Bankkontot är avstängt och visas på fakturor. En ägare eller administratör behöver aktivera det under Inställningar innan transaktioner kan läggas på det.',
+    message_en: 'This bank account is turned off and is printed on invoices. An owner or admin needs to turn it on in Settings before transactions can be put on it.',
+  },
+  CASH_ACCOUNT_PRIMARY_INELIGIBLE: {
+    httpStatus: 400,
+    message_sv: 'Kontot kan inte vara primärt. Det primära kontot måste vara ett aktivt bankkonto i SEK (konto 1920-1999).',
+    message_en: 'This account cannot be the primary. The primary account must be an active bank account in SEK (account 1920-1999).',
+  },
+  CASH_ACCOUNT_DISABLE_UNRESOLVED: {
+    httpStatus: 400,
+    message_sv: 'Kontot har obokförda transaktioner och kan inte stängas av förrän de är bokförda eller ignorerade.',
+    message_en: 'The account has unbooked transactions and cannot be disabled until they are booked or ignored.',
+  },
+  CASH_ACCOUNT_ENABLED_BANK_MANAGED: {
+    httpStatus: 409,
+    message_sv: 'Kontot hör till en bankkoppling. Slå på eller av det under bankkopplingen i stället.',
+    message_en: 'This account belongs to a bank connection. Turn it on or off from the bank connection instead.',
+  },
   INVOICE_SEND_PAYMENT_ACCOUNT_MISSING: {
     httpStatus: 400,
     // Currency-neutral by necessity (the registry has no details). Surfaces
@@ -2280,6 +2305,39 @@ const VAT_REPORT: Record<string, StructuredErrorEntry> = {
   },
 }
 
+// Marking a momsperiod as filed by hand (issue #2746): the record is the
+// period's moms deadline, so these guard the dates a manual filing may carry
+// and the one state a manual action must not touch (a Skatteverket kvittens).
+const VAT_FILING: Record<string, StructuredErrorEntry> = {
+  VAT_FILING_PERIOD_NOT_ENDED: {
+    httpStatus: 400,
+    message_sv: 'Perioden har inte avslutats än och kan inte markeras som inlämnad.',
+    message_en: 'The period has not ended yet and cannot be marked as filed.',
+  },
+  VAT_FILING_DATE_BEFORE_PERIOD_END: {
+    httpStatus: 400,
+    message_sv: 'Inlämningsdatumet ligger före periodens slut.',
+    message_en: 'The filing date is before the end of the period.',
+  },
+  VAT_FILING_DATE_IN_FUTURE: {
+    httpStatus: 400,
+    message_sv: 'Inlämningsdatumet kan inte ligga i framtiden.',
+    message_en: 'The filing date cannot be in the future.',
+  },
+  VAT_FILING_NOT_FOUND: {
+    httpStatus: 404,
+    message_sv: 'Perioden är inte markerad som inlämnad.',
+    message_en: 'The period is not recorded as filed.',
+  },
+  VAT_FILING_CONFIRMED_BY_SKATTEVERKET: {
+    httpStatus: 409,
+    message_sv:
+      'Perioden är inlämnad via Skatteverket-kopplingen med kvittens och kan inte avmarkeras.',
+    message_en:
+      'The period was filed through the Skatteverket connection with a receipt and cannot be unmarked.',
+  },
+}
+
 const PS_REPORT: Record<string, StructuredErrorEntry> = {
   PS_REPORT_MISSING_PARAMS: {
     httpStatus: 400,
@@ -2544,6 +2602,12 @@ const BANK_SYNC: Record<string, StructuredErrorEntry> = {
     httpStatus: 429,
     message_sv: 'Anslutningen synkades nyligen. Vänta tills next_allowed_at innan du synkar igen.',
     message_en: 'This connection was synced recently. Wait until next_allowed_at before syncing again; the data you have is already fresh.',
+    retryable: true,
+  },
+  BANK_RATE_LIMITED: {
+    httpStatus: 429,
+    message_sv: 'Banken begränsar just nu hur ofta transaktioner får hämtas. Vänta tills next_allowed_at. Anslutningen behöver inte förnyas.',
+    message_en: 'The bank is temporarily rate limiting this consent. Do not sync again before next_allowed_at: it is our cooldown (the bank\'s Retry-After when it sent one, bounded backoff otherwise), not a reset time confirmed by the bank. The connection is still valid: do not ask the user to renew it.',
     retryable: true,
   },
   BANK_SESSION_EXPIRED: {
@@ -4636,6 +4700,13 @@ const ASSETS: Record<string, StructuredErrorEntry> = {
     message_en:
       'Acquisition date, cost and category cannot be changed once the asset has been disposed or depreciation has been posted. Reverse (storno) first, or use the disposal flow.',
   },
+  ASSET_DELETE_BLOCKED: {
+    httpStatus: 409,
+    message_sv:
+      'Tillgången kan inte tas bort eftersom den har nått bokföringen: avskrivningar är bokförda eller tillgången är avyttrad. Registerraden är då räkenskapsinformation (BFL 7 kap.). Använd avyttring, eller återför verifikatet med storno först.',
+    message_en:
+      'The asset cannot be deleted because it has reached the books: depreciation is posted or the asset is disposed. The register row is then accounting information (BFL ch. 7). Dispose it, or reverse the voucher with storno first.',
+  },
   K3_REQUIRED_FOR_COMPONENTS: {
     httpStatus: 422,
     message_sv:
@@ -5026,6 +5097,7 @@ const REGISTRY: Record<string, StructuredErrorEntry> = {
   ...FX,
   ...REPORT,
   ...VAT_REPORT,
+  ...VAT_FILING,
   ...PS_REPORT,
   ...SIE_EXPORT,
   ...TAX_DECL,

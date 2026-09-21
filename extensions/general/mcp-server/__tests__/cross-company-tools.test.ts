@@ -165,7 +165,9 @@ describe('registration', () => {
     expect(overviewTool.annotations.readOnlyHint).toBe(true)
     expect(runTool.annotations.readOnlyHint).toBe(true)
     expect(stageTool.annotations.readOnlyHint).toBe(false)
-    expect(stageTool.catalogVisibility).toBe('search')
+    // Listed by default (a search-only write is unreachable on chat hosts, #2800);
+    // simple company mode hides it from single-company keys.
+    expect(stageTool.catalogVisibility).toBeUndefined()
     expect(readinessTool.catalogVisibility).toBe('search')
   })
 })

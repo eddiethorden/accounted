@@ -31,7 +31,7 @@ import {
   type ApiKeyScope,
 } from '@/lib/auth/api-keys'
 import { checkRateLimit } from '@/lib/auth/rate-limit-http'
-import { getCanonicalBaseUrl } from '@/lib/api/v1/base-url'
+import { getCanonicalBaseUrl, resolveDiscoveryBaseUrl } from '@/lib/api/v1/base-url'
 import { createCompanyCore } from '@/lib/company/create-company'
 import {
   AssetCorrectionBlockedError,
@@ -105,7 +105,13 @@ import { setTransactionIgnored } from '@/lib/transactions/ignore'
 import { canApproveSupplierInvoice } from '@/lib/supplier-invoices/lifecycle'
 import { backfillSupplierPaymentDetails, type SupplierPaymentDetails } from '@/lib/supplier-invoices/payment-details-backfill'
 import { eventBus } from '@/lib/events/bus'
-import { getVatRules, getPermittedVatRates, getArticleVatRateAdoptionSet } from '@/lib/invoices/vat-rules'
+import {
+  explainVatTreatment,
+  getVatRules,
+  getPermittedVatRates,
+  getArticleVatRateAdoptionSet,
+  type InvoiceVatWarning,
+} from '@/lib/invoices/vat-rules'
 import { validateDeductionLines } from '@/lib/invoices/rot-rut-rules'
 import { computeLineNet } from '@/lib/invoices/line-amounts'
 import { resolveSupplierInvoiceExchangeRate } from '@/lib/currency/supplier-invoice-rate'
@@ -120,12 +126,12 @@ import {
 } from '@/lib/reports/kpi'
 import { generateTrialBalance } from '@/lib/reports/trial-balance'
 import {
-  ACCOUNT_RUTA,
-  VAT_SETTLEMENT_NET_ACCOUNTS,
+  detectMomsredovisning,
   rutorFromTotals,
   rcInputTotalsFromDeclaration,
   calculateVatDeclaration,
   resolvePeriodDates,
+  type MomsredovisningDetection,
   type VatPeriodSource,
 } from '@/lib/reports/vat-declaration'
 import { fetchDynamicVatAccounts } from '@/lib/reports/vat-revenue-accounts'
@@ -146,6 +152,7 @@ import {
   type RcBasisGapScan,
 } from '@/lib/reports/vat-filing-gate'
 import { findRcBasisGaps } from '@/lib/reports/rc-basis-gaps'
+import { resolveAgentWorklist } from '@/lib/receipt-hunt/agent-worklist'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { expandParty } from '@/lib/parties/party-api'
 import { listForCompany as listCashAccountsForCompany } from '@/lib/cash-accounts/service'
@@ -185,7 +192,12 @@ import {
   assertRecommendedLoadoutsValid,
   type RecommendedToolClassification,
 } from './recommended-tools'
-import { SEARCH_ONLY_WRITE_NOTE, isDefaultCatalogTool, toolCallableVia } from './tool-reach'
+import {
+  SEARCH_ONLY_STAGED_NOTE,
+  SEARCH_ONLY_WRITE_NOTE,
+  isDefaultCatalogTool,
+  toolCallableVia,
+} from './tool-reach'
 import {
   canonicalizeToolReferencesInText,
   projectToolReferences,
@@ -1054,6 +1066,19 @@ interface StageOptions {
   complianceNote?: string
 }
 
+/**
+ * Fold the invoice VAT-treatment explanation (explainVatTreatment, #2749 and
+ * #2558) into the staging message as the existing WARNING channel. The
+ * structured list itself is staged as preview.vat_warnings; this is the
+ * prose the agent reads in the tool result. English: the surrounding message
+ * is English and the approval card renders the Swedish sentence from the
+ * structured field, not from compliance_warning.
+ */
+function vatWarningsStageOptions(warnings: InvoiceVatWarning[]): Pick<StageOptions, 'complianceNote'> {
+  if (warnings.length === 0) return {}
+  return { complianceNote: warnings.map((warning) => `${warning.code}: ${warning.message_en}`).join(' ') }
+}
+
 // Keys that can stage typically lack pending_operations:approve (segregation
 // of duties, see STAGING_SCOPES in lib/auth/api-keys.ts), so the approve tool
 // is filtered out of their tools/list. Every staging response names the web
@@ -1813,6 +1838,25 @@ const TOOL_PREFLIGHT_MAP: Record<string, string> = {
 }
 
 /**
+ * The DECLARED "stages, never commits" property of a tool: its outputSchema IS
+ * the staged-operation envelope (identity, not shape). One predicate, two
+ * consumers, so they cannot disagree: deriveToolMeta turns it into the
+ * `_meta.requires_approval` contract a client reads, and the gnubok_stage_tool
+ * bridge uses it to decide which writes it may carry (issue #2800).
+ *
+ * Deliberately NOT keyed on annotations. ANNOTATIONS_STAGED_WRITE is worn by
+ * tools that commit directly (gnubok_create_transactions inserts rows,
+ * gnubok_reject_pending_operation settles one), so the constant's name is not
+ * a staging signal, and neither is a tool's own name. A declaration is only a
+ * claim: __tests__/staging-behaviour.test.ts executes every declaring tool
+ * against a recording client and fails one that writes anywhere but
+ * pending_operations, and statically refuses a mutation call in its body.
+ */
+export function isStagingTool(t: { outputSchema?: Record<string, unknown> }): boolean {
+  return t.outputSchema === STAGED_OPERATION_SCHEMA
+}
+
+/**
  * Discovery-time metadata derived from a tool definition, surfaced under `_meta`
  * in tools/list (and gnubok_search_tools detail=full). Lets an agent tell
  * (WITHOUT reading prose) whether a write stages for approval and whether a
@@ -1823,7 +1867,7 @@ const TOOL_PREFLIGHT_MAP: Record<string, string> = {
  * don't bloat the catalog with empty objects.
  */
 export function deriveToolMeta(t: { name: string; outputSchema?: Record<string, unknown> }): Record<string, unknown> | undefined {
-  if (t.outputSchema !== STAGED_OPERATION_SCHEMA) return undefined
+  if (!isStagingTool(t)) return undefined
   const preflight = TOOL_PREFLIGHT_MAP[t.name]
   return {
     requires_approval: true,
@@ -1836,6 +1880,59 @@ export function deriveToolMeta(t: { name: string; outputSchema?: Record<string, 
 // without an import cycle); re-exported here so the bench and tests keep
 // importing it from the server module.
 export { isDefaultCatalogTool } from './tool-reach'
+
+type BridgeKind = 'call_tool' | 'stage_tool'
+
+/**
+ * The two listed bridges, keyed by canonical tool name. A Map, not an object
+ * literal: the key looked up is the caller-supplied tool name, and `in` or
+ * index access on an object would match inherited keys ("constructor",
+ * "toString") and treat an arbitrary request as a bridge call.
+ */
+const BRIDGE_TOOLS: ReadonlyMap<string, BridgeKind> = new Map([
+  ['gnubok_call_tool', 'call_tool'],
+  ['gnubok_stage_tool', 'stage_tool'],
+])
+
+/**
+ * Why a bridge will not carry this target, or null when it will.
+ *
+ * This decides only WHICH tools a bridge may name. It grants nothing: after it
+ * passes, the dispatcher runs the target exactly as a direct call, so the
+ * target's scope, argument guard, company routing, viewer-role gate,
+ * capability paywall and test-key block all still apply. An unknown target
+ * returns null on purpose so it reaches the unknown-tool handler, which lists
+ * what exists.
+ *
+ *   call_tool:  reads only, unchanged since 2026-08-27.
+ *   stage_tool: a write that declares the staged envelope AND is absent from
+ *               tools/list. gnubok_approve_pending_operation declares no staged
+ *               envelope, so stage-then-approve can never both ride a bridge.
+ */
+function bridgeRefusalReason(
+  bridge: BridgeKind,
+  requestedToolName: string,
+  target: McpTool | undefined,
+): string | null {
+  const bridgeName = bridge === 'call_tool' ? 'gnubok_call_tool' : 'gnubok_stage_tool'
+  if (!requestedToolName) return `${bridgeName} requires a "tool" argument naming the tool to invoke.`
+  if (!target) return null
+  const isRead = target.annotations.readOnlyHint === true
+  if (bridge === 'call_tool') {
+    if (isRead) return null
+    return isStagingTool(target) && !isDefaultCatalogTool(target)
+      ? `${requestedToolName} is a write, so gnubok_call_tool will not invoke it. It only stages a pending operation: use gnubok_stage_tool.`
+      : `${requestedToolName} is not a read-only tool, so gnubok_call_tool will not invoke it. Call ${requestedToolName} directly by name.`
+  }
+  if (isRead) return `${requestedToolName} is read-only: invoke it through gnubok_call_tool, not gnubok_stage_tool.`
+  if (!isStagingTool(target)) {
+    return `${requestedToolName} commits directly instead of staging a pending operation, so gnubok_stage_tool will not invoke it. Call ${requestedToolName} directly by name.`
+  }
+  if (isDefaultCatalogTool(target)) {
+    return `${requestedToolName} is in tools/list: call it directly by name so your client applies that tool's own permission.`
+  }
+  return null
+}
 
 /**
  * Inline SIE content above this length is refused: a model reproducing tens
@@ -2155,7 +2252,42 @@ interface VatReportResult {
   }
   summary: string
   warnings: string[]
+  /**
+   * The verifikat in the period that are NOT in the rutor because they are
+   * classified as momsredovisning. Without this an agent comparing a ruta with
+   * the general ledger sees a gap and nothing that explains it (#2805).
+   * Capped at EXCLUDED_SETTLEMENT_ENTRIES_CAP; `count` is the uncapped total.
+   * Not declared in VAT_REPORT_OUTPUT_SCHEMA on purpose: that schema leaves the
+   * top level open, and the tools/list payload budget has no room for prose.
+   */
+  excluded_settlement_entries: {
+    count: number
+    truncated: boolean
+    note: string
+    entries: VatExcludedSettlementEntry[]
+  }
 }
+
+/** One verifikat kept out of the rutor as a momsredovisning. */
+interface VatExcludedSettlementEntry {
+  journal_entry_id: string
+  voucher_label: string
+  entry_date: string
+  source_type: string | null
+  /**
+   * `tagged`: source_type vat_settlement. `net_account_shape`: a declaration
+   * account and a 2650/1650 line. `tax_account_shape`: only 26xx, the
+   * skattekonto 1630 and 3740. See detectMomsredovisning in core.
+   */
+  detected_by: MomsredovisningDetection
+}
+
+const EXCLUDED_SETTLEMENT_ENTRIES_CAP = 20
+
+const EXCLUDED_SETTLEMENT_ENTRIES_NOTE =
+  'Dessa verifikat är klassade som momsredovisning (taggade vat_settlement, eller igenkända på formen: ' +
+  'ett momskonto mot 2650/1650, eller enbart 26xx mot skattekontot 1630) och ingår därför inte i rutorna. ' +
+  'Skiljer sig en ruta från huvudboken är det här förklaringen finns.'
 
 interface VatReportWithRutor {
   report: VatReportResult
@@ -2191,6 +2323,12 @@ interface VatReportWithRutor {
    * discloses a yearly calendar fallback.
    */
   periodSource: VatPeriodSource
+  /**
+   * EVERY verifikat kept out of the rutor as a momsredovisning, uncapped
+   * (`report.excluded_settlement_entries.entries` is the capped wire view).
+   * The close check names the shape-detected ones from this list.
+   */
+  excludedSettlementEntries: VatExcludedSettlementEntry[]
 }
 
 /**
@@ -2244,46 +2382,63 @@ async function computeVatReportWithRutor(
     account_number: string
     debit_amount: number
     credit_amount: number
-    journal_entries?: { source_type: string | null }
+    journal_entries?: {
+      source_type: string | null
+      entry_date?: string | null
+      voucher_series?: string | null
+      voucher_number?: number | null
+    }
   }>({
     supabase,
-    entryColumns: 'entry_date, status, user_id, source_type',
+    entryColumns: 'entry_date, status, user_id, source_type, voucher_series, voucher_number',
     lineColumns: 'journal_entry_id, account_number, debit_amount, credit_amount',
     filterEntries: (q: EntryLinesQuery) =>
       q
         .eq('company_id', companyId)
         .in('status', ['posted', 'reversed'])
-        // Momsredovisning entries (the settlement verifikat clearing 26xx to
-        // 2650/1650) would zero the rutor once booked; exclude them so this
-        // report matches lib/reports/vat-declaration.ts (fetchVatAccountTotals).
-        .neq('source_type', 'vat_settlement')
+        // Tagged vat_settlement entries are fetched too and dropped below with
+        // the shape-detected ones, so the report can NAME what it excluded.
         .gte('entry_date', startDate)
         .lte('entry_date', endDate),
   })
 
-  // Settlements booked WITHOUT the vat_settlement tag (manual momsomföring,
-  // SIE-imported settlements, stornos of a settlement) are excluded by shape,
-  // mirroring fetchVatAccountTotals (#984): an entry touching both a
-  // declaration account (ACCOUNT_RUTA) and a settlement net account
-  // (2650/1650) is a momsredovisning, not VAT-bearing activity. Opening
-  // balances are exempt: carried-in 26xx balances are unsettled VAT that
-  // belongs in the next declaration.
-  const declarationEntryIds = new Set<string>()
-  const netEntryIds = new Set<string>()
+  // Momsredovisning entries would zero the rutor once booked, so they are
+  // excluded: the tagged ones (source_type vat_settlement) and the untagged
+  // ones recognised by shape (manual momsomföring, SIE-imported settlements,
+  // stornos of a settlement, VAT moved straight against the skattekonto).
+  // The rule itself lives in core, detectMomsredovisning, the TypeScript
+  // mirror of the predicate in get_vat_declaration_totals (#984, #2805): this
+  // report holds every line of every entry, which is what the purity test of
+  // the second shape needs. Never re-derive it here.
+  const entryLineAccounts = new Map<string, string[]>()
   for (const line of lines) {
-    if (ACCOUNT_RUTA[line.account_number]) declarationEntryIds.add(line.journal_entry_id)
-    else if (VAT_SETTLEMENT_NET_ACCOUNTS.includes(line.account_number)) {
-      netEntryIds.add(line.journal_entry_id)
-    }
+    const accounts = entryLineAccounts.get(line.journal_entry_id)
+    if (accounts) accounts.push(line.account_number)
+    else entryLineAccounts.set(line.journal_entry_id, [line.account_number])
   }
   const settlementShapedIds = new Set<string>()
+  const excludedEntries: VatExcludedSettlementEntry[] = []
   for (const line of lines) {
     const id = line.journal_entry_id
-    if (!declarationEntryIds.has(id) || !netEntryIds.has(id)) continue
+    if (settlementShapedIds.has(id)) continue
     const entry = line.journal_entries
-    if (!entry || entry.source_type === 'opening_balance') continue
+    if (!entry) continue
+    const detectedBy = detectMomsredovisning(entry.source_type, entryLineAccounts.get(id) ?? [])
+    if (!detectedBy) continue
     settlementShapedIds.add(id)
+    excludedEntries.push({
+      journal_entry_id: id,
+      voucher_label: formatVoucherLabel(entry.voucher_series, entry.voucher_number),
+      entry_date: entry.entry_date ?? '',
+      source_type: entry.source_type,
+      detected_by: detectedBy,
+    })
   }
+  excludedEntries.sort((a, b) =>
+    a.entry_date === b.entry_date
+      ? a.voucher_label.localeCompare(b.voucher_label, 'sv', { numeric: true })
+      : a.entry_date < b.entry_date ? -1 : 1,
+  )
 
   const accountTotals = new Map<string, { debit: number; credit: number }>()
   for (const line of lines) {
@@ -2377,6 +2532,12 @@ async function computeVatReportWithRutor(
         ? `Moms att få tillbaka: ${Math.abs(ruta49).toFixed(2)} kr`
         : 'Noll i moms',
     warnings,
+    excluded_settlement_entries: {
+      count: excludedEntries.length,
+      truncated: excludedEntries.length > EXCLUDED_SETTLEMENT_ENTRIES_CAP,
+      note: EXCLUDED_SETTLEMENT_ENTRIES_NOTE,
+      entries: excludedEntries.slice(0, EXCLUDED_SETTLEMENT_ENTRIES_CAP),
+    },
   }
 
   // Same `accountTotals` the report is built from, projected through core's
@@ -2388,6 +2549,7 @@ async function computeVatReportWithRutor(
     dynamicVatAccounts,
     accountTotals,
     periodSource,
+    excludedSettlementEntries: excludedEntries,
   }
 }
 
@@ -2481,10 +2643,17 @@ interface VatCloseBlocker {
     | 'declaration_incomplete'
     | 'deadline_unavailable'
     | 'fiscal_year_not_found'
+    | 'momsredovisning_entries_excluded'
   severity: 'high' | 'medium' | 'low'
   count: number
   message: string
   hint: string
+  /**
+   * Only on `momsredovisning_entries_excluded`: the verifikat the finding is
+   * about, capped like the report's list. `blockers` items are open objects in
+   * the outputSchema, so this costs no tools/list budget.
+   */
+  entries?: VatExcludedSettlementEntry[]
   /**
    * Stable rule id when this blocker comes from the shared momsdeklaration
    * completeness checks (lib/reports/vat-declaration-checks.ts), so an agent
@@ -2917,8 +3086,14 @@ export async function computeVatCloseCheck(
   //    step 4b: they need rutor 20-24 and 50, which the report view omits, plus
   //    the per-account totals so the RC input comparison reads 2645/2647
   //    instead of the ruta 48 aggregate.
-  const { report: vatReport, declarationRutor, dynamicVatAccounts, accountTotals, periodSource } =
-    await computeVatReportWithRutor(args, companyId, supabase)
+  const {
+    report: vatReport,
+    declarationRutor,
+    dynamicVatAccounts,
+    accountTotals,
+    periodSource,
+    excludedSettlementEntries,
+  } = await computeVatReportWithRutor(args, companyId, supabase)
   const { start, end, type: periodType, year, period } = vatReport.period
 
   // 2) Company settings: deadline inputs come from the same fields used by
@@ -3087,9 +3262,35 @@ export async function computeVatCloseCheck(
       severity: 'medium',
       count: missingUnderlag,
       message: `${missingUnderlag} verifikat över ${MISSING_UNDERLAG_MIN_GROSS_SEK} kr saknar underlag`,
-      hint: `BFL 5 kap 6-7 §: varje affärshändelse måste ha en verifikation med hänvisning till sitt underlag. Lista dem med gnubok_list_verifikat_without_documents (since=${start}, min_amount=${MISSING_UNDERLAG_MIN_GROSS_SEK}) och para ihop via gnubok_list_unmatched_documents.`,
+      hint: `BFL 5 kap 6-7 §: varje affärshändelse måste ha en verifikation med hänvisning till sitt underlag. Lista dem med gnubok_list_verifikat_without_documents (via gnubok_call_tool; since=${start}, min_amount=${MISSING_UNDERLAG_MIN_GROSS_SEK}) och para ihop via gnubok_list_unmatched_documents.`,
     })
   }
+  // Untagged verifikat the report classified as momsredovisning BY SHAPE and
+  // therefore kept out of the rutor. Informational (severity low, never part
+  // of ready_to_close): a manual or imported settlement is supposed to be
+  // excluded. It is named because shape is an inference, not a recorded intent
+  // (#2805): when a ruta disagrees with the general ledger, these are the
+  // verifikat that explain it, and until now nothing pointed at them. Tagged
+  // vat_settlement entries are left out: the app booked those itself.
+  const shapeDetectedEntries = excludedSettlementEntries.filter((e) => e.detected_by !== 'tagged')
+  if (shapeDetectedEntries.length > 0) {
+    const named = shapeDetectedEntries
+      .slice(0, EXCLUDED_SETTLEMENT_ENTRIES_CAP)
+      .map((e) => `${e.voucher_label} (${e.entry_date})`)
+      .join(', ')
+    const more = shapeDetectedEntries.length > EXCLUDED_SETTLEMENT_ENTRIES_CAP
+      ? ` och ${shapeDetectedEntries.length - EXCLUDED_SETTLEMENT_ENTRIES_CAP} till`
+      : ''
+    blockers.push({
+      kind: 'momsredovisning_entries_excluded',
+      severity: 'low',
+      count: shapeDetectedEntries.length,
+      message: `Information: ${shapeDetectedEntries.length} verifikat utan momsredovisningstagg är klassade som momsredovisning på formen och ingår inte i rutorna: ${named}${more}`,
+      hint: 'Blockerar inte. Formen är ett momskonto mot 2650/1650, eller enbart 26xx mot skattekontot 1630. Skiljer sig en ruta från huvudboken är det dessa verifikat som förklarar skillnaden: granska dem med gnubok_query_journal.',
+      entries: shapeDetectedEntries.slice(0, EXCLUDED_SETTLEMENT_ENTRIES_CAP),
+    })
+  }
+
   // 4b) Is the DECLARATION itself complete? Everything above is about the
   //     bookkeeping around it; this is about the momsdeklaration.
   //
@@ -3906,19 +4107,13 @@ export const tools: McpTool[] = [
     name: 'gnubok_call_tool',
     title: 'Call a Read Tool by Name',
     description:
-      'Invoke any read-only tool by name, including ones absent from tools/list. Find the name with gnubok_search_tools first. Writes are refused: call a write tool directly so its approval contract stays visible.',
+      'Invoke any read-only tool by name, including ones absent from tools/list. Find the name with gnubok_search_tools first. Writes are refused: use gnubok_stage_tool for an unlisted write.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        tool: {
-          type: 'string',
-          description: 'Canonical name of the read-only tool to invoke, e.g. "gnubok_get_reconciliation_status".',
-        },
-        arguments: {
-          type: 'object',
-          description: "Arguments for that tool, validated against its own inputSchema. Omit for a tool that takes none.",
-        },
+        tool: { type: 'string', description: 'Canonical name, e.g. "gnubok_get_invoice".' },
+        arguments: { type: 'object', description: "Validated against that tool's own inputSchema." },
       },
       required: ['tool'],
     },
@@ -3942,9 +4137,67 @@ export const tools: McpTool[] = [
     },
   },
   {
+    // The write half of the bridge (issue #2800). 20 search-only WRITES were
+    // unreachable from claude.ai: tools/list hid them and gnubok_call_tool
+    // refuses writes. Every one of them only STAGES a pending operation, so
+    // nothing reaches the books until gnubok_approve_pending_operation, which
+    // is a separate LISTED tool with its own scope and its own approval card.
+    //
+    // A second tool rather than a wider gnubok_call_tool, on purpose. That
+    // tool is annotated read-only and a user may have told their client to
+    // always allow it. Letting the same name start staging writes would
+    // silently reuse consent that was given to a read-only tool, and flipping
+    // its annotation instead would make every bridged READ prompt. A new name
+    // carries no prior consent, and gnubok_call_tool keeps exactly the meaning
+    // it was consented under.
+    //
+    // Carries ONLY tools that (a) declare the staged envelope (isStagingTool)
+    // and (b) are absent from tools/list. (b) matters: a listed write has its
+    // own per-tool permission in the client, and a bridge that also carried it
+    // would let an agent route around a user who blocked that one tool.
+    //
+    // Never executed, like gnubok_call_tool: the dispatcher rewrites the call
+    // before resolution so every guard applies to the real target.
+    name: 'gnubok_stage_tool',
+    title: 'Stage a Write Tool by Name',
+    description:
+      'Stage a write tool absent from tools/list (search hits with callable_via "stage_tool"). Only stages: nothing posts until gnubok_approve_pending_operation. Call a listed write directly.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        tool: { type: 'string', description: 'Canonical name, e.g. "gnubok_reconcile_unmatch".' },
+        arguments: { type: 'object', description: "Validated against that tool's own inputSchema." },
+      },
+      required: ['tool'],
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: true,
+      description: "The inner tool's staged-operation result, unchanged.",
+    },
+    // Worst case over everything it can carry, never the common case: one
+    // bridgeable target (gnubok_post_kontantmetod_cutoff) is annotated
+    // destructive, so the carrier is too. A hint that errs toward prompting is
+    // the safe direction; connector-catalog-reach.test.ts pins the rule.
+    annotations: ANNOTATIONS_DESTRUCTIVE_WRITE,
+    // No _meta.requires_approval here: deriveToolMeta keys on the staged
+    // schema, which this open pass-through is not. The contract still reaches
+    // the agent twice: the description names the approve step, and every
+    // staged result carries approve: { tool, args }.
+    async execute() {
+      // Unreachable: see gnubok_call_tool. If this ever runs, the rewrite was
+      // removed and a bridged write skipped the staging-only check.
+      throw codedError(
+        'VALIDATION_ERROR',
+        'gnubok_stage_tool is resolved by the dispatcher and has no direct implementation.',
+      )
+    },
+  },
+  {
     name: 'gnubok_search_tools',
     title: 'Search MCP Tools',
-    description: 'Search tools by keyword; hits carry callable_via: tools_list, call_tool or none.',
+    description: 'Search tools by keyword; hits carry callable_via: tools_list, call_tool, stage_tool or none.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -4057,10 +4310,11 @@ export const tools: McpTool[] = [
         // WRITE on a tools/list-only host) was reported as a missing tool four
         // times (feedback seq 372962 and siblings). Response field, so it costs
         // nothing in tools/list.
-        const callableVia = toolCallableVia(t)
+        const callableVia = toolCallableVia(t, isStagingTool(t))
         const reach = {
           callable_via: callableVia,
           ...(callableVia === 'none' ? { note: SEARCH_ONLY_WRITE_NOTE } : {}),
+          ...(callableVia === 'stage_tool' ? { note: SEARCH_ONLY_STAGED_NOTE } : {}),
         }
         if (detail === 'full') {
           const meta = projectMcpPayload(
@@ -4619,7 +4873,11 @@ export const tools: McpTool[] = [
       required: ['batch_id', 'tool', 'scope', 'results', 'staged_count', 'failed', 'dry_run', 'message'],
     },
     annotations: ANNOTATIONS_STAGED_WRITE,
-    catalogVisibility: 'search',
+    // Default catalog, not search-only: a search-only WRITE is out of reach on
+    // hosts that can only call listed tools (issue #2800), and this result is
+    // a batch listing, not the staged-operation contract gnubok_stage_tool
+    // carries. Simple company mode hides it from single-company keys, so only
+    // the keys that can use it pay for it.
     async execute(args, _companyId, userId, supabase, actor) {
       const innerName = toCanonicalToolName(typeof args.tool === 'string' ? args.tool : '')
       const inner = tools.find((t) => t.name === innerName)
@@ -5194,6 +5452,19 @@ export const tools: McpTool[] = [
             next_allowed_at: result.next_allowed_at ?? null,
             instructions:
               'A sync ran or was attempted on this connection within the last 15 minutes. Check last_synced_at via gnubok_connect_bank: if it is fresh, transactions and balances are already current, continue with gnubok_list_uncategorized_transactions. If it is still stale, the previous attempt failed; retry once after next_allowed_at, never before.',
+          }
+        }
+        // The bank's own rate limit: also in-band, because the one thing the
+        // agent must learn is WHEN, and the thrown envelope carries no time.
+        if (result.code === 'BANK_RATE_LIMITED') {
+          return {
+            synced: false,
+            connection_id: result.connection_id,
+            bank: null,
+            last_synced_at: null,
+            next_allowed_at: result.next_allowed_at ?? null,
+            instructions:
+              'The bank is rate limiting this consent (PSD2 banks allow only a few unattended fetches per day). Nothing was fetched. Do not call again before next_allowed_at; it is our cooldown, not a reset time confirmed by the bank. The connection is still valid: do not ask the user to renew it. Continue with the transactions already imported (gnubok_list_uncategorized_transactions).',
           }
         }
         throw Object.assign(
@@ -6094,7 +6365,7 @@ export const tools: McpTool[] = [
           type: 'array',
           items: { type: 'object' },
           description:
-            'Per-workflow tool loadouts, ordered by call sequence: each entry names a workflow, describes it, and lists its tools as {name, callable, blocked_by?, note?}: callable=false names the missing scope or a search-only write. Batch-load the callable names in one call (ToolSearch select:a,b,c).',
+            'Per-workflow tool loadouts, ordered by call sequence: each entry names a workflow, describes it, and lists its tools as {name, callable, blocked_by?, note?}: callable=false names the missing scope or a write no bridge carries; note names the bridge for an unlisted tool. Batch-load the callable names in one call (ToolSearch select:a,b,c).',
         },
         feedback_channel: {
           type: 'object',
@@ -6133,7 +6404,7 @@ export const tools: McpTool[] = [
         const target = tools.find((candidate) => candidate.name === toolName)
         return {
           required_scope: TOOL_SCOPE_MAP[toolName] ?? null,
-          callable_via: target ? toolCallableVia(target) : 'none',
+          callable_via: target ? toolCallableVia(target, isStagingTool(target)) : 'none',
         }
       }
 
@@ -6749,6 +7020,10 @@ export const tools: McpTool[] = [
       },
     }),
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748, paying for the draft-invoice writes): a strict
+    // subset of gnubok_list_verifikat_without_documents; reachable through
+    // gnubok_call_tool.
+    catalogVisibility: 'search',
     async execute(args, companyId, userId, supabase) {
       const limit = Math.min(Math.max(1, Number(args.limit) || 20), 100)
       const offset = Math.max(0, Number(args.offset) || 0)
@@ -6823,6 +7098,11 @@ export const tools: McpTool[] = [
       },
     }),
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748, paying for the draft-invoice writes): the
+    // missing-underlag family is reached through gnubok_call_tool, like
+    // gnubok_receipt_hunt_worklist; the two listed tools that point here
+    // (link_document_to_voucher, the vat_close_check hint) name the bridge.
+    catalogVisibility: 'search',
     async execute(args, companyId, _userId, supabase) {
       const limit = Math.min(Math.max(1, Number(args.limit) || 20), 100)
       const offset = Math.max(0, Number(args.offset) || 0)
@@ -6858,6 +7138,72 @@ export const tools: McpTool[] = [
       const rows = result.verifikat ?? []
       const total = result.total_count ?? 0
       return { verifikat: rows, ...pageTail(rows, total, offset) }
+    },
+  },
+
+  {
+    name: 'gnubok_receipt_hunt_worklist',
+    // Reached through the kvittojakten skill, which names it: a slot in
+    // tools/list would spend the context budget on every other session.
+    catalogVisibility: 'search',
+    keywords: ['kvittojakten', 'kvitto', 'underlag', 'saknar underlag', 'mail'],
+    title: 'Kvittojakten Worklist',
+    description: 'What lacks an underlag, shaped for a mail search: posted verifikat and unbooked purchases, largest first, with counterparty, amount, date window, portal hint, the inbox address to forward to and a next step per item. Load skill kvittojakten first.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: { type: 'number', description: 'Max items to return, 1-100 (default 25)' },
+        since: { type: 'string', description: 'Optional ISO date (YYYY-MM-DD). Only return items on or after this date.' },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              kind: { type: 'string', enum: ['verifikat', 'transaction'] },
+              journal_entry_id: { type: ['string', 'null'] },
+              transaction_id: { type: ['string', 'null'] },
+              voucher: { type: ['string', 'null'] },
+              date: { type: 'string' },
+              amount: { type: 'number' },
+              currency: { type: 'string' },
+              counterparty: { type: ['string', 'null'] },
+              description: { type: ['string', 'null'] },
+              invoice_number: { type: ['string', 'null'] },
+              search_from: { type: 'string' },
+              search_to: { type: 'string' },
+              mail_searchable: { type: 'boolean' },
+              portal: {
+                type: ['object', 'null'],
+                additionalProperties: false,
+                properties: {
+                  vendor: { type: 'string' },
+                  url: { type: 'string' },
+                  note: { type: ['string', 'null'] },
+                },
+              },
+              tip_possible: { type: 'boolean', description: 'Restaurant or bar: the charge is the bill plus a tip, so a receipt up to a quarter smaller is still this purchase.' },
+              next_step: { type: 'string', description: 'One Swedish sentence for the user when the document cannot be fetched: where the receipt is and what to do. Report it verbatim.' },
+            },
+          },
+        },
+        total_count: { type: 'number' },
+        inbox_address: { type: ['string', 'null'], description: 'Forward a found mail here to turn it into an inbox document. Null when no inbox is provisioned.' },
+      },
+      required: ['items', 'total_count', 'inbox_address'],
+    },
+    annotations: ANNOTATIONS_READ_ONLY,
+    async execute(args, companyId, _userId, supabase) {
+      const limit = Number(args.limit) || undefined
+      const since = typeof args.since === 'string' ? args.since : null
+      return resolveAgentWorklist(supabase, companyId, { limit, since })
     },
   },
 
@@ -7977,7 +8323,8 @@ export const tools: McpTool[] = [
     annotations: ANNOTATIONS_READ_ONLY,
     // Round-trip read surface for gnubok_update_invoice (issue #1642). Kept
     // out of the default tools/list: payload-size.bench.test.ts sits at its
-    // ceiling, and the update tool that needs it is search-only as well.
+    // ceiling, and as a READ it is reachable through gnubok_call_tool, which
+    // the update tool names (issue #2748).
     catalogVisibility: 'search',
     async execute(args, companyId, userId, supabase) {
       const invoiceId = args.invoice_id as string
@@ -8294,6 +8641,19 @@ export const tools: McpTool[] = [
       }
       const total = subtotal + vatAmount
 
+      // Why the treatment is what it is (#2749, #2558): the gate above is
+      // silent about WHICH reverse-charge condition failed, so an eu_business
+      // customer whose number was never VIES-validated got 25 % with no
+      // explanation. Same helper every surface renders. Staged structured
+      // (preview.vat_warnings, for the approval card and the agent) and
+      // folded into the tool message as a WARNING through complianceNote.
+      const vatWarnings = explainVatTreatment(
+        customer,
+        items
+          .filter((item) => item.line_type !== 'text')
+          .map((item) => (item.vat_rate !== undefined ? item.vat_rate : vatRules.rate)),
+      )
+
       // Due date from payment terms if not provided. A quote has no payment
       // due date: due_date mirrors valid_until (build-invoice-write parity).
       let dueDate = args.due_date as string | undefined
@@ -8353,6 +8713,7 @@ export const tools: McpTool[] = [
           // Echoed for every non-exact dimension resolution (resolve-don't-
           // select) so the agent can verify what a name attached to.
           ...(dimensionResolutions.length > 0 ? { dimension_resolutions: dimensionResolutions } : {}),
+          ...(vatWarnings.length > 0 ? { vat_warnings: vatWarnings } : {}),
         },
         actor,
         isQuote
@@ -8363,7 +8724,8 @@ export const tools: McpTool[] = [
           : {
               description: 'Once approved, the invoice is created as a draft. Send it with gnubok_send_invoice or use gnubok_mark_invoice_as_sent if delivered outside the system.',
               tool: 'gnubok_send_invoice',
-            }
+            },
+        vatWarningsStageOptions(vatWarnings),
       )
     },
   },
@@ -11974,6 +12336,10 @@ export const tools: McpTool[] = [
     },
     outputSchema: { type: 'object' },
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748, paying for the draft-invoice writes): the
+    // open-item question stays one hop away in gnubok_list_invoices; the
+    // aging report is reached through gnubok_call_tool.
+    catalogVisibility: 'search',
     async execute(args, companyId, userId, supabase) {
       const asOfDate = args.as_of_date as string | undefined
       return await generateARLedger(supabase, companyId, asOfDate)
@@ -11994,6 +12360,9 @@ export const tools: McpTool[] = [
     },
     outputSchema: { type: 'object' },
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748): same footing as gnubok_get_ar_ledger; open
+    // items stay listed in gnubok_list_supplier_invoices.
+    catalogVisibility: 'search',
     async execute(args, companyId, userId, supabase) {
       const asOfDate = args.as_of_date as string | undefined
       return await generateSupplierLedger(supabase, companyId, asOfDate)
@@ -15644,7 +16013,7 @@ export const tools: McpTool[] = [
     name: 'gnubok_link_document_to_voucher',
     keywords: ['koppla underlag', 'verifikat', 'kvitto'],
     title: 'Link Document to Voucher',
-    description: 'Stage linking a document to an already-POSTED verifikation (no bank-tx row). For an unbooked handling prefer gnubok_create_voucher with inbox_item_id (BFL 5 kap 6§). Call gnubok_list_verifikat_without_documents for targets.',
+    description: 'Stage linking a document to an already-POSTED verifikation (no bank-tx row). For an unbooked handling prefer gnubok_create_voucher with inbox_item_id (BFL 5 kap 6§). Targets: gnubok_list_verifikat_without_documents via gnubok_call_tool.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -16322,6 +16691,9 @@ export const tools: McpTool[] = [
     },
     outputSchema: { type: 'object' },
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748, paying for the draft-invoice writes): a yearly
+    // rollup; the monthly flow reads gnubok_get_salary_run, which stays listed.
+    catalogVisibility: 'search',
     async execute(args, companyId, _userId, supabase) {
       const { generateSalaryJournal } = await import('@/lib/reports/salary-journal')
       return generateSalaryJournal(supabase, companyId, args.year as number)
@@ -17574,6 +17946,13 @@ export const tools: McpTool[] = [
     },
     outputSchema: STAGED_OPERATION_SCHEMA,
     annotations: ANNOTATIONS_DESTRUCTIVE_WRITE,
+    // Search-only since 2026-09-20 (issue #2800): the first WRITE demoted to
+    // pay for a catalog addition, which gnubok_stage_tool makes possible (it
+    // only stages, so the bridge carries it). Chosen from 60 days of
+    // mcp.tool_called: zero calls, and payroll is monthly, so the window holds
+    // two full cycles and the zero is not a seasonal artifact. Named by no
+    // listed tool, skill or loadout; the salary calendar is the web door.
+    catalogVisibility: 'search',
     async execute(args, companyId, userId, supabase, actor) {
       const { employee_id, from, to, absence_type } = args as {
         employee_id: string; from: string; to: string; absence_type?: string
@@ -18531,6 +18910,10 @@ export const tools: McpTool[] = [
       },
     },
     annotations: ANNOTATIONS_READ_ONLY,
+    // Search-only (issue #2748, paying for the draft-invoice writes): no skill
+    // or loadout names it, and a whole SIE file in a chat turn is the rare
+    // case; reachable through gnubok_call_tool, the v1 REST route serves files.
+    catalogVisibility: 'search',
     async execute(args, companyId, _userId, supabase) {
       const fiscalPeriodId = args.fiscal_period_id as string
       if (!fiscalPeriodId) throw new Error('fiscal_period_id is required')
@@ -20287,20 +20670,20 @@ export const tools: McpTool[] = [
     name: 'gnubok_update_invoice',
     keywords: ['ändra faktura', 'kundfaktura', 'faktura'],
     title: 'Update Draft Invoice',
-    description: 'Stage an edit to a DRAFT invoice: header fields (incl. default_dimensions) and/or items (FULL REPLACE: read current lines with gnubok_get_invoice first; lines accept article_id). Drafts only, no verifikat, not self-billed, not a credit note; otherwise use gnubok_credit_invoice.',
+    description: 'Stage an edit to a DRAFT invoice: header fields and/or items (FULL REPLACE: read current lines with gnubok_get_invoice through gnubok_call_tool first; lines accept article_id). Drafts only, no verifikat, not self-billed, not a credit note; otherwise use gnubok_credit_invoice.',
     outputSchema: STAGED_OPERATION_SCHEMA,
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        invoice_id: { type: 'string', description: 'UUID of the draft invoice, from gnubok_list_invoices.' },
+        invoice_id: { type: 'string', description: 'Draft invoice UUID (gnubok_list_invoices).' },
         notes: { type: 'string' },
         invoice_date: { type: 'string', description: 'YYYY-MM-DD' },
         due_date: { type: 'string', description: 'YYYY-MM-DD' },
-        delivery_date: { type: ['string', 'null'], description: 'YYYY-MM-DD; null clears the delivery date.' },
+        delivery_date: { type: ['string', 'null'], description: 'YYYY-MM-DD; null clears.' },
         your_reference: { type: 'string' },
         our_reference: { type: 'string' },
-        invoice_marking: { type: 'string', description: 'Fakturamärkning (buyer marking/PO label), separate from your_reference.' },
+        invoice_marking: { type: 'string', description: 'Fakturamärkning (buyer marking), separate from your_reference.' },
         items: {
           type: 'array',
           items: {
@@ -20310,28 +20693,28 @@ export const tools: McpTool[] = [
               quantity: { type: 'number' },
               unit: { type: 'string', description: 'st, tim, dag, mån' },
               unit_price: { type: 'number', description: 'Price per unit excl. VAT' },
-              discount_percent: { type: 'number', description: 'Line discount 0-100 (rabatt); pass back to keep it, totals computed net of it.' },
+              discount_percent: { type: 'number', description: 'Line discount 0-100; pass back to keep it.' },
               vat_rate: { type: 'number', description: 'VAT rate 0-100 (optional override)' },
               article_id: {
                 type: 'string',
-                description: 'Optional article UUID from gnubok_list_articles. Prefills description, unit, unit_price, revenue account and, only when compatible with the customer VAT rules, vat_rate. Values set on the line win. Pass it back on every line that should keep its article linkage.',
+                description: 'Article UUID (gnubok_list_articles). Prefills description, unit, unit_price, revenue account and, when compatible with the customer VAT rules, vat_rate; line values win. Pass back to keep the linkage.',
               },
               line_type: {
                 type: 'string',
                 enum: ['product', 'text'],
-                description: 'text = free-text/spacer row: no amounts, never books; the quantity/description/unit/price rules are skipped.',
+                description: 'text = free-text row: no amounts, never books, quantity/price rules skipped.',
               },
               revenue_account: {
                 type: ['string', 'null'],
-                description: 'BAS class 1-3 posting-account override; null books by VAT treatment. Pass back to keep a manual override.',
+                description: 'BAS class 1-3 posting override; null books by VAT treatment. Pass back to keep.',
               },
-              deduction_type: { type: ['string', 'null'], description: 'rot or rut; pass back or the ROT/RUT-avdrag is removed by the replace.' },
+              deduction_type: { type: ['string', 'null'], description: 'rot or rut; pass back to keep the avdrag.' },
               labor_hours: { type: ['number', 'null'] },
               work_type: { type: ['string', 'null'], description: 'Skatteverket arbetstypskod for the deduction line.' },
               housing_designation: { type: ['string', 'null'], description: 'Fastighetsbeteckning; required on ROT lines.' },
               apartment_number: { type: ['string', 'null'] },
               brf_org_number: { type: ['string', 'null'] },
-              accrual_period_start: { type: ['string', 'null'], description: 'YYYY-MM-DD; with accrual_period_end defers the revenue (periodisering). Pass back or the deferral is removed.' },
+              accrual_period_start: { type: ['string', 'null'], description: 'YYYY-MM-DD; with accrual_period_end defers the revenue. Pass back to keep.' },
               accrual_period_end: { type: ['string', 'null'] },
               accrual_balance_account: { type: ['string', 'null'], description: '29xx interim account; null = default.' },
               dimensions: {
@@ -20342,12 +20725,12 @@ export const tools: McpTool[] = [
             },
             required: ['quantity'],
           },
-          description: 'FULL REPLACE: every existing line is deleted and this array becomes the new line set. Read the current lines with gnubok_get_invoice first and pass unchanged lines back verbatim (article, ROT/RUT, accrual and account fields survive only if passed back). Omit to keep the current lines.',
+          description: 'FULL REPLACE: this array becomes the whole line set; omit to keep the current lines. gnubok_get_invoice is not in tools/list: read the lines with gnubok_call_tool({tool: "gnubok_get_invoice"}) first and pass unchanged lines back verbatim (article, ROT/RUT, accrual and account fields survive only if passed back).',
         },
         default_dimensions: {
           type: 'object',
           additionalProperties: { type: 'string' },
-          description: 'Dims bag keyed by SIE dim no, value = code OR name. Replaces the whole stored bag; {} clears all tags. Omit to keep the current bag.',
+          description: 'Dims bag {sie_dim_no: code or name}; replaces the stored bag, {} clears it. Omit to keep.',
         },
         dry_run: { type: 'boolean', description: 'Validate and preview without staging or changing data.' },
         idempotency_key: { type: 'string', description: 'Random per-operation UUID. Reusing it with the same payload returns the original staged response.' },
@@ -20355,7 +20738,10 @@ export const tools: McpTool[] = [
       required: ['invoice_id'],
     },
     annotations: ANNOTATIONS_IDEMPOTENT_WRITE,
-    catalogVisibility: 'search',
+    // Default catalog on purpose (issue #2748): a WRITE marked search-only is
+    // absent from tools/list and refused by gnubok_call_tool, so the claude.ai
+    // connector had no way to edit a draft. Its pre-read gnubok_get_invoice
+    // stays search-only and is named through the bridge above.
     async execute(args, companyId, userId, supabase, actor) {
       const invoiceId = args.invoice_id as string
       if (!invoiceId) throw new Error('invoice_id is required. Use gnubok_list_invoices to find IDs.')
@@ -20430,19 +20816,24 @@ export const tools: McpTool[] = [
       let subtotal = 0
       let vatAmount = 0
       let currentItems: Array<Record<string, unknown>> | undefined
+      // The customer row the items branch fetches; feeds the VAT-treatment
+      // explanation below. A header-only edit changes no rate, so it stays
+      // undefined there and nothing is explained.
+      let updateCustomer: Parameters<typeof explainVatTreatment>[0] | undefined
       if (rawItems !== undefined) {
         // personal_number is fetched ONLY as a presence check for the ROT/RUT
         // staging gate below (commit falls back to the kundkort personnummer
         // for individuals); never decrypted, staged, or returned here.
         const { data: customer, error: custError } = await supabase
           .from('customers')
-          .select('customer_type, vat_number_validated, country, personal_number')
+          .select('id, customer_type, vat_number, vat_number_validated, country, personal_number')
           .eq('id', invoice.customer_id)
           .eq('company_id', companyId)
           .single()
         if (custError || !customer) {
           throw new Error('Customer not found: they may have been deleted. The draft cannot be edited without its customer.')
         }
+        updateCustomer = customer
 
         const vatRules = getVatRules(customer.customer_type, customer.vat_number_validated, customer.country)
         defaultVatRate = vatRules.rate
@@ -20596,6 +20987,18 @@ export const tools: McpTool[] = [
         throw new Error(`Invalid invoice update: ${issue ? `${issue.path.join('.')}: ${issue.message}` : 'validation failed'}`)
       }
 
+      // Same VAT-treatment explanation as gnubok_create_invoice (#2749,
+      // #2558), on the effective rates of the staged replacement lines.
+      const vatWarnings: InvoiceVatWarning[] =
+        updateCustomer && items
+          ? explainVatTreatment(
+              updateCustomer,
+              items
+                .filter((item) => item.line_type !== 'text')
+                .map((item) => item.vat_rate ?? defaultVatRate),
+            )
+          : []
+
       return stagePendingOperation(supabase, companyId, userId, 'update_invoice',
         `Uppdatera fakturautkast: ${customerName ?? invoice.invoice_number ?? invoice.id}`,
         parsed.data,
@@ -20635,6 +21038,7 @@ export const tools: McpTool[] = [
               }
             : {}),
           ...(dimensionResolutions.length > 0 ? { dimension_resolutions: dimensionResolutions } : {}),
+          ...(vatWarnings.length > 0 ? { vat_warnings: vatWarnings } : {}),
         },
         actor,
         {
@@ -20644,6 +21048,7 @@ export const tools: McpTool[] = [
         {
           dryRun: Boolean(args.dry_run),
           idempotencyKey: typeof args.idempotency_key === 'string' ? args.idempotency_key : undefined,
+          ...vatWarningsStageOptions(vatWarnings),
         },
       )
     },
@@ -20658,7 +21063,7 @@ export const tools: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        invoice_id: { type: 'string', description: 'UUID of the draft invoice, from gnubok_list_invoices.' },
+        invoice_id: { type: 'string', description: 'Draft invoice UUID (gnubok_list_invoices).' },
         dry_run: { type: 'boolean', description: 'Validate and preview without staging or changing data.' },
         idempotency_key: { type: 'string', description: 'Random per-operation UUID. Reusing it with the same payload returns the original staged response.' },
       },
@@ -20666,7 +21071,8 @@ export const tools: McpTool[] = [
     },
     outputSchema: STAGED_OPERATION_SCHEMA,
     annotations: ANNOTATIONS_DESTRUCTIVE_WRITE,
-    catalogVisibility: 'search',
+    // Default catalog on purpose (issue #2748): see gnubok_update_invoice. A
+    // search-only WRITE is unreachable from the claude.ai connector.
     async execute(args, companyId, userId, supabase, actor) {
       const invoiceId = args.invoice_id as string
       if (!invoiceId) throw new Error('invoice_id is required. Use gnubok_list_invoices to find IDs.')
@@ -23778,6 +24184,30 @@ export const tools: McpTool[] = [
 // shipping a briefing that recommends phantom tools.
 assertRecommendedLoadoutsValid(new Set(tools.map((t) => t.name)))
 
+/**
+ * Exactly the tools gnubok_stage_tool will carry: writes that declare the
+ * staged envelope and are absent from tools/list. Derived from the registry,
+ * never hand-listed, so it cannot drift from bridgeRefusalReason (a test pins
+ * that the two agree tool by tool). The bridges themselves are not in it: their
+ * pass-through outputSchema is not the staged envelope.
+ */
+export const STAGE_BRIDGE_TARGETS: readonly McpTool[] = tools.filter(
+  (t) => isStagingTool(t) && !isDefaultCatalogTool(t) && t.annotations.readOnlyHint !== true,
+)
+
+/**
+ * Whether tools/list shows gnubok_stage_tool to this key. It has no scope of
+ * its own (the target's scope is what the dispatcher enforces), so without
+ * this a read-only key would be shown a tool whose every call is
+ * scope-denied: listed but unusable, the smell issue #2800 is about.
+ */
+function keyCanStageThroughBridge(keyScopes: ApiKeyScope[]): boolean {
+  return STAGE_BRIDGE_TARGETS.some((t) => {
+    const required = TOOL_SCOPE_MAP[t.name]
+    return !required || hasScope(keyScopes, required)
+  })
+}
+
 // ── MCP Protocol Handler ─────────────────────────────────────
 
 // Build identifier so MCP clients can tell deploys apart in `initialize`
@@ -24177,8 +24607,18 @@ function emitWorkflowStarted(payload: {
  */
 export async function handleMcpRequest(request: Request): Promise<Response> {
   const toolNamespace = resolveMcpToolNamespace(request)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-  const resourceMetadataUrl = new URL('/.well-known/oauth-protected-resource', appUrl)
+  // The challenge must name the metadata document on the SAME host the client
+  // called. Pinned to NEXT_PUBLIC_APP_URL it broke every OAuth attempt against
+  // app.gnubok.se, the machine host existing connectors are configured with:
+  // the 401 pointed at app.accounted.se while the document served on
+  // app.gnubok.se names itself, and clients refuse the mismatch ("Protected
+  // resource ... does not match expected"). resolveDiscoveryBaseUrl is what
+  // the metadata route itself uses, so header and document always agree, and
+  // it reflects allowlisted hosts only: a spoofed Host falls back to canonical.
+  const resourceMetadataUrl = new URL(
+    '/.well-known/oauth-protected-resource',
+    resolveDiscoveryBaseUrl(request),
+  )
   if (toolNamespace === 'accounted') {
     resourceMetadataUrl.searchParams.set('tool_namespace', 'accounted')
   }
@@ -24445,8 +24885,8 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
                 ]
               : []),
             'Discovery:',
-            '• tools/list returns common tool schemas. Call gnubok_search_tools(query="…") for specialized tools: it ranks all capabilities; pass detail="name"|"summary"|"full" to control payload size. If your client cannot invoke a tool that is not in tools/list, reach any READ tool through gnubok_call_tool({tool, arguments}); a WRITE outside tools/list is then out of reach (the bridge refuses writes), so check callable_via on each search hit before planning around it.',
-            '• gnubok_get_agent_briefing returns recommended_tools: ordered per-workflow tool loadouts (categorize_month, close_period, invoice_run, vat_declaration, payroll_month). If your harness defers tool loading, batch-load a whole workflow in one call (e.g. Claude Code ToolSearch select:a,b,c) instead of searching cluster by cluster. Each loadout tool carries callable; when false, blocked_by and note say why (missing scope or search-only write).',
+            '• tools/list returns common tool schemas. Call gnubok_search_tools(query="…") for specialized tools: it ranks all capabilities; pass detail="name"|"summary"|"full" to control payload size. If your client cannot invoke a tool that is not in tools/list, each search hit says how to reach it in callable_via: "call_tool" is a READ, invoke it through gnubok_call_tool({tool, arguments}); "stage_tool" is a WRITE that only stages a pending operation, stage it through gnubok_stage_tool({tool, arguments}) and then approve with gnubok_approve_pending_operation as for any staged write; "none" commits directly and is out of reach from such a client.',
+            '• gnubok_get_agent_briefing returns recommended_tools: ordered per-workflow tool loadouts (categorize_month, close_period, invoice_run, vat_declaration, payroll_month). If your harness defers tool loading, batch-load a whole workflow in one call (e.g. Claude Code ToolSearch select:a,b,c) instead of searching cluster by cluster. Each loadout tool carries callable; when false, blocked_by and note say why (a missing scope, or a write no bridge carries). A callable tool with a note is not in tools/list: the note names the bridge that reaches it.',
             ...(simpleCompanyMode
               ? [
                   companyId
@@ -24468,7 +24908,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
             '• Invoicing: gnubok_list_customers (or gnubok_create_customer) → gnubok_create_invoice → gnubok_send_invoice or gnubok_mark_invoice_as_sent → gnubok_mark_invoice_as_paid. Refund via gnubok_credit_invoice.',
             '• Suppliers: gnubok_list_suppliers (or gnubok_create_supplier) → gnubok_create_supplier_invoice_from_inbox → gnubok_approve_supplier_invoice. Refund via gnubok_credit_supplier_invoice.',
             '• VAT: gnubok_get_vat_report(period_type, year, period). Ruta49 = VAT to pay (positive) or refund (negative). Pass render_ui=true to open the momsdeklaration review widget (claude.ai / Desktop). gnubok_vat_close_check reports filing-readiness blockers.',
-            '• Reporting: gnubok_get_trial_balance / _income_statement / _balance_sheet / _kpi_report / _ar_ledger / _supplier_ledger: all default to the most recent fiscal period. For account roll-ups use gnubok_get_general_ledger; for ad-hoc line queries (free-text, amount/date/source filters) use gnubok_query_journal.',
+            '• Reporting: gnubok_get_trial_balance / _income_statement / _balance_sheet / _kpi_report, plus _ar_ledger / _supplier_ledger through gnubok_call_tool: all default to the most recent fiscal period. For account roll-ups use gnubok_get_general_ledger; for ad-hoc line queries (free-text, amount/date/source filters) use gnubok_query_journal.',
             '• Interactive review UIs (claude.ai / Claude Desktop only): gnubok_get_vat_report(render_ui=true) renders the VAT widget, gnubok_receipt_matcher opens the receipt↔transaction matcher, and gnubok_list_pending_operations(render_ui=true) opens the approval queue where the user approves/rejects with a click. All also return structured data; other clients ignore the UI and use the data.',
             '• Year-end: run gnubok_year_end_readiness first. For kontantmetoden, resolve kontantmetod_cutoff_required with the searchable gnubok_post_kontantmetod_cutoff tool. Then gnubok_run_year_end on the OPEN period (never gnubok_lock_period first): it posts the closing entry, locks and closes the period and seeds the next period\'s opening balances in one step; gnubok_set_opening_balances, gnubok_close_period and gnubok_lock_period are manual-flow tools, not follow-ups. Verify with gnubok_list_fiscal_periods. Each write stages for human approval; closing is irreversible per BFL.',
             '• Payroll: gnubok_create_salary_run → gnubok_calculate_salary_run → gnubok_book_salary_run → gnubok_generate_agi.',
@@ -24528,6 +24968,9 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         // can pick the right tool; calling a protected one is what produces
         // the 401 challenge that starts the connect (and signup) flow.
         if (isAnonymous) return true
+        // Unscoped itself, so gate it on whether this key could stage anything
+        // through it (see keyCanStageThroughBridge).
+        if (t.name === 'gnubok_stage_tool') return keyCanStageThroughBridge(keyScopes)
         const required = TOOL_SCOPE_MAP[t.name]
         return !required || hasScope(keyScopes, required)
       })
@@ -24575,13 +25018,16 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         unknown
       >
 
-      // gnubok_call_tool bridge. Rewrite {tool, arguments} into a direct call
-      // on the inner tool BEFORE resolution, so the scope check, the
+      // The two bridges (gnubok_call_tool for reads, gnubok_stage_tool for
+      // staging writes). Rewrite {tool, arguments} into a direct call on the
+      // inner tool BEFORE resolution, so the scope check, the
       // unknown-argument guard, company routing, the test-key write block, the
       // staging _meta and telemetry below all apply to the real target. A
       // wrapper that called the inner tool's execute() itself would have
       // skipped every one of them.
-      const viaBridge = toCanonicalToolName(outerToolName) === 'gnubok_call_tool'
+      const outerCanonicalName = toCanonicalToolName(outerToolName)
+      const bridge: BridgeKind | null = BRIDGE_TOOLS.get(outerCanonicalName) ?? null
+      const viaBridge = bridge !== null
       const requestedToolName = viaBridge
         ? typeof outerToolArgs.tool === 'string'
           ? outerToolArgs.tool
@@ -24607,22 +25053,19 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       // an anonymous caller never needs the bridge to name them.
       if (isAnonymous && !isPublicTool(toolName)) return unauthorized()
 
-      // The bridge reaches reads only. A write must be named directly so the
-      // client sees its own annotations and its staging/approval contract
-      // rather than a generic wrapper's. An unknown-but-named target falls
-      // through to the unknown-tool handler below, which lists what exists.
-      if (viaBridge && (!requestedToolName || (tool && tool.annotations.readOnlyHint !== true))) {
-        const bridgeError = toToolError(
-          codedError(
-            'VALIDATION_ERROR',
-            requestedToolName
-              ? `${requestedToolName} is not a read-only tool, so gnubok_call_tool will not invoke it. Call ${requestedToolName} directly by name.`
-              : 'gnubok_call_tool requires a "tool" argument naming the read-only tool to invoke.',
-          ),
-          { toolName: 'gnubok_call_tool' },
-        )
+      // Which targets each bridge may name lives in bridgeRefusalReason:
+      // gnubok_call_tool carries reads, gnubok_stage_tool carries unlisted
+      // writes that only stage. Passing this check grants nothing: every guard
+      // below still runs against the real target. An unknown-but-named target
+      // falls through to the unknown-tool handler below, which lists what
+      // exists.
+      const refusal = bridge ? bridgeRefusalReason(bridge, requestedToolName, tool) : null
+      if (refusal) {
+        const bridgeError = toToolError(codedError('VALIDATION_ERROR', refusal), {
+          toolName: outerCanonicalName,
+        })
         emitToolCallTelemetry({
-          tool: 'gnubok_call_tool',
+          tool: outerCanonicalName,
           requiredScope: null,
           actor,
           latencyMs: 0,

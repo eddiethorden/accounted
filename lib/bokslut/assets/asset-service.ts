@@ -1020,3 +1020,108 @@ function disposalAccounts(category: AssetCategory): { gain: string; loss: string
   }
   return { gain: '3973', loss: '7973' }
 }
+
+// ── Register-only delete ─────────────────────────────────────────
+//
+// The anläggningsregister is sidoordnad bokföring (BFL 5 kap. 4 §, BFNAR
+// 2013:2 kap. 4). A row becomes räkenskapsinformation the moment it drives a
+// voucher: a posted planenlig avskrivning (depreciation_schedules with a
+// journal_entry_id) or the avyttring voucher (disposed_at /
+// disposal_journal_entry_id). From then on BFL 7 kap. retention applies and
+// the only exits are disposal and storno. A row that never reached the books
+// (a typo, a Bokio migration test row) is a register entry and nothing else,
+// so removing it changes no bokföringspost and may be done outright.
+//
+// createAsset() posts no acquisition voucher (the purchase is already in the
+// ledger), and no document links point at assets, so those two signals do not
+// exist here. The manual-depreciation ledger heuristic used by the basis
+// correction guard (hasManualDepreciationPosted) is deliberately NOT a delete
+// blocker: a hand-posted avskrivningsverifikat carries no link to the register
+// row, the ledger is untouched by removing the row, and on a shared 12x9
+// account the heuristic would refuse every migrated company's typo rows.
+
+export type AssetDeleteBlockReason = 'disposed' | 'depreciation_posted'
+
+export class AssetDeleteBlockedError extends Error {
+  readonly code = 'ASSET_DELETE_BLOCKED'
+  constructor(readonly reason: AssetDeleteBlockReason) {
+    super(
+      reason === 'disposed'
+        ? 'Cannot delete a disposed asset: the disposal voucher references it. Reverse the disposal with storno first.'
+        : 'Cannot delete an asset with posted depreciation: reverse the depreciation (storno) first, or dispose the asset.',
+    )
+    this.name = 'AssetDeleteBlockedError'
+  }
+}
+
+/**
+ * The single definition of "reached the books". Pure so every door (list
+ * annotation, GET, v1 view, the delete itself) derives `deletable` from the
+ * same rule; the async wrapper below feeds it the schedule check.
+ */
+export function assetDeleteBlockReason(
+  asset: Pick<Asset, 'disposed_at' | 'disposal_journal_entry_id'>,
+  hasPostedDepreciationRows: boolean,
+): AssetDeleteBlockReason | null {
+  if (asset.disposed_at || asset.disposal_journal_entry_id) return 'disposed'
+  if (hasPostedDepreciationRows) return 'depreciation_posted'
+  return null
+}
+
+export async function getAssetDeleteBlock(
+  supabase: SupabaseClient,
+  companyId: string,
+  asset: Asset,
+): Promise<AssetDeleteBlockReason | null> {
+  const disposed = assetDeleteBlockReason(asset, false)
+  if (disposed) return disposed
+  return assetDeleteBlockReason(asset, await hasPostedDepreciation(supabase, companyId, asset.id))
+}
+
+/**
+ * Delete an asset that never reached the books, together with its own
+ * unposted depreciation_schedules drafts. Throws AssetNotFoundError (404) when
+ * the row is not in this company and AssetDeleteBlockedError (409) when a
+ * posted signal exists. Returns the row as it was, for the caller's log line.
+ *
+ * The rule is decided and the delete performed by delete_never_posted_asset
+ * (migration 20260920190200) in ONE transaction, under the asset row lock
+ * that commit_asset_depreciation and commit_asset_disposal also take. A
+ * posting in flight has therefore either committed (and is seen) or waits and
+ * then finds no asset (and posts no voucher): the check-then-delete window
+ * issue #2779 described is gone. The RPC is SECURITY INVOKER, so it still
+ * runs as the caller: the assets_delete / depreciation_schedules_delete RLS
+ * policies and the writer-role trigger apply exactly as before.
+ *
+ * Behind it sits a BEFORE DELETE guard on posted depreciation_schedules rows,
+ * which also fires for the assets FK cascade, so the invariant no longer
+ * depends on this function (or any future caller) checking first.
+ */
+export async function deleteNeverPostedAsset(
+  supabase: SupabaseClient,
+  companyId: string,
+  assetId: string,
+): Promise<Asset> {
+  // Read first only for the 404 and the returned row; it decides nothing.
+  const asset = await getAsset(supabase, companyId, assetId)
+  if (!asset) throw new AssetNotFoundError()
+
+  const { data, error } = await supabase.rpc('delete_never_posted_asset', {
+    p_company_id: companyId,
+    p_asset_id: assetId,
+  })
+  if (error) throw new Error(`Failed to delete asset ${assetId}: ${error.message}`)
+
+  switch (data as string | null) {
+    case 'deleted':
+      return asset
+    case 'disposed':
+    case 'depreciation_posted':
+      throw new AssetDeleteBlockedError(data as AssetDeleteBlockReason)
+    case 'not_found':
+      // Vanished between the read above and the lock: deleted concurrently.
+      throw new AssetNotFoundError()
+    default:
+      throw new Error(`Failed to delete asset ${assetId}: unexpected outcome ${String(data)}`)
+  }
+}
