@@ -90,7 +90,54 @@ describe('getChipState', () => {
       [row({ status: 'pending_selection', consent_expires: at(1 * DAY_MS), last_synced_at: null })],
       { now: NOW },
     )
-    expect(state).toEqual({ kind: 'healthy', mostRecent: null })
+    // Never 'expiring': the consent of a row that syncs nothing is not the
+    // thing to warn about. It is not 'healthy' either (see below).
+    expect(state.kind).not.toBe('expiring')
+  })
+
+  it('says accounts must be chosen when a connection waits for account selection', () => {
+    // Authorized at the bank, picker never saved: the cron and the sync route
+    // both skip the row, so it used to read as 'healthy' while syncing nothing.
+    const state = getChipState(
+      [row({ id: 'waiting', status: 'pending_selection', last_synced_at: null })],
+      { now: NOW },
+    )
+    expect(state).toEqual({ kind: 'selection', connectionId: 'waiting', count: 1 })
+  })
+
+  it('ignores revoked rows next to the waiting one (a superseded earlier attempt)', () => {
+    const state = getChipState(
+      [
+        row({ id: 'old', status: 'revoked', last_synced_at: null }),
+        row({ id: 'waiting', status: 'pending_selection', last_synced_at: null }),
+      ],
+      { now: NOW },
+    )
+    expect(state).toEqual({ kind: 'selection', connectionId: 'waiting', count: 1 })
+  })
+
+  it('keeps a dead connection ahead of a waiting one: only BankID fixes that', () => {
+    const state = getChipState(
+      [row({ id: 'dead', status: 'expired' }), row({ id: 'waiting', status: 'pending_selection' })],
+      { now: NOW },
+    )
+    expect(state).toEqual({ kind: 'attention', count: 1 })
+  })
+
+  it('does not ask for account selection on a consent that already lapsed', () => {
+    const state = getChipState(
+      [row({ status: 'pending_selection', consent_expires: at(-1 * DAY_MS), last_synced_at: null })],
+      { now: NOW },
+    )
+    expect(state.kind).not.toBe('selection')
+  })
+
+  it('stays paused without the bank_sync capability even with a waiting row', () => {
+    const state = getChipState(
+      [row({ status: 'pending_selection', last_synced_at: null })],
+      { now: NOW, hasBankSync: false },
+    )
+    expect(state).toEqual({ kind: 'paused' })
   })
 
   it('reads stale after 36 hours without a sync', () => {

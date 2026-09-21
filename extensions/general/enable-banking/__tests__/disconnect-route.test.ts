@@ -257,6 +257,30 @@ describe('DELETE /disconnect (enable-banking)', () => {
     )
   })
 
+  it('removes a connection waiting for account selection even when Enable Banking says the session is already closed', async () => {
+    // Prod answers 400 {"error":"CLOSED_SESSION"} for a consent the bank has
+    // already dropped. The provider side being gone must never keep the local
+    // row alive: a row that cannot be removed also blocks connecting the same
+    // bank again.
+    mockedDeleteSession.mockRejectedValue(
+      new Error('Failed to revoke session (400): {"error":"CLOSED_SESSION","message":"Session is closed"}'),
+    )
+    const stub = makeStub({
+      connectionRow: { id: 'conn-1', session_id: 'sess-1', status: 'pending_selection', bank_name: 'Lunar' },
+    })
+    const ctx = makeContext(buildSupabase(stub))
+
+    const res = await disconnectRoute.handler(makeRequest({ connection_id: 'conn-1' }), ctx)
+
+    expect(res.status).toBe(200)
+    expect(mockedDeleteSession).toHaveBeenCalledWith('sess-1')
+    expect(stub.connUpdates).toEqual([{ status: 'revoked', session_id: null }])
+    expect(stub.cashUpdates).toHaveLength(1)
+    // Best-effort revoke: a warning, not an error.
+    expect(ctx.log.warn).toHaveBeenCalled()
+    expect(ctx.log.error).not.toHaveBeenCalled()
+  })
+
   it('skips PSD2 session revocation when the connection has no session', async () => {
     const stub = makeStub({
       connectionRow: { id: 'conn-1', session_id: null, status: 'expired', bank_name: 'Lunar' },

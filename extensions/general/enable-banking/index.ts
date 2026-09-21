@@ -546,13 +546,46 @@ export const enableBankingExtension: Extension = {
             if (forceNew !== true) {
               const { data: establishedRow } = await supabase
                 .from('bank_connections')
-                .select('id, status')
+                .select('id, status, consent_expires')
                 .eq('company_id', companyId)
                 .eq('bank_name', resolvedAspspName)
                 .in('status', ['expired', 'error', 'pending_selection'])
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle()
+
+              // A 'pending_selection' row is not dead: the bank is already
+              // authorized and only the account choice is missing (the user
+              // skipped or left the picker). "Förnya samtycke" is the wrong
+              // remedy and is not even offered on such a row, so the generic
+              // answer below left the user with a connection they could
+              // neither finish nor replace. Name the real next step and hand
+              // back the row id so every client can open account selection
+              // for it, even one whose own list does not show the row. Kept
+              // a 409 on purpose: a stale client that treated a 200 as "go to
+              // authorization_url" would navigate to undefined. A row whose
+              // consent has already lapsed has nothing to resume and falls
+              // through to the renewal answer.
+              const waitingRow = establishedRow as
+                | { id: string; status: string; consent_expires?: string | null }
+                | null
+              const consentStillValid =
+                !waitingRow?.consent_expires ||
+                new Date(waitingRow.consent_expires).getTime() > Date.now()
+              if (waitingRow?.status === 'pending_selection' && consentStillValid) {
+                log.info('[enable-banking] Fresh connect meets a connection waiting for account selection', {
+                  existing_id: waitingRow.id,
+                  bank: resolvedAspspName,
+                })
+                return NextResponse.json(
+                  {
+                    error: `Du har redan anslutit ${resolvedAspspName}. Välj vilka konton som ska synkas för att slutföra kopplingen.`,
+                    code: 'PENDING_SELECTION',
+                    existing_connection_id: waitingRow.id,
+                  },
+                  { status: 409 }
+                )
+              }
 
               if (establishedRow) {
                 log.info('[enable-banking] Rejecting fresh connect: dead connection needs renewal', {
