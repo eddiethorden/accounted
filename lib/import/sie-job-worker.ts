@@ -12,6 +12,7 @@ import { computeVoucherNumberRanges } from './sie-import'
 import type { ImportResult, MigrationDocumentation, ParsedSIEFile } from './types'
 import { legacyNotices } from './notices'
 import { buildSIEVatDefaults } from './account-sync'
+import { sweepBankRowsAfterSIEImport } from './sie-post-import-sweep'
 
 const log = createLogger('sie-worker')
 
@@ -154,6 +155,10 @@ export async function runSIEWorker(options: { importId?:string; budgetMs?:number
       if (isSIEJobUnresolved(job.job_state) && job.worker_id === worker) {
         await sieJobRPC(supabase,job,'yield_sie_import_job')
       }
+      // Issue #2835: the import is final here and its period hold is released,
+      // so bank rows can be matched against the new verifikat. Never throws;
+      // the receipt lets the cron finish a sweep this invocation cannot.
+      if (job.job_state === 'completed') await sweepBankRowsAfterSIEImport(supabase,job)
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Unknown SIE worker error'
       log.error('SIE job requires recovery',err as Error,{alert:true,companyId:job.company_id,importId:job.id,phase:job.job_phase})
