@@ -156,12 +156,14 @@ describe('pinned connection at the dispatcher', () => {
     ])
   })
 
-  it('routes a call without company_id to the pin and echoes it as the default', async () => {
+  it('routes a call without company_id to the pin, without a company block (simple mode)', async () => {
     const result = await parseTool(
       await handleMcpRequest(toolCall('gnubok_list_pending_operations', {}, { pin: PINNED_COMPANY_ID }))
     )
     expect(result.isError).toBe(false)
-    expect(result.text.company).toEqual({ company_id: PINNED_COMPANY_ID, name: 'Pinned AB', is_default: true })
+    // A pinned connection is simple company mode by definition: one company,
+    // named once in the instructions, never repeated on results.
+    expect(result.text).not.toHaveProperty('company')
     // The pin check and the call's own resolution both look at the pin only.
     expect(mocks.membershipLookups).toEqual([PINNED_COMPANY_ID, PINNED_COMPANY_ID])
   })
@@ -173,7 +175,8 @@ describe('pinned connection at the dispatcher', () => {
       )
     )
     expect(result.isError).toBe(false)
-    expect((result.text.company as { company_id: string }).company_id).toBe(PINNED_COMPANY_ID)
+    expect(result.text).not.toHaveProperty('company')
+    expect(mocks.membershipLookups).toContain(PINNED_COMPANY_ID)
   })
 
   it('refuses a call naming another company with FORBIDDEN and no candidates', async () => {

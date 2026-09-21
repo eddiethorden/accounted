@@ -154,7 +154,9 @@ describe('key allowlist at the dispatcher', () => {
       await handleMcpRequest(toolCall('gnubok_list_pending_operations', { company_id: ALLOWED_COMPANY_ID }))
     )
     expect(result.isError).toBe(false)
-    expect(result.text.company).toEqual({ company_id: ALLOWED_COMPANY_ID, name: 'Allowed AB', is_default: true })
+    // A key limited to one company is a single-company key: simple company
+    // mode, so the result carries no company block.
+    expect(result.text).not.toHaveProperty('company')
   })
 
   it('answers a member company outside the allowlist with NOT_FOUND and allowlisted candidates only', async () => {

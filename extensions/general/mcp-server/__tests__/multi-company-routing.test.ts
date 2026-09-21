@@ -389,7 +389,7 @@ describe('pinned connection helpers', () => {
     const tool = { name: 'gnubok_list_invoices', inputSchema: { type: 'object', properties: { status: { type: 'string' } } } }
     const free = projectToolInputSchema(tool)
     expect((free.properties as Record<string, unknown>).company_id).toBeDefined()
-    const pinned = projectToolInputSchema(tool, { pinned: true })
+    const pinned = projectToolInputSchema(tool, { omitCompanyId: true })
     expect(pinned).toBe(tool.inputSchema)
     expect((pinned.properties as Record<string, unknown>).company_id).toBeUndefined()
   })
