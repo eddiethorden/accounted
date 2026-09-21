@@ -8,6 +8,7 @@ import { getErrorMessage } from '@/lib/errors/get-error-message'
 import { errorResponse, errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { createSalaryRunWithEmployees } from '@/lib/salary/create-run'
 import { SalaryDeviationPeriodError } from '@/lib/salary/deviation-period'
+import { nextRunPeriod } from '@/lib/salary/next-run-period'
 import { runSalaryCalculation } from '@/lib/salary/run-calculation'
 import { resolveDefaultSeriesForSource } from '@/lib/bookkeeping/voucher-series-resolver'
 
@@ -89,18 +90,11 @@ export const POST = withRouteContext(
         .limit(1)
         .maybeSingle()
 
-      if (latest) {
-        // Number() pins the untyped (any) Supabase row values to `number`,
-        // so periodYear/periodMonth stay narrowed after this block.
-        const latestYear = Number(latest.period_year)
-        const latestMonth = Number(latest.period_month)
-        periodYear = latestMonth === 12 ? latestYear + 1 : latestYear
-        periodMonth = latestMonth === 12 ? 1 : latestMonth + 1
-      } else {
-        const now = new Date()
-        periodYear = now.getFullYear()
-        periodMonth = now.getMonth() + 1
-      }
+      // One rule, shared with the Löner page's button, which names the month
+      // a click creates (lib/salary/next-run-period.ts).
+      const next = nextRunPeriod(latest ? [latest] : [], new Date())
+      periodYear = next.period_year
+      periodMonth = next.period_month
     }
 
     // salary_pay_day is 1–28 by CHECK, so the date exists in every month.

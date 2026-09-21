@@ -7739,6 +7739,7 @@
     "empty_runs_description": "Skapa en lönekörning för att räkna ut löner, skatt och arbetsgivaravgifter.",
     "create_run": "Skapa lönekörning",
     "start_run": "Starta lönekörning",
+    "start_run_for_period": "Starta lönekörning {period}",
     "run_exists_opening": "Lönekörningen finns redan — öppnar den",
     "start_run_failed": "Lönekörningen kunde inte startas",
     "onboarding_title": "Kom igång med lön",

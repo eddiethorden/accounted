@@ -7739,6 +7739,7 @@
     "empty_runs_description": "Create a payroll run to compute wages, tax, and employer contributions.",
     "create_run": "Create payroll run",
     "start_run": "Start payroll run",
+    "start_run_for_period": "Start payroll run {period}",
     "run_exists_opening": "A payroll run already exists — opening it",
     "start_run_failed": "Could not start the payroll run",
     "onboarding_title": "Get started with payroll",
