@@ -141,6 +141,9 @@ describe('GET /api/transactions/[id]/match-supplier-invoice/preview: settlement 
           {
             description: 'Tjänstepension',
             line_total: 10000,
+            // The preview now runs the engine's own builder, which (like the
+            // POST) treats a missing vat_rate as 25 %; the column is NOT NULL.
+            vat_rate: 0,
             vat_amount: 0,
             account_number: '7412',
             apply_slp: true,
@@ -163,6 +166,85 @@ describe('GET /api/transactions/[id]/match-supplier-invoice/preview: settlement 
     expect(body.lines.find((l) => l.account_number === '2514')?.credit_amount).toBe(2426)
     // The pair nets to zero: the bank credit stays at the invoice total.
     expect(body.lines.find((l) => l.account_number === '1930')?.credit_amount).toBe(10000)
+  })
+
+  // #2852: kontantmetoden + öresavrundning. The preview runs the engine's own
+  // buildSupplierInvoiceCashLines with the settledBankSek the POST passes, so
+  // a whole-krona bank row previews the bank amount on the payment account and
+  // the residual on 3740, and the invoice settles in full.
+  it.each([
+    { label: 'rounded UP', bank: 1235, lineTotal: 987.65, vat: 246.91, total: 1234.56, ore: ['3740', 0.44, 0] },
+    { label: 'rounded DOWN', bank: 1234, lineTotal: 987.55, vat: 246.89, total: 1234.44, ore: ['3740', 0, 0.44] },
+  ])('kontantmetod: a $label whole-krona bank row previews the bank amount and the 3740 residual', async ({ bank, lineTotal, vat, total, ore }) => {
+    enqueue({
+      data: { id: TX_UUID, date: '2026-02-01', amount: -bank, currency: 'SEK', amount_sek: null, cash_account_id: null },
+      error: null,
+    })
+    enqueue({
+      data: {
+        id: SI_UUID,
+        supplier_invoice_number: 'LF-1',
+        currency: 'SEK',
+        exchange_rate: null,
+        total,
+        remaining_amount: total,
+        paid_amount: 0,
+        // The flag is OFF: on the match door the bank row decides, exactly as
+        // on the accrual clearing path.
+        ore_rounding: false,
+        vat_treatment: 'standard_25',
+        reverse_charge: false,
+        registration_journal_entry_id: null,
+        supplier: { supplier_type: 'swedish_business' },
+        items: [
+          { description: 'Kontorsmaterial', line_total: lineTotal, vat_rate: 0.25, vat_amount: vat, account_number: '6110' },
+        ],
+      },
+      error: null,
+    })
+    enqueue({ data: { accounting_method: 'cash' }, error: null })
+
+    const res = await GET(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    const { status, body } = await parseJsonResponse<{
+      entry_type: string
+      is_fully_paid: boolean
+      ore_rounding: boolean
+      lines: Array<{ account_number: string; debit_amount: number; credit_amount: number }>
+    }>(res)
+
+    expect(status).toBe(200)
+    expect(body.entry_type).toBe('cash')
+    expect(body.is_fully_paid).toBe(true)
+    expect(body.ore_rounding).toBe(true)
+    // Expense on the item's own account at the ex-VAT amount, VAT added on
+    // 2641 (the hand-rolled preview booked 4000 and subtracted the VAT).
+    expect(body.lines.map((l) => [l.account_number, l.debit_amount, l.credit_amount])).toEqual([
+      ['6110', lineTotal, 0],
+      ['2641', vat, 0],
+      ['1930', 0, bank],
+      ore,
+    ])
+  })
+
+  it('kontantmetod: a shortfall of a krona or more is still refused as a partial', async () => {
+    enqueue({
+      data: { id: TX_UUID, date: '2026-02-01', amount: -1233, currency: 'SEK', amount_sek: null, cash_account_id: null },
+      error: null,
+    })
+    enqueue({
+      data: {
+        id: SI_UUID, currency: 'SEK', exchange_rate: null, total: 1234.44, remaining_amount: 1234.44,
+        paid_amount: 0, registration_journal_entry_id: null, supplier: { supplier_type: 'swedish_business' },
+        items: [{ description: 'x', line_total: 987.55, vat_rate: 0.25, vat_amount: 246.89, account_number: '6110' }],
+      },
+      error: null,
+    })
+    enqueue({ data: { accounting_method: 'cash' }, error: null })
+
+    const res = await GET(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    const { status, body } = await parseJsonResponse<{ error: { code: string } }>(res)
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('SI_CASH_PARTIAL_UNSUPPORTED')
   })
 
   it('previews a credit to the linked cash account when it is not the primary 1930', async () => {

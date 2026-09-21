@@ -11,8 +11,10 @@ import { z } from 'zod'
 import { withRouteContext } from '@/lib/api/with-route-context'
 import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { cashPartialBlockReason } from '@/lib/bookkeeping/booking-mode'
-import { resolveSekAmount } from '@/lib/bookkeeping/currency-utils'
-import { DEFAULT_SUPPLIER_PAYMENT_ACCOUNT } from '@/lib/bookkeeping/supplier-invoice-entries'
+import {
+  buildSupplierInvoiceCashLines,
+  DEFAULT_SUPPLIER_PAYMENT_ACCOUNT,
+} from '@/lib/bookkeeping/supplier-invoice-entries'
 import type { SupplierInvoice, SupplierInvoiceItem } from '@/types'
 
 type PreviewLine = {
@@ -45,7 +47,9 @@ export const GET = withRouteContext(
 
     const { data: invoice, error: invErr } = await supabase
       .from('supplier_invoices')
-      .select('*, items:supplier_invoice_items(*)')
+      // supplier_type drives the reverse-charge lines of the cash entry and the
+      // name goes into its line text, as in the POST handler.
+      .select('*, supplier:suppliers(supplier_type, name), items:supplier_invoice_items(*)')
       .eq('id', id)
       .eq('company_id', companyId)
       .single()
@@ -91,50 +95,44 @@ export const GET = withRouteContext(
 
     if (useCashEntry) {
       entryType = 'cash'
-      const si = invoice as SupplierInvoice & { items?: SupplierInvoiceItem[] }
-      const items = si.items ?? []
-      let totalAmountSek = 0
-      let totalVatSek = 0
-      if (items.length > 0) {
-        for (const it of items) {
-          const lineTotal = resolveSekAmount(it.line_total, null, si.currency, si.exchange_rate)
-          const vat = resolveSekAmount(it.vat_amount, null, si.currency, si.exchange_rate)
-          const expenseAcct = (it as { expense_account?: string | null }).expense_account ?? '4000'
+      // The lines come from buildSupplierInvoiceCashLines, the same pure
+      // builder the POST handler's createSupplierInvoiceCashEntry books from,
+      // with the same inputs (no bank row is known on this door, so no
+      // settledBankSek). This preview used to re-model the entry by hand and
+      // had drifted from it (a non-existent expense_account, VAT subtracted
+      // from an ex-VAT line_total, no reverse-charge or SLP lines, no 3740).
+      // A SEK invoice with display-only öresavrundning now previews the
+      // whole-krona payment and the 3740 residual the POST will book (#2852).
+      const si = invoice as SupplierInvoice & {
+        items?: SupplierInvoiceItem[]
+        supplier?: { supplier_type?: string | null; name?: string | null } | null
+      }
+      try {
+        const built = buildSupplierInvoiceCashLines(
+          si,
+          si.items ?? [],
+          si.supplier?.supplier_type || 'swedish_business',
+          { supplierName: si.supplier?.name ?? undefined, paymentAccount: creditAccount },
+        )
+        for (const l of built.lines) {
           lines.push({
-            account_number: expenseAcct,
-            debit_amount: Math.round((lineTotal - vat) * 100) / 100,
-            credit_amount: 0,
-            description: it.description ?? 'Kostnad',
+            account_number: l.account_number,
+            debit_amount: l.debit_amount,
+            credit_amount: l.credit_amount,
+            description: l.line_description ?? '',
           })
-          totalAmountSek += lineTotal
-          totalVatSek += vat
         }
-      } else {
-        const subSek = resolveSekAmount(si.subtotal, si.subtotal_sek, si.currency, si.exchange_rate)
-        const vatSek = resolveSekAmount(si.vat_amount, si.vat_amount_sek, si.currency, si.exchange_rate)
-        lines.push({
-          account_number: '4000',
-          debit_amount: Math.round(subSek * 100) / 100,
-          credit_amount: 0,
-          description: 'Kostnad',
-        })
-        totalAmountSek = subSek + vatSek
-        totalVatSek = vatSek
+      } catch (err) {
+        // Same refusal the POST handler gives a foreign invoice with no usable
+        // rate (toSekOrThrow), instead of previewing 1 EUR as 1 kr.
+        if ((err as { code?: unknown })?.code === 'SI_FX_RATE_MISSING') {
+          return errorResponseFromCode('SI_FX_RATE_MISSING', log, {
+            requestId,
+            details: { invoice_currency: si.currency },
+          })
+        }
+        throw err
       }
-      if (totalVatSek > 0) {
-        lines.push({
-          account_number: '2641',
-          debit_amount: Math.round(totalVatSek * 100) / 100,
-          credit_amount: 0,
-          description: 'Ingående moms',
-        })
-      }
-      lines.push({
-        account_number: creditAccount,
-        debit_amount: 0,
-        credit_amount: Math.round(totalAmountSek * 100) / 100,
-        description: 'Utbetalning',
-      })
     } else {
       const rounded = Math.round(amount * 100) / 100
       lines.push({

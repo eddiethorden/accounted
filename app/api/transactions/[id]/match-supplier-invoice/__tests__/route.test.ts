@@ -558,8 +558,10 @@ describe('POST /api/transactions/[id]/match-supplier-invoice: settlement account
     expect(mockCreatePaymentEntry).not.toHaveBeenCalled()
     const args = mockCreateCashEntry.mock.calls[0]
     expect(args[8]).toBe('1940')
-    // Pure SEK settlement: no settledBankSek override.
-    expect(args[9]).toBeUndefined()
+    // Pure SEK settlement: the bank amount is handed over so a sub-krona
+    // difference to the invoice total can land on 3740 (#2852). An exact
+    // amount, as here, books exactly as before.
+    expect(args[9]).toBe(500)
   })
 
   it('cash-method branch: falls back to 1930 when the transaction has no linked cash account', async () => {
@@ -816,14 +818,46 @@ describe('POST /api/transactions/[id]/match-supplier-invoice: cash method + FX',
     expect(mockCreateCashEntry).not.toHaveBeenCalled()
   })
 
-  it('does NOT absorb öre under the cash method: a SEK sub-krona diff is rejected as partial', async () => {
-    // Kontantmetoden books the full invoice via the cash entry (not the bank
-    // amount), so folding the 0,25 to 3740 would hide a 1930 discrepancy. The
-    // öre band is accrual-only. Previously the sub-krona shortfall booked the
-    // FULL cash entry while leaving the invoice partially_paid (an over-book
-    // the invoice could never recover from); now it is rejected outright.
+  // #2852: the öre band used to be accrual-only, because the cash builder
+  // credited the payment account with the exact öre total: absorbing would
+  // have marked the invoice paid while 1930 silently drifted from the bank row.
+  // The builder now credits the bank amount and books the residual on 3740,
+  // so a whole-krona payment settles a kontantmetoden invoice in full too.
+  it('absorbs öre under the cash method: a rounded-DOWN whole-krona row settles in full and hands the builder the bank amount', async () => {
     enqueueHappyPath({
       transaction: { amount: -11231, currency: 'SEK' },
+      invoice: { currency: 'SEK', remaining_amount: 11231.25 },
+      accountingMethod: 'cash',
+    })
+    const res = await POST(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    const { status, body } = await parseJsonResponse<{
+      invoice_status: string
+      remaining_amount: number
+      paid_amount: number
+    }>(res)
+    expect(status).toBe(200)
+    expect(mockCreateCashEntry).toHaveBeenCalledTimes(1)
+    expect(mockCreateCashEntry.mock.calls[0][9]).toBe(11231)
+    expect(body.invoice_status).toBe('paid')
+    expect(body.remaining_amount).toBe(0)
+    // The debt settled, not the cash moved: the 0,25 lives on 3740.
+    expect(body.paid_amount).toBe(11231.25)
+  })
+
+  it('absorbs öre under the cash method: a rounded-UP whole-krona row is not an overshoot', async () => {
+    enqueueHappyPath({
+      transaction: { amount: -1235, currency: 'SEK' },
+      invoice: { currency: 'SEK', remaining_amount: 1234.56 },
+      accountingMethod: 'cash',
+    })
+    const res = await POST(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    expect(res.status).toBe(200)
+    expect(mockCreateCashEntry.mock.calls[0][9]).toBe(1235)
+  })
+
+  it('a shortfall of a krona or more under the cash method is still a partial, and still rejected', async () => {
+    enqueueHappyPath({
+      transaction: { amount: -11230, currency: 'SEK' },
       invoice: { currency: 'SEK', remaining_amount: 11231.25 },
       accountingMethod: 'cash',
     })
@@ -833,6 +867,35 @@ describe('POST /api/transactions/[id]/match-supplier-invoice: cash method + FX',
     expect(body.error.code).toBe('SI_CASH_PARTIAL_UNSUPPORTED')
     expect(mockCreateCashEntry).not.toHaveBeenCalled()
     expect(mockCreateJournalEntry).not.toHaveBeenCalled()
+  })
+
+  it('an overshoot of a krona or more under the cash method is still rejected', async () => {
+    enqueueHappyPath({
+      transaction: { amount: -1236, currency: 'SEK' },
+      invoice: { currency: 'SEK', remaining_amount: 1234.56 },
+      accountingMethod: 'cash',
+    })
+    const res = await POST(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    const { status, body } = await parseJsonResponse<{ error: { code: string } }>(res)
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('MATCH_SI_AMOUNT_EXCEEDS_REMAINING')
+    expect(mockCreateCashEntry).not.toHaveBeenCalled()
+  })
+
+  it('a previously part-paid kontantmetoden invoice stays blocked even when the row is within the öre band', async () => {
+    // The rounding residual belongs to the one settling payment of a fully
+    // unpaid invoice; the cash builder books the whole invoice and cannot
+    // complete a partial.
+    enqueueHappyPath({
+      transaction: { amount: -500, currency: 'SEK' },
+      invoice: { currency: 'SEK', paid_amount: 500, remaining_amount: 500.4 },
+      accountingMethod: 'cash',
+    })
+    const res = await POST(makeReq(), createMockRouteParams({ id: TX_UUID }))
+    const { status, body } = await parseJsonResponse<{ error: { code: string } }>(res)
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('SI_CASH_PARTIAL_UNSUPPORTED')
+    expect(mockCreateCashEntry).not.toHaveBeenCalled()
   })
 })
 

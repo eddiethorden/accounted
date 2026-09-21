@@ -20,6 +20,7 @@ import { createLogger } from '@/lib/logger'
 import { roundOre } from '@/lib/money'
 import { creditNatural, debitNatural } from './line-side'
 import { isSupplierInvoiceRoundingItem } from '@/lib/supplier-invoices/rounding-item'
+import { resolveSupplierCashSettlement, supplierOreRoundingLine } from './supplier-payment-lines'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ExpenseClaimLineInput } from '@/lib/expenses/expense-claims-service'
 import type {
@@ -400,36 +401,52 @@ export async function createSupplierInvoicePaymentEntry(
   return createJournalEntry(supabase, companyId, userId, input)
 }
 
+export interface SupplierInvoiceCashLinesOptions {
+  supplierName?: string
+  /** Payment account credited; defaults to DEFAULT_SUPPLIER_PAYMENT_ACCOUNT. */
+  paymentAccount?: string
+  /**
+   * SEK that actually left the bank, when the payment is matched from a bank
+   * row. For a foreign-currency invoice this pins the whole entry to the
+   * PAYMENT-date rate, see the kontantmetoden note below. For a SEK invoice a
+   * sub-krona difference to the debt is booked on 3740 (öresavrundning). Omit
+   * on the mark-paid doors, where no bank row is known: a SEK invoice with
+   * display-only öresavrundning then settles at the whole-krona amount the
+   * user was told to pay.
+   */
+  settledBankSek?: number
+}
+
+export interface SupplierInvoiceCashLinesResult {
+  /** Verifikat header text, also stamped on the expense and payment legs. */
+  description: string
+  lines: CreateJournalEntryLineInput[]
+  /** The payment-account credit in SEK. */
+  bankSek: number
+  /** Öre residual booked on 3740: >0 credit (vinst), <0 debit (förlust), 0 none. */
+  oreDiffSek: number
+}
+
 /**
- * Create journal entry for cash method (kontantmetoden)
- * Combined entry at payment time:
+ * The lines of the kontantmetoden payment verifikat. Pure: no DB calls.
  *
- *   Debit  5xxx/6xxx (per item)      [line_total]
- *   Debit  2641 Ingående moms        [total VAT]
- *   Credit 1930 Företagskonto        [total incl VAT]
+ * Single source of truth for createSupplierInvoiceCashEntry (every commit
+ * door: dashboard and v1 mark-paid, dashboard and v1 match-supplier-invoice)
+ * AND both previews (mark-paid/preview, match-supplier-invoice/preview), so
+ * what the user approves is what gets booked. The previews used to re-model
+ * the entry by hand and had drifted from it.
+ *
+ * Throws SupplierInvoiceFxRateMissingError (toSekOrThrow) for a foreign
+ * invoice with no usable rate.
  */
-export async function createSupplierInvoiceCashEntry(
-  supabase: SupabaseClient,
-  companyId: string,
-  userId: string,
+export function buildSupplierInvoiceCashLines(
   invoice: SupplierInvoice,
   items: SupplierInvoiceItem[],
-  paymentDate: string,
   supplierType: string,
-  supplierName?: string,
-  paymentAccount?: string,
-  // SEK that actually settled the invoice (the amount that left the bank). For
-  // a foreign-currency invoice this pins the whole entry to the PAYMENT-date
-  // rate, see the kontantmetoden note below. Omit for SEK invoices and the
-  // behaviour is byte-identical to before.
-  settledBankSek?: number
-): Promise<JournalEntry | null> {
+  options: SupplierInvoiceCashLinesOptions = {},
+): SupplierInvoiceCashLinesResult {
+  const { supplierName, paymentAccount, settledBankSek } = options
   const creditAccount = paymentAccount || DEFAULT_SUPPLIER_PAYMENT_ACCOUNT
-  const fiscalPeriodId = await findFiscalPeriod(supabase, companyId, paymentDate)
-  if (!fiscalPeriodId) {
-    log.warn('No open fiscal period found for payment date:', paymentDate)
-    return null
-  }
 
   // Under kontantmetoden the booked affärshändelse IS the payment (BFL 5 kap:
   // "bokföring vid betalningstillfället"), so the entire verifikat is translated
@@ -557,17 +574,82 @@ export async function createSupplierInvoiceCashEntry(
   // For reverse charge, intermediate credits (2614/2624/2634) already exist, so we subtract them
   const totalDebits = lines.reduce((sum, l) => sum + l.debit_amount, 0)
   const totalCredits = lines.reduce((sum, l) => sum + l.credit_amount, 0)
+
+  // Öresavrundning (#2852): the payment account must carry what actually
+  // left the bank, not the exact öre debt, or 1930 drifts from the bank row
+  // by up to 50 öre per invoice. The residual goes to 3740 (no VAT), decided
+  // by the same rule as the accrual clearing path. Kontantmetoden books the
+  // affärshändelse at payment, and the generated cash entry only ever settles
+  // an invoice in full from a fully unpaid state (cashPartialBlockReason), so
+  // the residual always belongs to this one settling verifikat. Foreign
+  // invoices are untouched: their bank leg is pinned by the settlement rate.
+  const settlement = resolveSupplierCashSettlement({
+    invoice,
+    owedSek: totalDebits - totalCredits,
+    knownBankSek: isForeign ? undefined : settledBankSek,
+  })
   lines.push({
     account_number: creditAccount,
-    ...creditNatural(totalDebits - totalCredits),
+    ...creditNatural(settlement.oreDiffSek !== 0 ? settlement.bankSek : totalDebits - totalCredits),
     line_description: desc,
     dimensions: defaultDimensions,
+  })
+  if (settlement.oreDiffSek !== 0) {
+    lines.push({
+      ...supplierOreRoundingLine(settlement.oreDiffSek),
+      dimensions: defaultDimensions,
+    })
+  }
+
+  return {
+    description: desc,
+    lines,
+    bankSek: settlement.bankSek,
+    oreDiffSek: settlement.oreDiffSek,
+  }
+}
+
+/**
+ * Create journal entry for cash method (kontantmetoden)
+ * Combined entry at payment time:
+ *
+ *   Debit  5xxx/6xxx (per item)      [line_total]
+ *   Debit  2641 Ingående moms        [total VAT]
+ *   Credit 1930 Företagskonto        [what left the bank]
+ *   Cr/Dr  3740 Öresavrundning       [sub-krona residual, when there is one]
+ *
+ * Lines come from buildSupplierInvoiceCashLines, shared with the previews.
+ */
+export async function createSupplierInvoiceCashEntry(
+  supabase: SupabaseClient,
+  companyId: string,
+  userId: string,
+  invoice: SupplierInvoice,
+  items: SupplierInvoiceItem[],
+  paymentDate: string,
+  supplierType: string,
+  supplierName?: string,
+  paymentAccount?: string,
+  // SEK that actually settled the invoice (the amount that left the bank),
+  // see SupplierInvoiceCashLinesOptions.settledBankSek.
+  settledBankSek?: number
+): Promise<JournalEntry | null> {
+  const fiscalPeriodId = await findFiscalPeriod(supabase, companyId, paymentDate)
+  if (!fiscalPeriodId) {
+    log.warn('No open fiscal period found for payment date:', paymentDate)
+    return null
+  }
+
+  const { description, lines } = buildSupplierInvoiceCashLines(invoice, items, supplierType, {
+    supplierName,
+    paymentAccount,
+    settledBankSek,
   })
 
   const input: CreateJournalEntryInput = {
     fiscal_period_id: fiscalPeriodId,
     entry_date: paymentDate,
-    description: desc,
+    description,
     source_type: 'supplier_invoice_cash_payment',
     source_id: invoice.id,
     lines,

@@ -25,7 +25,10 @@ export interface SupplierInvoiceDisplayFigures {
    * What the user is told to pay: whole kronor when rounding applies, else
    * the exact total. The bank row of a Bankgiro/Swish payment carries this
    * figure. New editor submissions save the adjustment as an invoice item;
-   * legacy display-only rounding is handled when the payment is matched.
+   * legacy display-only rounding is settled against 3740 when the payment is
+   * booked: by buildSupplierPaymentClearingLines under faktureringsmetoden and
+   * by buildSupplierInvoiceCashLines under kontantmetoden, both through
+   * supplierOreResidual (lib/bookkeeping/supplier-payment-lines.ts).
    */
   toPay: number
 }

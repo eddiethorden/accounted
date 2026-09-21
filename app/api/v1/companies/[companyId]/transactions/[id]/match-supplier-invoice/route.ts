@@ -25,6 +25,7 @@ import { findUnresolvableAccounts } from '@/lib/bookkeeping/account-validation'
 import { anchorSupplierInvoiceDocument } from '@/lib/core/documents/supplier-invoice-underlag'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
 import { logMatchEvent } from '@/lib/invoices/match-log'
+import { planSupplierPayment } from '@/lib/invoices/apply-supplier-payment'
 import { clearSettledInvoiceSuggestions } from '@/lib/invoices/clear-settled-invoice-suggestions'
 import { paidAtFromDate } from '@/lib/invoices/paid-at'
 import { eventBus } from '@/lib/events/bus'
@@ -51,6 +52,7 @@ registerEndpoint({
     'Categorizing a direct supplier expense without an invoice: use `:categorize`. Matching to a customer invoice: use `:match-invoice`. Bulk auto-match: `POST /reconciliation/bank/run`.',
   pitfalls: [
     'Cash-method companies can settle a foreign invoice in full (booked at the payment-date rate); only a PARTIAL cash-method payment across currencies is rejected (MATCH_SI_CASH_FX_UNSUPPORTED): pay in full, switch to accrual, or book manually.',
+    'Cash-method öresavrundning: a SEK bank row less than 1 kr off a never-booked SEK invoice (a whole-krona payment of an öre total) settles it in full. The payment account is credited with the bank amount and the residual is booked on 3740 (no VAT); paid_amount records the debt settled, not the cash moved. A difference of 1 kr or more is a partial and still returns SI_CASH_PARTIAL_UNSUPPORTED.',
     'Transaction must be negative (amount < 0). Positive returns MATCH_SI_NOT_EXPENSE.',
     'Supplier invoice must NOT be paid/credited already. paid/credited returns MATCH_SI_ALREADY_PAID; registered/approved/partially_paid/overdue are matchable.',
     'Idempotency-Key is mandatory.',
@@ -280,12 +282,33 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
     const siAlreadyBooked = !!(invoice as { registration_journal_entry_id?: string | null }).registration_journal_entry_id
     const useCashEntry = !siAlreadyBooked && accountingMethod === 'cash'
 
+    // Kontantmetoden öresavrundning (#2852): a whole-krona SEK bank row within
+    // the öre band of the remaining balance (1 234,00 or 1 235,00 on 1 234,44)
+    // settles the invoice in full; the cash builder credits the payment account
+    // with the bank amount and books the residual on 3740. Decided by the same
+    // planSupplierPayment rule the dashboard route uses, so the two doors agree.
+    // Scoped to the generated cash entry: this route's accrual clearing keeps
+    // its existing ledger math.
+    const isPureSek = transaction.currency === 'SEK' && invoice.currency === 'SEK'
+    const cashOrePlan =
+      useCashEntry && isPureSek
+        ? planSupplierPayment(invoice, paymentAmountInvoiceCurrency, { absorbOreRounding: true })
+        : null
+    const cashOreSettled = cashOrePlan?.ok === true && cashOrePlan.plan.oreSettled
+    // Debt settled in the invoice's currency: the whole remaining balance when
+    // an öre residual is absorbed (the residual lives on 3740, not on the
+    // supplier ledger), else the payment amount.
+    const settledInvoiceCurrency = cashOreSettled
+      ? invoice.remaining_amount
+      : paymentAmountInvoiceCurrency
+
     // Full settlement = the bank amount pays off the whole remaining balance.
     // Cross-currency always settles the remaining (paymentAmountInvoiceCurrency
     // is clamped to invoice.remaining_amount above).
     const fullSettlement =
       transaction.currency !== invoice.currency ||
-      txAmountAbs >= invoice.remaining_amount - 0.005
+      txAmountAbs >= invoice.remaining_amount - 0.005 ||
+      cashOreSettled
 
     // Under kontantmetoden the expense is recognised AT PAYMENT (payment-date
     // rate), so a full foreign-currency settlement has no kursdifferens: the
@@ -371,10 +394,13 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
           // internal 1930 default only stands for unlinked transactions, via
           // resolveSettlementAccount's own fallback (#1000).
           paymentAccount,
-          // Pin a foreign-currency settlement to the payment-date rate so the
-          // settlement account equals the bank movement. No-op for SEK /
-          // same-rate settlements.
-          exchangeRateDifference !== 0 && fullSettlement ? actualBankSek : undefined,
+          // The SEK that left the bank. Foreign invoice: pins the settlement
+          // to the payment-date rate so the settlement account equals the bank
+          // movement; a no-op for same-rate settlements. Pure SEK: a sub-krona
+          // difference to the invoice total is booked on 3740 (öresavrundning).
+          (isPureSek || exchangeRateDifference !== 0) && fullSettlement
+            ? actualBankSek
+            : undefined,
         )
         if (je) journalEntryId = je.id
       } else {
@@ -420,10 +446,10 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
 
     const newRemaining = Math.max(
       0,
-      Math.round((invoice.remaining_amount - paymentAmountInvoiceCurrency) * 100) / 100,
+      Math.round((invoice.remaining_amount - settledInvoiceCurrency) * 100) / 100,
     )
     const newPaidAmount =
-      Math.round((invoice.paid_amount + paymentAmountInvoiceCurrency) * 100) / 100
+      Math.round((invoice.paid_amount + settledInvoiceCurrency) * 100) / 100
     const isFullyPaid = newRemaining <= 0
     const newStatus = isFullyPaid ? 'paid' : 'partially_paid'
     const paidAt = isFullyPaid ? paidAtFromDate(transaction.date) : null
@@ -468,7 +494,10 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string; id: string 
         company_id: ctx.companyId!,
         supplier_invoice_id,
         payment_date: transaction.date,
-        amount: paymentAmountInvoiceCurrency,
+        // The debt settled, including any 3740 adjustment (payment rows
+        // reconstruct and reverse paid_amount). Actual cash stays on the
+        // linked bank transaction and the payment account's journal line.
+        amount: settledInvoiceCurrency,
         currency: invoice.currency,
         journal_entry_id: journalEntryId,
         transaction_id: txId,
