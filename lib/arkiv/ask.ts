@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { DOCUMENT_TEXT_NOTICE, fenceDocumentText } from './untrusted'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAiService, getAiStatus } from '@/lib/ai'
 import { recordActivity, softwareAgent } from '@/lib/documents/provenance'
@@ -65,7 +66,7 @@ const ANSWER_SCHEMA = {
 } as const
 
 export function buildAskSystem(company: { name: string }, fileName: string): string {
-  return `You answer one question about one document in the accounting archive of ${company.name}. The document is "${fileName}". Answer only from the page text you are given: never infer, never compute, never use outside knowledge. Quote the exact fragment the answer comes from and say which page. If the document does not answer the question, say so (not_found true) and leave answer null. Never write a placeholder such as "not stated".`
+  return `You answer one question about one document in the accounting archive of ${company.name}. The document is "${fileName}". Answer only from the page text you are given: never infer, never compute, never use outside knowledge. Quote the exact fragment the answer comes from and say which page. If the document does not answer the question, say so (not_found true) and leave answer null. Never write a placeholder such as "not stated". ${DOCUMENT_TEXT_NOTICE}`
 }
 
 /** The pages sent with a question: the ones asked for, else the whole document when it fits, else the pages that mention the question. */
@@ -163,7 +164,7 @@ export async function askDocument(
     const sent = selectAskPages(pages, input.question, input.pages)
     if (sent.length === 0) return { status: 'skipped', reason: 'no_text' }
     const system = buildAskSystem(input.company, d.file_name)
-    const prompt = `${sent.map((p) => `=== PAGE ${p.pageNo} ===\n${p.text}`).join('\n\n')}\n\nQUESTION: ${input.question}`
+    const prompt = `${sent.map((p) => `=== PAGE ${p.pageNo} ===\n${fenceDocumentText(p.text, { page: p.pageNo })}`).join('\n\n')}\n\nQUESTION: ${input.question}`
     const startedAt = new Date().toISOString()
     const result = await getAiService().generateStructured({
       tier: 'extraction',
