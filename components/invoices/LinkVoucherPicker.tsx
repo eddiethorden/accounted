@@ -84,16 +84,34 @@ export default function LinkVoucherPicker({
   const { toast } = useToast()
   const t = useTranslations('invoice_link_voucher')
 
-  // Supplier mode links against an AP debit (2440), kontantmetoden against a
-  // bank/cash debit (19xx), and the accrual customer mode against an AR credit
-  // (1510): the intro + empty copy must describe the right side, otherwise the
-  // empty state tells the user to look for a verifikat that can never match
-  // (support case 2026-07-26: supplier dialog spoke of kundfordran/1510).
+  // Supplier mode links against an AP debit (2440) or, for a kontantmetod
+  // invoice that was never booked at registration, a bank/cash credit (19xx);
+  // the customer mode against a bank/cash debit (19xx) on kontantmetoden and an
+  // AR credit (1510) otherwise. The intro + empty copy must describe the right
+  // side, otherwise the empty state tells the user to look for a verifikat
+  // that can never match (support case 2026-07-26: supplier dialog spoke of
+  // kundfordran/1510; issue #2854: it told a kontantmetod user to register a
+  // new payment, which books the cost twice).
+  //
+  // The supplier side is NOT derived here: the candidates response says which
+  // side the server searched (supplier_invoice_settlement_side), and the copy
+  // follows it. Until it arrives the intro describes nothing side-specific.
   const isSupplier = mode === 'supplier_invoice'
   const isCash = mode === 'customer_invoice' && accountingMethod === 'cash'
-  const introKey = isSupplier ? 'intro_supplier' : isCash ? 'intro_cash' : 'intro'
+  const [supplierSide, setSupplierSide] = useState<'ap_debit' | 'bank_credit' | null>(null)
+  const introKey = isSupplier
+    ? supplierSide === 'bank_credit'
+      ? 'intro_supplier_cash'
+      : supplierSide === 'ap_debit'
+        ? 'intro_supplier'
+        : 'intro_supplier_pending'
+    : isCash
+      ? 'intro_cash'
+      : 'intro'
   const emptyDescriptionKey = isSupplier
-    ? 'empty_description_supplier'
+    ? supplierSide === 'bank_credit'
+      ? 'empty_description_supplier_cash'
+      : 'empty_description_supplier'
     : isCash
       ? 'empty_description_cash'
       : 'empty_description'
@@ -124,6 +142,8 @@ export default function LinkVoucherPicker({
         }
         const body = await response.json()
         if (cancelled) return
+        const side = body?.data?.settlement_side
+        setSupplierSide(side === 'bank_credit' || side === 'ap_debit' ? side : 'ap_debit')
         setCandidates(body?.data?.candidates ?? [])
       } catch {
         if (!cancelled) setCandidates([])

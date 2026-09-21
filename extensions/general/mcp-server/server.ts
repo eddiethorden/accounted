@@ -331,6 +331,7 @@ import {
   findMatchingVouchersForSupplierInvoice,
   validateVoucherForSupplierInvoiceLink,
 } from '@/lib/invoices/supplier-voucher-matching'
+import { resolveSupplierSettlementSide } from '@/lib/invoices/supplier-settlement-side'
 import { findFiscalPeriod, getSwedishLocalDate, validateBalance } from '@/lib/bookkeeping/engine'
 import { countUnbookedInPeriod, findNextPeriod, lockPeriod, resolvePeriodStatusForDate, type PeriodStatusForDate } from '@/lib/core/bookkeeping/period-service'
 import { validateYearEndReadiness, previewYearEndClosing } from '@/lib/core/bookkeeping/year-end-service'
@@ -12763,7 +12764,7 @@ export const tools: McpTool[] = [
     name: 'gnubok_find_voucher_candidates_for_supplier_invoice',
     keywords: ['verifikat', 'koppla'],
     title: 'Find Voucher Candidates (Supplier Invoice)',
-    description: 'List posted verifikat that debit leverantörsskuld (2440) and could be this supplier invoice\'s payment. Call before gnubok_link_supplier_invoice_to_voucher to mark the leverantörsfaktura paid (no new bokföring).',
+    description: "List posted verifikat that could be this supplier invoice's payment (debit 244x; kontantmetoden with no registration verifikat: credit 19xx). Call before gnubok_link_supplier_invoice_to_voucher to mark the leverantörsfaktura paid (no new bokföring).",
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -12779,6 +12780,7 @@ export const tools: McpTool[] = [
       properties: {
         supplier_invoice_id: { type: 'string' },
         invoice_status: { type: 'string' },
+        settlement_side: { type: 'string', enum: ['ap_debit', 'bank_credit'] },
         candidates: { type: 'array', items: { type: 'object' } },
       },
       required: ['supplier_invoice_id', 'candidates'],
@@ -12807,15 +12809,17 @@ export const tools: McpTool[] = [
         }
       }
 
+      const settlementSide = await resolveSupplierSettlementSide(supabase, companyId, supplierInvoiceId)
       const candidates = await findMatchingVouchersForSupplierInvoice(
         supabase,
         companyId,
         invoice as never,
-        { limit },
+        { limit, settlementSide },
       )
       return {
         supplier_invoice_id: supplierInvoiceId,
         invoice_status: invoice.status,
+        settlement_side: settlementSide.side,
         candidates,
       }
     },
@@ -12825,7 +12829,7 @@ export const tools: McpTool[] = [
     name: 'gnubok_link_supplier_invoice_to_voucher',
     keywords: ['koppla leverantörsfaktura', 'verifikat'],
     title: 'Link Supplier Invoice to Voucher',
-    description: 'Markera en leverantörsfaktura som betald via länk till en befintlig verifikation som debiterar leverantörsskuld (2440). Skapar ingen ny verifikation. Kör gnubok_find_voucher_candidates_for_supplier_invoice först. Stages.',
+    description: 'Markera en leverantörsfaktura som betald via länk till en befintlig verifikation (debiterar 244x; kontantmetoden utan registreringsverifikat: krediterar 19xx). Skapar ingen ny verifikation. Kör gnubok_find_voucher_candidates_for_supplier_invoice först. Stages.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -12890,6 +12894,7 @@ export const tools: McpTool[] = [
           voucher_date: validation.voucher.entry_date,
           voucher_description: validation.voucher.description,
           ap_debit_amount: validation.apDebitAmount,
+          settlement_side: validation.settlementSide,
           payment_amount: validation.paymentAmount,
           will_be_fully_paid: validation.isFullyPaid,
           remaining_after: validation.remainingAfter,

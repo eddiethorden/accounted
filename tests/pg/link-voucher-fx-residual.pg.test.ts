@@ -51,6 +51,17 @@ const UNBOOKED_ONLY_MIGRATION_SQL = readFileSync(
   'utf8',
 )
 
+// 20260921190300 replaces link_supplier_invoice_to_voucher to add the
+// kontantmetod (19xx credit) side. Replayed last so every supplier test below,
+// all of them on the 244x side, runs against THAT body: nothing here may move.
+const SUPPLIER_KONTANTMETOD_MIGRATION_SQL = readFileSync(
+  path.join(
+    process.cwd(),
+    'supabase/migrations/20260921190300_link_supplier_invoice_to_voucher_kontantmetod.sql',
+  ),
+  'utf8',
+)
+
 let seq = 0
 function nextSeq(): number {
   return (Date.now() % 1_000_000) * 1000 + seq++
@@ -65,6 +76,7 @@ async function withFxMigration(fn: (client: PoolClient) => Promise<void>): Promi
     await client.query(MIGRATION_SQL)
     await client.query(CASH_MIGRATION_SQL)
     await client.query(UNBOOKED_ONLY_MIGRATION_SQL)
+    await client.query(SUPPLIER_KONTANTMETOD_MIGRATION_SQL)
     await fn(client)
   } finally {
     await client.query('ROLLBACK').catch(() => {})

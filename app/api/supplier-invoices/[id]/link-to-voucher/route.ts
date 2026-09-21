@@ -12,11 +12,14 @@ ensureInitialized()
  * POST /api/supplier-invoices/[id]/link-to-voucher
  *
  * Marks a supplier invoice as paid (or partially paid) by linking an existing
- * posted verifikat whose lines already debit AP (2440). Creates no new journal
- * entry: only a supplier_invoice_payments row + invoice status advance.
+ * posted verifikat that already carries its settlement: a 244x debit, or, for
+ * a kontantmetod company's invoice with no registration verifikat, a 19xx
+ * credit (the side is decided by supplier_invoice_settlement_side, inside the
+ * RPC). Creates no new journal entry: only a supplier_invoice_payments row +
+ * invoice status advance.
  *
- * Rejects with LINK_SI_VOUCHER_NO_AP_DEBIT for vouchers that book the expense
- * directly without going through 2440: those require gnubok_correct_entry first.
+ * Rejects with LINK_SI_VOUCHER_NO_AP_DEBIT / LINK_SI_VOUCHER_NO_BANK_CREDIT
+ * for a voucher without that side.
  */
 export const POST = withRouteContext(
   'supplier_invoice.link_to_voucher',

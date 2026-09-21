@@ -28,6 +28,17 @@ import {
 } from '../supplier-voucher-matching'
 import { makeInvoice, makeSupplierInvoice, createQueuedMockSupabase } from '@/tests/helpers'
 
+// Which voucher line settles the invoice is a DB function
+// (supplier_invoice_settlement_side, read through supplier-settlement-side.ts).
+// Stubbed so the lookup takes no slot in the queued Supabase mock. Every test
+// in this file is the 244x-debit side and is unchanged by issue #2854; the
+// 19xx-credit side is in supplier-voucher-matching-kontantmetod.test.ts. The
+// customer-side matcher in this file does not use it.
+vi.mock('@/lib/invoices/supplier-settlement-side', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../supplier-settlement-side')>()
+  return { ...actual, resolveSupplierSettlementSide: async () => actual.AP_DEBIT_SIDE }
+})
+
 // ============================================================
 // A mock that actually executes the filters
 // ============================================================

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { withRouteContext } from '@/lib/api/with-route-context'
 import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { findMatchingVouchersForSupplierInvoice } from '@/lib/invoices/supplier-voucher-matching'
+import { resolveSupplierSettlementSide } from '@/lib/invoices/supplier-settlement-side'
 import type { Supplier, SupplierInvoice } from '@/types'
 
 /**
@@ -10,6 +11,11 @@ import type { Supplier, SupplierInvoice } from '@/types'
  * Returns posted verifikat candidates that could be linked as payment for
  * this supplier invoice. Used by the "Befintlig verifikation" tab in the
  * supplier-invoice mark-paid dialog to auto-suggest matches.
+ *
+ * `settlement_side` says which line of a voucher was searched: `ap_debit`
+ * (244x debit) or `bank_credit` (19xx credit, a kontantmetod company's invoice
+ * with no registration verifikat). The dialog words its intro and empty state
+ * from it, so the screen never decides the side on its own.
  */
 export const GET = withRouteContext(
   'supplier_invoice.voucher_candidates',
@@ -32,8 +38,16 @@ export const GET = withRouteContext(
       return errorResponseFromCode('LINK_SI_VOUCHER_INVOICE_NOT_FOUND', log, { requestId })
     }
 
+    const settlementSide = await resolveSupplierSettlementSide(supabase, companyId, id)
+
     if (!['registered', 'approved', 'overdue', 'partially_paid'].includes(invoice.status)) {
-      return NextResponse.json({ data: { candidates: [], invoice_status: invoice.status } })
+      return NextResponse.json({
+        data: {
+          candidates: [],
+          invoice_status: invoice.status,
+          settlement_side: settlementSide.side,
+        },
+      })
     }
 
     const candidates = await findMatchingVouchersForSupplierInvoice(
@@ -43,8 +57,9 @@ export const GET = withRouteContext(
       // from the join shorthand. The matcher only reads `supplier?.name`, so
       // cast through unknown to the runtime shape it expects.
       invoice as unknown as SupplierInvoice & { supplier?: Supplier },
+      { settlementSide },
     )
 
-    return NextResponse.json({ data: { candidates } })
+    return NextResponse.json({ data: { candidates, settlement_side: settlementSide.side } })
   },
 )

@@ -4080,6 +4080,29 @@ const LINK_SI_VOUCHER: Record<string, StructuredErrorEntry> = {
       tool: 'gnubok_correct_entry',
     },
   },
+  // The three below only arise on the kontantmetod side (19xx credit): see
+  // supplier_invoice_settlement_side, migration 20260921190300.
+  LINK_SI_VOUCHER_NO_BANK_CREDIT: {
+    httpStatus: 400,
+    message_sv:
+      'Verifikationen krediterar inget kassa- eller bankkonto (19xx), så den kan inte vara betalningen av fakturan. Välj verifikationen där pengarna lämnade kontot.',
+    message_en:
+      'The journal entry does not credit a cash or bank account (19xx), so it cannot be the payment of this invoice. On kontantmetoden the payment verifikat is the one where the money left the account (Dr cost, Dr 2641 / Cr 19xx).',
+  },
+  LINK_SI_VOUCHER_FULLY_ALLOCATED: {
+    httpStatus: 409,
+    message_sv:
+      'Verifikationens utbetalning är redan kopplad till andra leverantörsfakturor och har inget belopp kvar. Välj en annan verifikation.',
+    message_en:
+      'The voucher\'s bank credit is already used by payment rows for other supplier invoices; nothing is left to settle this one. Pick a different voucher.',
+  },
+  LINK_SI_VOUCHER_CUTOFF_ALREADY_POSTED: {
+    httpStatus: 409,
+    message_sv:
+      'Bokslutets periodisering enligt kontantmetoden är redan bokförd för ett år som omfattar både fakturan och betalningen, och den räknade fakturan som obetald. Rätta periodiseringen först (storno och bokför om), koppla sedan verifikationen.',
+    message_en:
+      'A posted kontantmetod year-end cut-off covers both the invoice and the payment voucher and counted this invoice as unpaid. Correct the cut-off first (storno and re-post), then link the voucher.',
+  },
   LINK_SI_VOUCHER_ALREADY_LINKED: {
     httpStatus: 409,
     message_sv: 'Verifikationen är redan länkad till den här leverantörsfakturan.',
@@ -4088,9 +4111,9 @@ const LINK_SI_VOUCHER: Record<string, StructuredErrorEntry> = {
   LINK_SI_VOUCHER_AMOUNT_EXCEEDS_REMAINING: {
     httpStatus: 400,
     message_sv:
-      'Verifikationens leverantörsskuldsdebitering är större än leverantörsfakturans återstående belopp. Verifikationen täcker fler fakturor: välj en annan verifikation eller rätta beloppet först.',
+      'Verifikationens belopp är större än leverantörsfakturans återstående belopp. Verifikationen täcker fler fakturor: välj en annan verifikation eller rätta beloppet först.',
     message_en:
-      'The voucher\'s AP debit exceeds the supplier invoice\'s remaining balance. Split the voucher across multiple supplier invoices via gnubok_correct_entry first, or pick a different voucher.',
+      'The voucher\'s settlement amount (details.ap_debit: the 244x debit, or details.bank_credit: the 19xx credit on kontantmetoden) exceeds the supplier invoice\'s remaining balance. Split the voucher across multiple supplier invoices via gnubok_correct_entry first, or pick a different voucher.',
   },
   LINK_SI_VOUCHER_CURRENCY_MISMATCH: {
     httpStatus: 400,
