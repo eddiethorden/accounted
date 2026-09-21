@@ -25,10 +25,10 @@ export type RecordKind = 'document' | 'agreement' | 'party' | 'journal_entry' | 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function parseRecordRef(ref: unknown): { kind: RecordKind; id: string } {
-  if (typeof ref !== 'string') throw new Error('record_ref must be a string like document:<uuid>')
+  if (typeof ref !== 'string') throw invalid('record_ref must be a string like document:<uuid>')
   const [kind, id] = ref.split(':')
   if (!['document', 'agreement', 'party', 'journal_entry', 'fact'].includes(kind) || !UUID.test(id ?? '')) {
-    throw new Error('record_ref must be <document|agreement|party|journal_entry|fact>:<uuid>')
+    throw invalid('record_ref must be <document|agreement|party|journal_entry|fact>:<uuid>')
   }
   return { kind: kind as RecordKind, id }
 }
@@ -37,8 +37,17 @@ const recordRef = (kind: RecordKind, id: string) => `${kind}:${id}`
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Coded so the dispatch envelope resolves a registry entry instead of
+ * UNKNOWN_ERROR ("Något gick fel", which reads as a crash and invites a
+ * retry). The English text is what the agent reads and acts on.
+ */
+const coded = (code: string, message: string): Error => Object.assign(new Error(message), { code })
+const invalid = (message: string) => coded('VALIDATION_ERROR', message)
+const notFound = (message: string) => coded('NOT_FOUND', message)
+
 function assertEnabled(companyId: string): void {
-  if (!isArkivEnabled(companyId)) throw new Error('Arkiv is not enabled for this company yet')
+  if (!isArkivEnabled(companyId)) throw coded('ARKIV_NOT_ENABLED', 'Arkiv is not enabled for this company yet. Nothing to retry: the other tools work as usual.')
 }
 
 interface Deps {
@@ -355,7 +364,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       async execute(args, companyId, _userId, supabase) {
         assertEnabled(companyId)
         const query = String(args.query ?? '').trim()
-        if (query.length < 2) throw new Error('query must be at least two characters')
+        if (query.length < 2) throw invalid('query must be at least two characters')
         const kinds = new Set<string>(Array.isArray(args.kinds) && args.kinds.length ? (args.kinds as string[]) : ['document', 'agreement', 'fact'])
         const limit = Math.min(50, Math.max(1, Number(args.limit ?? 10)))
         const items: Array<{
@@ -475,28 +484,28 @@ export function createArkivTools(deps: Deps): McpTool[] {
         switch (ref.kind) {
           case 'document': {
             const document = await documentRecord(supabase, companyId, ref.id)
-            if (!document) throw new Error('Record not found')
+            if (!document) throw notFound('Record not found')
             return { ...base, document }
           }
           case 'agreement': {
             const agreement = await agreementRecord(supabase, companyId, ref.id, asOf)
-            if (!agreement) throw new Error('Record not found')
+            if (!agreement) throw notFound('Record not found')
             return { ...base, agreement }
           }
           case 'party': {
             const party = await partyRecord(supabase, companyId, ref.id)
-            if (!party) throw new Error('Record not found')
+            if (!party) throw notFound('Record not found')
             return { ...base, party }
           }
           case 'journal_entry': {
             const journalEntry = await journalEntryRecord(supabase, companyId, ref.id)
-            if (!journalEntry) throw new Error('Record not found')
+            if (!journalEntry) throw notFound('Record not found')
             return { ...base, journal_entry: journalEntry }
           }
           case 'fact': {
             const { data, error } = await supabase.from('company_facts').select('*').eq('id', ref.id).eq('company_id', companyId).maybeSingle()
             if (error) throw dbError(error)
-            if (!data) throw new Error('Record not found')
+            if (!data) throw notFound('Record not found')
             return { ...base, fact: factView(data as FactRow) }
           }
         }
@@ -586,7 +595,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
         assertEnabled(companyId)
         const subject = parseSubjectRef(args.subject_ref, companyId)
         const predicate = typeof args.predicate === 'string' && args.predicate ? args.predicate : null
-        if (predicate && !PREDICATES[predicate]) throw new Error(`unknown predicate ${predicate}`)
+        if (predicate && !PREDICATES[predicate]) throw invalid(`unknown predicate ${predicate}`)
         const facts = await factHistory(supabase, companyId, subject, predicate)
         return { subject_ref: String(args.subject_ref), facts: facts.map(factView) }
       },
@@ -596,7 +605,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'fråga dokument', 'vad står det', 'villkor', 'avtal', 'läs'],
       title: 'Ask Document',
       description:
-        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Nothing is pre-extracted for this: use it for any clause or detail the record does not carry. Answer and quote come from the file and arrive fenced as untrusted data.',
+        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Use it for any clause or detail the record does not carry. Answer and quote come from the file, fenced as untrusted data.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -643,11 +652,11 @@ export function createArkivTools(deps: Deps): McpTool[] {
       async execute(args, companyId, _userId, supabase) {
         assertEnabled(companyId)
         const ref = parseRecordRef(String(args.record_ref ?? ''))
-        if (!ref || ref.kind !== 'document') throw new Error('record_ref must be document:<uuid>')
+        if (!ref || ref.kind !== 'document') throw invalid('record_ref must be document:<uuid>')
         const question = String(args.question ?? '').trim()
-        if (question.length < 3) throw new Error('question is required')
+        if (question.length < 3) throw invalid('question is required')
         const pages = Array.isArray(args.pages) ? [...new Set(args.pages.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1))] : undefined
-        if (pages && pages.length === 0) throw new Error('pages must hold page numbers from 1 upwards')
+        if (pages && pages.length === 0) throw invalid('pages must hold page numbers from 1 upwards')
         const { data: company, error: companyError } = await supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
         if (companyError) throw dbError(companyError)
         const out = await askDocument(supabase, {
@@ -659,7 +668,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
           askedBy: { agentName: 'mcp.ask', agentVersion: '1' },
         })
         if (out.status === 'skipped') {
-          if (out.reason === 'not_found') throw new Error('No such document in this company')
+          if (out.reason === 'not_found') throw notFound('No such document in this company')
           throw new Error(out.reason === 'ai_unconfigured' ? 'The reader is not configured on this installation' : 'The document has no readable text')
         }
         if (out.status === 'error') throw new Error(`The reader failed: ${out.reason}`)
@@ -714,11 +723,13 @@ export function createArkivTools(deps: Deps): McpTool[] {
       async execute(args, companyId, _userId, supabase) {
         assertEnabled(companyId)
         const ref = String(args.ref ?? '').trim()
-        if (!/^[a-z_]+:[A-Za-z0-9_-]+$/.test(ref)) throw new Error('ref must look like kind:id, as in the graph')
+        if (!/^[a-z_]+:[A-Za-z0-9_-]+$/.test(ref)) throw invalid('ref must look like kind:id, as in the graph')
         const depth = Math.max(1, Math.min(3, Number(args.depth ?? 1) || 1))
         const graph = await getCompanyGraph(supabase, companyId)
+        // The map hands out company:<id> as the company's record_ref, but the company is the whole graph, not a node in it.
+        if (ref === graph.company.ref) throw invalid('The company is the whole graph, not a node: read Accounted://arkiv/graph, or pass an account, party, agreement, document or fact ref from it')
         const n = neighbourhoodOf(graph, ref, depth)
-        if (!n) throw new Error(`No node ${ref} in the company graph; read Accounted://arkiv/graph for the refs that exist`)
+        if (!n) throw notFound(`No node ${ref} in the company graph; read Accounted://arkiv/graph for the refs that exist`)
         return { center: n.center, depth: n.depth, node_count: n.nodes.length, link_count: n.links.length, capped: n.capped, computed_at: graph.computed_at, text: n.text, nodes: n.nodes, links: n.links }
       },
     },
@@ -752,13 +763,13 @@ export function createArkivTools(deps: Deps): McpTool[] {
       async execute(args, companyId, userId, supabase) {
         assertEnabled(companyId)
         const findingId = String(args.finding_id ?? '').trim()
-        if (!UUID_RE.test(findingId)) throw new Error('finding_id must be a uuid from Accounted://arkiv/missing')
+        if (!UUID_RE.test(findingId)) throw invalid('finding_id must be a uuid from Accounted://arkiv/missing')
         const resolution = String(args.resolution ?? '')
-        if (!['uploaded', 'not_exists', 'not_applicable'].includes(resolution)) throw new Error('resolution must be uploaded, not_exists or not_applicable')
+        if (!['uploaded', 'not_exists', 'not_applicable'].includes(resolution)) throw invalid('resolution must be uploaded, not_exists or not_applicable')
         let documentId: string | null = null
         if (args.document_ref != null) {
           const ref = parseRecordRef(String(args.document_ref))
-          if (!ref || ref.kind !== 'document') throw new Error('document_ref must be document:<uuid>')
+          if (!ref || ref.kind !== 'document') throw invalid('document_ref must be document:<uuid>')
           documentId = ref.id
         }
         const { data: finding, error: findError } = await supabase
@@ -770,7 +781,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
           .eq('status', 'open')
           .maybeSingle()
         if (findError) throw dbError(findError)
-        if (!finding) throw new Error('No open missing-document item with that id in this company')
+        if (!finding) throw notFound('No open missing-document item with that id in this company')
         const detail: Record<string, unknown> = { ...((finding as { detail: Record<string, unknown> }).detail ?? {}), ...(documentId ? { resolved_document_id: documentId } : {}) }
         const status = resolution === 'uploaded' ? 'resolved' : 'dismissed'
         const { error: updateError } = await supabase
@@ -793,10 +804,10 @@ export function createArkivTools(deps: Deps): McpTool[] {
         type: 'object',
         additionalProperties: false,
         properties: {
-          document_id: { type: 'string', description: 'UUID of the document.' },
+          record_ref: { type: 'string', description: 'document:<uuid>, as every other Arkiv tool takes it.' },
+          document_id: { type: 'string', description: 'The bare document UUID, instead of record_ref.' },
           page: { type: 'integer', minimum: 1, description: 'Page number. Default 1.' },
         },
-        required: ['document_id'],
       },
       outputSchema: {
         type: 'object',
@@ -817,8 +828,10 @@ export function createArkivTools(deps: Deps): McpTool[] {
       catalogVisibility: 'search',
       async execute(args, companyId, _userId, supabase) {
         assertEnabled(companyId)
-        const documentId = String(args.document_id ?? '')
-        if (!UUID.test(documentId)) throw new Error('document_id must be a UUID')
+        const ref = args.record_ref === undefined ? null : parseRecordRef(args.record_ref)
+        if (ref && ref.kind !== 'document') throw invalid('record_ref must be document:<uuid>')
+        const documentId = ref ? ref.id : String(args.document_id ?? '')
+        if (!UUID.test(documentId)) throw invalid('Pass record_ref as document:<uuid>, or document_id as a UUID')
         const pageNo = Math.max(1, Number(args.page ?? 1))
         const { data: doc, error } = await supabase
           .from('document_attachments')
@@ -827,7 +840,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
           .eq('company_id', companyId)
           .maybeSingle()
         if (error) throw dbError(error)
-        if (!doc) throw new Error('Document not found')
+        if (!doc) throw notFound('Document not found')
         const d = doc as { id: string; file_name: string; storage_path: string; page_count: number | null }
         const { data: page, error: pageError } = await supabase.from('document_pages').select('text').eq('document_id', documentId).eq('page_no', pageNo).maybeSingle()
         if (pageError) throw dbError(pageError)
@@ -879,8 +892,8 @@ export function createArkivTools(deps: Deps): McpTool[] {
         assertEnabled(companyId)
         const subject = parseSubjectRef(args.subject_ref, companyId)
         const def = predicateDef(String(args.predicate ?? ''))
-        if (!def) throw new Error(`unknown predicate; use one of ${Object.keys(PREDICATES).join(', ')}`)
-        if (def.subject !== subject.kind) throw new Error(`predicate ${def.predicate} belongs to a ${def.subject}, not a ${subject.kind}`)
+        if (!def) throw invalid(`unknown predicate; use one of ${Object.keys(PREDICATES).join(', ')}`)
+        if (def.subject !== subject.kind) throw invalid(`predicate ${def.predicate} belongs to a ${def.subject}, not a ${subject.kind}`)
         const params = ArkivProposeFactParamsSchema.parse({
           subject_kind: subject.kind,
           subject_id: subject.id,
@@ -917,14 +930,14 @@ export function createArkivTools(deps: Deps): McpTool[] {
 }
 
 function parseSubjectRef(ref: unknown, companyId: string): { kind: FactSubjectKind; id: string } {
-  if (typeof ref !== 'string') throw new Error('subject_ref must be company:<uuid>, agreement:<uuid> or party:<uuid>')
+  if (typeof ref !== 'string') throw invalid('subject_ref must be company:<uuid>, agreement:<uuid> or party:<uuid>')
   const [kind, id] = ref.split(':')
   if (kind === 'company') {
-    if (id !== companyId) throw new Error('subject_ref company must be the active company')
+    if (id !== companyId) throw invalid('subject_ref company must be the active company')
     return { kind: 'company', id: companyId }
   }
   if ((kind === 'agreement' || kind === 'party') && UUID.test(id ?? '')) return { kind, id }
-  throw new Error('subject_ref must be company:<uuid>, agreement:<uuid> or party:<uuid>')
+  throw invalid('subject_ref must be company:<uuid>, agreement:<uuid> or party:<uuid>')
 }
 
 interface LinkView {

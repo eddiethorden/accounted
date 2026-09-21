@@ -16,6 +16,8 @@ describe('arkivRollout', () => {
     expect(arkivRollout()).toBe('all')
     process.env.ARKIV_COMPANY_IDS = ' co-1, ,co-2 '
     expect(arkivRollout()).toEqual(['co-1', 'co-2'])
+    process.env.ARKIV_COMPANY_IDS = 'co-1,co-2,co-1'
+    expect(arkivRollout()).toEqual(['co-1', 'co-2'])
   })
 })
 

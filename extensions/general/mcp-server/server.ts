@@ -3989,27 +3989,33 @@ export const tools: McpTool[] = [
         // exact keyword > per-term name/keyword hits > description hits. Ties
         // fall back to definition order (stable).
         const terms = query.split(/\s+/).filter(Boolean)
-        const ranked = candidates
-          .map((t, idx) => {
-            const name = t.name.toLowerCase()
-            const desc = t.description.toLowerCase()
-            const kw = (t.keywords ?? []).map((k) => k.toLowerCase())
-            const kwText = kw.join(' ')
-            const hay = `${name} ${desc} ${kwText}`
-            if (!terms.every((term) => hay.includes(term))) return null
-            let score = 0
-            if (name === query || name === `gnubok_${query}` || name.endsWith(`_${query}`)) score += 100
-            if (name.includes(query)) score += 40
-            if (kw.includes(query)) score += 40
-            for (const term of terms) {
-              if (name.includes(term)) score += 10
-              if (kwText.includes(term)) score += 10
-              if (desc.includes(term)) score += 1
-            }
-            return { t, score, idx }
-          })
-          .filter((x): x is { t: McpTool; score: number; idx: number } => x !== null)
-          .sort((a, b) => b.score - a.score || a.idx - b.idx)
+        const rank = (matches: (hay: string) => boolean) =>
+          candidates
+            .map((t, idx) => {
+              const name = t.name.toLowerCase()
+              const desc = t.description.toLowerCase()
+              const kw = (t.keywords ?? []).map((k) => k.toLowerCase())
+              const kwText = kw.join(' ')
+              if (!matches(`${name} ${desc} ${kwText}`)) return null
+              let score = 0
+              if (name === query || name === `gnubok_${query}` || name.endsWith(`_${query}`)) score += 100
+              if (name.includes(query)) score += 40
+              if (kw.includes(query)) score += 40
+              for (const term of terms) {
+                if (name.includes(term)) score += 10
+                if (kwText.includes(term)) score += 10
+                if (desc.includes(term)) score += 1
+              }
+              return { t, score, idx }
+            })
+            .filter((x): x is { t: McpTool; score: number; idx: number } => x !== null)
+            .sort((a, b) => b.score - a.score || a.idx - b.idx)
+        let ranked = rank((hay) => terms.every((term) => hay.includes(term)))
+        // An agent often sends a bag of words ("arkiv graph source links"); no
+        // single tool holds them all, and an empty answer reads as "no such
+        // tools". When every-term finds nothing, any-term does, ranked by the
+        // same per-term score so the tools holding most of the words lead.
+        if (ranked.length === 0 && terms.length > 1) ranked = rank((hay) => terms.some((term) => hay.includes(term)))
         candidates = ranked.map((x) => x.t)
       }
 

@@ -101,6 +101,18 @@ describe('gnubok_search_tools', () => {
     expect(paid.tools[0].name).toBe('gnubok_mark_invoice_as_paid')
   })
 
+  it('a bag of words that no single tool holds falls back to any-term, best match first', async () => {
+    // Every-term finds nothing here (prod, 2026-09-21: "arkiv graph source links fact history" answered 0 tools).
+    const bag = await call({ query: 'neighbourhood zzzunmatchedzzz', limit: 50 })
+    expect(bag.total_matched).toBeGreaterThan(0)
+    expect(bag.tools[0].name).toBe('gnubok_get_neighbourhood')
+    // A query whose every term matches keeps the strict answer: the fallback never widens it.
+    const strict = await call({ query: 'neighbourhood', limit: 50 })
+    expect(strict.tools.map((t) => t.name)).toEqual(['gnubok_get_neighbourhood'])
+    // Nothing matches at all: still empty.
+    expect((await call({ query: 'zzzunmatchedzzz qqqalsonothingqqq' })).total_matched).toBe(0)
+  })
+
   it('respects limit (1-50, default 20, clamps over-50)', async () => {
     const overLimit = await call({ limit: 100 })
     expect(overLimit.tools.length).toBeLessThanOrEqual(50)

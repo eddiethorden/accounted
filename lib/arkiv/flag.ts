@@ -10,10 +10,8 @@ export function arkivRollout(): 'all' | string[] {
   const raw = process.env.ARKIV_COMPANY_IDS?.trim()
   if (!raw) return []
   if (raw === '*') return 'all'
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  // Each company once: the crons walk this list, and a repeated id would take a slot per repeat.
+  return [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))]
 }
 
 export function isArkivEnabled(companyId: string | null | undefined): boolean {
