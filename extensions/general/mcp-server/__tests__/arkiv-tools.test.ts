@@ -46,6 +46,17 @@ describe('Arkiv tools', () => {
     expect(() => parseRecordRef('document:nope')).toThrow(/record_ref/)
   })
 
+  it('keeps every output schema open at the top level, and every input closed', async () => {
+    // Clients cache tools/list and validate responses against it: under a closed output
+    // schema an added response field breaks every session connected before the deploy.
+    const arkiv = (await import('../arkiv-tools')).createArkivTools({ readOnly: tool('gnubok_get_source').annotations, stagedWrite: tool('gnubok_propose_fact').annotations, stagedSchema: {}, stagePendingOperation: vi.fn() })
+    expect(arkiv.length).toBeGreaterThanOrEqual(NAMES.length)
+    for (const t of arkiv) {
+      expect((t.outputSchema as { additionalProperties?: boolean } | undefined)?.additionalProperties, t.name).not.toBe(false)
+      expect((t.inputSchema as { additionalProperties?: boolean }).additionalProperties, t.name).toBe(false)
+    }
+  })
+
   it('refuses every tool outside the rollout', async () => {
     process.env.ARKIV_COMPANY_IDS = 'someone-else'
     await expect(tool('gnubok_search_records').execute({ query: 'hyra' }, CO, 'user-1', supabase)).rejects.toThrow(/not enabled/)

@@ -19,6 +19,11 @@ import { neighbourhoodOf } from '@/lib/arkiv/graph/neighbourhood'
  * `<kind>:<uuid>` for document, agreement, party, journal_entry and fact.
  * Reads never leave the company; the only write stages a proposal a person
  * approves. Outside the rollout every tool answers "not enabled".
+ *
+ * Output schemas stay open at the top level: clients cache tools/list and
+ * validate responses against it, so under a closed schema every added response
+ * field breaks each session connected before the deploy (prod 2026-09-21: the
+ * `notice` field made ask_document fail in a live session). Inputs stay closed.
  */
 export type RecordKind = 'document' | 'agreement' | 'party' | 'journal_entry' | 'fact'
 
@@ -338,7 +343,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           items: {
             type: 'array',
@@ -463,7 +467,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           record_ref: { type: 'string' },
           kind: { type: 'string', enum: ['document', 'agreement', 'party', 'journal_entry', 'fact'] },
@@ -528,7 +531,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           record_ref: { type: 'string' },
           links: {
@@ -585,7 +587,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: { subject_ref: { type: 'string' }, facts: { type: 'array', items: FACT_SHAPE } },
         required: ['subject_ref', 'facts'],
       },
@@ -629,7 +630,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           record_ref: { type: 'string' },
           question: { type: 'string' },
@@ -706,7 +706,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           center: { type: 'string' },
           depth: { type: 'integer' },
@@ -752,7 +751,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           finding_id: { type: 'string' },
           status: { type: 'string', enum: ['resolved', 'dismissed'] },
@@ -811,7 +809,6 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       outputSchema: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           document_id: { type: 'string' },
           file_name: { type: 'string' },
