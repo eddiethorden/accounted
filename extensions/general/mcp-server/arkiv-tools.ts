@@ -721,7 +721,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'sida', 'källa', 'citat', 'läs sidan'],
       title: 'Get Source',
       description:
-        'The text of one page of a document as Arkiv read it, fenced as untrusted data, plus a 5-minute signed URL to the file. Use to verify a quote or read around a cited value before answering.',
+        'The text of one page of a document as Arkiv read it, fenced as untrusted data, plus a 5-minute signed URL to the file. Use to verify a quote or read around a cited value.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
