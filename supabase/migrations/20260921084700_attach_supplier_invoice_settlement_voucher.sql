@@ -53,7 +53,8 @@
 --
 -- p_dry_run runs every check and returns the row that would be written without
 -- writing it, so a batch can be previewed against the same rules that will
--- judge it, not against a copy of them in TypeScript.
+-- judge it, not against a copy of them in TypeScript. Omitted means a real run;
+-- an explicit NULL is treated as a dry run.
 
 CREATE OR REPLACE FUNCTION public.attach_supplier_invoice_settlement_voucher(
   p_supplier_invoice_id uuid,
@@ -81,6 +82,10 @@ DECLARE
   v_used numeric;
   v_capacity numeric;
   v_payment_id uuid;
+  -- An explicit NULL fails safe: nothing is written and the result says so.
+  -- Left raw, `IF NOT NULL` would skip the INSERT and still answer ok, which
+  -- reads as a write that never happened.
+  v_dry_run boolean := COALESCE(p_dry_run, true);
 BEGIN
   -- Attribution, as in link_supplier_invoice_to_voucher: for a user session the
   -- JWT sub is authoritative, so p_user_id cannot point the row at someone else.
@@ -285,7 +290,7 @@ BEGIN
       ));
   END IF;
 
-  IF NOT p_dry_run THEN
+  IF NOT v_dry_run THEN
     -- The fixed prefix marks every row this function wrote, so one run can be
     -- found and undone with a single DELETE (same idea as backfill:#2019).
     INSERT INTO public.supplier_invoice_payments (
@@ -301,7 +306,7 @@ BEGIN
 
   RETURN jsonb_build_object(
     'ok', true,
-    'dry_run', p_dry_run,
+    'dry_run', v_dry_run,
     'payment_id', v_payment_id,
     'supplier_invoice_id', p_supplier_invoice_id,
     'journal_entry_id', p_journal_entry_id,

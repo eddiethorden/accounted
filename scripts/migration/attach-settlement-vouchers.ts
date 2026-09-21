@@ -22,9 +22,14 @@
  * supplier_invoice_payments row, dated at the verifikat. supplier_invoices is
  * never updated and no journal table is touched. A pair that is already
  * attached reports 'already_linked' and writes nothing. Every row carries the
- * note marker 'settlement-evidence', so a run can be found again, and undone:
- *   DELETE FROM supplier_invoice_payments
+ * note marker 'settlement-evidence', so a run can be found again:
+ *   SELECT * FROM supplier_invoice_payments
  *   WHERE company_id = '<uuid>' AND notes LIKE 'settlement-evidence%';
+ * A run that went wrong can be undone by deleting exactly those rows, but ONLY
+ * while nothing has relied on them. Once a bokslut or a kontantmetoden cut-off
+ * has been posted with the rows in place they are part of what that figure
+ * rests on (BFL 5 kap 5 §: a correction may not erase the original without a
+ * trace), so they are left alone and the correction goes through the cut-off.
  *
  * Input: a JSON array, one object per pair.
  *   [
@@ -129,13 +134,16 @@ async function resolveActingUser(): Promise<string> {
       .select('user_id')
       .eq('company_id', COMPANY_ID)
       .eq('user_id', USER_ID)
+      // A writing role, as the RLS insert policy demands of a user session:
+      // the row must not be attributed to someone who could never have written it.
+      .in('role', ['owner', 'admin', 'member'])
       .limit(1)
     if (error) {
       console.error(`Could not read company_members: ${error.message}`)
       process.exit(1)
     }
     if (!data || data.length === 0) {
-      console.error(`User ${USER_ID} is not a member of company ${COMPANY_ID}.`)
+      console.error(`User ${USER_ID} is not a writing member (owner, admin or member) of company ${COMPANY_ID}.`)
       process.exit(1)
     }
     return USER_ID

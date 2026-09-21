@@ -256,6 +256,21 @@ describe('attach_supplier_invoice_settlement_voucher', () => {
     expect(await paymentRows(invoiceId)).toHaveLength(1)
   })
 
+  it('an explicit NULL p_dry_run fails safe: nothing is written and the result says dry run', async () => {
+    const company = await seedCompanyWithMethod('cash')
+    const invoiceId = await seedSupplierInvoice({ company })
+    const voucherId = await seedVoucher({ company, lines: cashPaymentLines(1000) })
+
+    // Left raw, `IF NOT NULL` would skip the INSERT and still answer ok with
+    // dry_run null, which a caller reads as a write that never happened.
+    const { rows } = await getPool().query<{ result: AttachResult }>(ATTACH, [
+      invoiceId, voucherId, company.userId, company.companyId, null, null,
+    ])
+
+    expect(rows[0].result).toMatchObject({ ok: true, dry_run: true, payment_id: null, amount: 1000 })
+    expect(await paymentRows(invoiceId)).toHaveLength(0)
+  })
+
   it('faktureringsmetoden: reads the 244x debit', async () => {
     const company = await seedCompanyWithMethod('accrual')
     const invoiceId = await seedSupplierInvoice({ company })
