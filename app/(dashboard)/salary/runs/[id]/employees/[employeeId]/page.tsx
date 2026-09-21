@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { ArrowLeft, Calculator, Loader2, X } from 'lucide-react'
@@ -11,7 +11,11 @@ import { HelpPopover } from '@/components/ui/help-popover'
 import { TH_CLASS, TD_CLASS, HOVER_REVEAL_CLASS } from '@/components/ui/dry-table'
 import { SalaryCalendar } from '@/components/salary/SalaryCalendar'
 import { SalaryOverridePanel } from '@/components/salary/SalaryOverridePanel'
-import { cn, formatCurrency } from '@/lib/utils'
+import { AddPayslipLineDialog } from '@/components/salary/AddPayslipLineDialog'
+import { isManualPayslipLineType, manualLineCapsFromRunParams } from '@/lib/salary/manual-payslip-lines'
+import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import { hasCustomDeviationWindow } from '@/lib/salary/deviation-period'
+import { payslipCalendarWindow } from '@/lib/salary/payslip-calendar'
 import type { SalaryRun, SalaryRunEmployee, SalaryLineItem, SalaryLineItemType, EmployeeMasked } from '@/types'
 import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-message'
 
@@ -69,9 +73,26 @@ const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'success' | 'war
   corrected: 'outline',
 }
 
+/** A line as the detail route returns it: the source columns say where it came from. */
+type LineRow = SalaryLineItem & {
+  source_recurring_line_id?: string | null
+  source_benefit_id?: string | null
+}
+
 interface DetailResponse {
   run: SalaryRun
-  runEmployee: SalaryRunEmployee & { employee: EmployeeMasked; line_items: SalaryLineItem[] }
+  runEmployee: SalaryRunEmployee & { employee: EmployeeMasked; line_items: LineRow[] }
+}
+
+/**
+ * Lines the user may take off a draft payslip: an utlägg line (added with one
+ * click on the run page, #2331) and a one-off line added by hand here. Lines
+ * the calculation or a recurring line derives are left alone: recalculation
+ * would only bring them back.
+ */
+function isRemovableLine(li: LineRow): boolean {
+  if (li.source_expense_claim_id) return true
+  return isManualPayslipLineType(li.item_type) && !li.source_recurring_line_id && !li.source_benefit_id
 }
 
 export default function SalaryRunEmployeeDetailPage({
@@ -81,17 +102,25 @@ export default function SalaryRunEmployeeDetailPage({
 }) {
   const t = useTranslations('salary_run_employee')
   const tSalary = useTranslations('salary')
+  const tRun = useTranslations('salary_run')
   const { id: runId, employeeId } = use(params)
   const [data, setData] = useState<DetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [calculating, setCalculating] = useState(false)
   const [removingLineId, setRemovingLineId] = useState<string | null>(null)
+  const [addingLine, setAddingLine] = useState(false)
   // Live counts pushed from the calendar: overrides the stale snapshot from
   // the last calculation so badges update immediately on absence save.
   const [liveCounts, setLiveCounts] = useState<{ sick: number; vab: number; parental: number } | null>(null)
 
+  // Reloads overlap now that the content stays mounted while one is in
+  // flight (save twice in the calendar, or save and recalculate): only the
+  // newest request may write state, or an older response lands last.
+  const loadSeq = useRef(0)
+
   const load = async () => {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError(null)
     try {
@@ -101,6 +130,7 @@ export default function SalaryRunEmployeeDetailPage({
       ])
       const runJson = await runRes.json().catch(() => null)
       const sreJson = await sreRes.json().catch(() => null)
+      if (seq !== loadSeq.current) return
       // Map the parsed body plus the status, never `new Error(json.error)`:
       // the routes answer thrown errors with the canonical envelope
       // `{ error: { code, message } }`, and the Error constructor stringifies
@@ -116,9 +146,10 @@ export default function SalaryRunEmployeeDetailPage({
       }
       setData({ run: runJson.data, runEmployee: sreJson.data })
     } catch (e) {
+      if (seq !== loadSeq.current) return
       setError(e instanceof Error ? getUserErrorMessage(e) : t('unknown_error'))
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }
 
@@ -147,9 +178,9 @@ export default function SalaryRunEmployeeDetailPage({
     }
   }
 
-  // Utlägg lines (#2331) are the only lines this page lets the user remove:
-  // they were added from the run page with one click and must be just as
-  // easy to take off again. The claim goes back to Att göra.
+  // Removes an utlägg line (#2331: added from the run page with one click,
+  // just as easy to take off again; the claim goes back to Att göra) or a
+  // one-off line added with "Lägg till rad". See isRemovableLine.
   const handleRemoveLine = async (lineId: string) => {
     setRemovingLineId(lineId)
     setError(null)
@@ -168,22 +199,26 @@ export default function SalaryRunEmployeeDetailPage({
     }
   }
 
-  const periodStart = useMemo(() => {
-    if (!data) return ''
-    const y = data.run.period_year
-    const m = data.run.period_month
-    return `${y}-${String(m).padStart(2, '0')}-01`
-  }, [data])
+  // Only data that belongs to the payslip in the URL is shown; anything else
+  // counts as "not loaded yet". Compared case-insensitively: Postgres matches
+  // a hand-typed uppercase uuid, and the row comes back in lowercase.
+  const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+  const current =
+    data && sameId(data.run.id, runId) && sameId(data.runEmployee.employee_id, employeeId) ? data : null
 
-  const periodEnd = useMemo(() => {
-    if (!data) return ''
-    const y = data.run.period_year
-    const m = data.run.period_month
-    const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
-    return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`
-  }, [data])
+  // The calendar works in the window the engine reads this run's absence and
+  // worked days from (the avvikelseperiod), which is not the pay month on a
+  // company that runs "föregående månads avvikelser".
+  const calendarWindow = useMemo(
+    () => (current ? payslipCalendarWindow(current.run) : null),
+    [current],
+  )
 
-  if (loading) {
+  // The spinner replaces the page on the FIRST load only. A reload after a
+  // save or a recalculation keeps the content mounted: unmounting it reset
+  // the calendar to its opening month on every saved post, and took the
+  // selection, the scroll position and any open dialog with it.
+  if (!current && loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('loading')}
@@ -191,7 +226,7 @@ export default function SalaryRunEmployeeDetailPage({
     )
   }
 
-  if (error || !data) {
+  if (!current || !calendarWindow) {
     return (
       <div className="space-y-3">
         <Link
@@ -206,14 +241,14 @@ export default function SalaryRunEmployeeDetailPage({
     )
   }
 
-  const { run, runEmployee } = data
+  const { run, runEmployee } = current
   const employee = runEmployee.employee
   const lineItems = runEmployee.line_items ?? []
   const periodLabel = `${run.period_year}-${String(run.period_month).padStart(2, '0')}`
   const readOnly = run.status !== 'draft' && run.status !== 'review'
-  // Utlägg lines can be taken off the payslip only while the run is a draft
-  // (the line commands' gate); the column exists only then.
-  const canRemoveClaimLines = run.status === 'draft'
+  // Lines can be added to and taken off the payslip only while the run is a
+  // draft (the line commands' gate); the button and the column exist only then.
+  const canEditLines = run.status === 'draft'
   const statusLabel = tSalary(`status_${run.status}`)
 
   const taxValue = runEmployee.tax_withheld_override ?? runEmployee.tax_withheld
@@ -241,7 +276,7 @@ export default function SalaryRunEmployeeDetailPage({
   ]
 
   return (
-    <div className="space-y-8 stagger-enter">
+    <div className="space-y-8 stagger-enter" aria-busy={loading}>
       {/* Back link on its own quiet row */}
       <div>
         <Link
@@ -266,12 +301,35 @@ export default function SalaryRunEmployeeDetailPage({
             ) : (
               <Badge variant={STATUS_VARIANTS[run.status] || 'secondary'}>{statusLabel}</Badge>
             )}
+            {loading && (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label={t('loading')} />
+            )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             <span className="tabular-nums">{employee.personnummer_masked}</span>
             {' · '}
             <span className="tabular-nums">{t('payslip_period', { period: periodLabel })}</span>
+            {/* Same note as the run header: say which days this payslip reads
+                when they are not the pay month, since the calendar opens there. */}
+            {hasCustomDeviationWindow(run) && (
+              <>
+                {' · '}
+                <span className="tabular-nums">
+                  {tRun('deviation_period_note', {
+                    start: formatDate(calendarWindow.start),
+                    end: formatDate(calendarWindow.end),
+                  })}
+                </span>
+              </>
+            )}
           </p>
+          {/* A failed reload or recalculation is said here, with the payslip
+              still on screen, instead of replacing the page. */}
+          {error && (
+            <p className="mt-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
         </div>
         {run.status === 'draft' && (
           <div className="flex shrink-0 items-center gap-2">
@@ -335,8 +393,10 @@ export default function SalaryRunEmployeeDetailPage({
         <SalaryCalendar
           employeeId={employee.id}
           salaryType={employee.salary_type}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
+          periodStart={calendarWindow.start}
+          periodEnd={calendarWindow.end}
+          hoursPerWeek={employee.hours_per_week}
+          workdaysPerWeek={employee.workdays_per_week}
           salaryRunEmployeeId={runEmployee.id}
           readOnly={readOnly}
           onChange={load}
@@ -352,8 +412,29 @@ export default function SalaryRunEmployeeDetailPage({
         </div>
       </DetailSection>
 
-      {/* Line items: the list-page table idiom straight on the panel. */}
-      <DetailSection kicker={t('line_items_title', { count: lineItems.length })}>
+      {/* Line items: the list-page table idiom straight on the panel. One-off
+          lines (milersättning, traktamente, bonus, a deduction) are added
+          from the kicker's action; utlägg from the run page. */}
+      <DetailSection
+        kicker={t('line_items_title', { count: lineItems.length })}
+        aside={
+          canEditLines ? (
+            <Button type="button" size="sm" variant="outline" className="-my-1" onClick={() => setAddingLine(true)}>
+              {t('add_line')}
+            </Button>
+          ) : undefined
+        }
+      >
+        {canEditLines && (
+          <AddPayslipLineDialog
+            open={addingLine}
+            onOpenChange={setAddingLine}
+            runId={runId}
+            salaryRunEmployeeId={runEmployee.id}
+            taxFreeCaps={manualLineCapsFromRunParams(run.calculation_params)}
+            onAdded={load}
+          />
+        )}
         {lineItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('no_line_items')}</p>
         ) : (
@@ -364,8 +445,8 @@ export default function SalaryRunEmployeeDetailPage({
                   <th className={cn(TH_CLASS, 'pl-0')}>{t('th_type')}</th>
                   <th className={TH_CLASS}>{t('th_description')}</th>
                   <th className={cn(TH_CLASS, 'text-right')}>{t('th_quantity')}</th>
-                  <th className={cn(TH_CLASS, 'text-right', !canRemoveClaimLines && 'pr-0')}>{t('th_amount')}</th>
-                  {canRemoveClaimLines && (
+                  <th className={cn(TH_CLASS, 'text-right', !canEditLines && 'pr-0')}>{t('th_amount')}</th>
+                  {canEditLines && (
                     <th className={cn(TH_CLASS, 'pr-0 text-right')}>
                       <span className="sr-only">{t('th_actions')}</span>
                     </th>
@@ -374,26 +455,26 @@ export default function SalaryRunEmployeeDetailPage({
               </thead>
               <tbody>
                 {lineItems.map(li => (
-                  <tr key={li.id} className={cn(canRemoveClaimLines && 'group')}>
+                  <tr key={li.id} className={cn(canEditLines && 'group')}>
                     <td className={cn(TD_CLASS, 'pl-0 text-muted-foreground')}>
                       {LINE_ITEM_TYPE_KEYS[li.item_type] ? t(LINE_ITEM_TYPE_KEYS[li.item_type]) : li.item_type}
                     </td>
                     <td className={TD_CLASS}>{li.description}</td>
                     <td className={cn(TD_CLASS, 'text-right tabular-nums')}>{li.quantity ?? '-'}</td>
-                    <td className={cn(TD_CLASS, 'text-right tabular-nums', !canRemoveClaimLines && 'pr-0')}>
+                    <td className={cn(TD_CLASS, 'text-right tabular-nums', !canEditLines && 'pr-0')}>
                       {formatCurrency(li.amount)}
                     </td>
-                    {canRemoveClaimLines && (
+                    {canEditLines && (
                       <td className={cn(TD_CLASS, 'pr-0 text-right')}>
-                        {li.source_expense_claim_id && (
+                        {isRemovableLine(li) && (
                           <Button
                             variant="ghost"
                             size="icon"
                             className={cn('-my-1 h-8 w-8 text-muted-foreground hover:text-foreground', HOVER_REVEAL_CLASS)}
                             onClick={() => handleRemoveLine(li.id)}
                             disabled={removingLineId === li.id}
-                            aria-label={t('remove_expense_claim_line_aria')}
-                            title={t('remove_expense_claim_line_aria')}
+                            aria-label={li.source_expense_claim_id ? t('remove_expense_claim_line_aria') : t('remove_line_aria')}
+                            title={li.source_expense_claim_id ? t('remove_expense_claim_line_aria') : t('remove_line_aria')}
                           >
                             {removingLineId === li.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />

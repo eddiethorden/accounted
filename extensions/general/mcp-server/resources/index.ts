@@ -9,6 +9,9 @@ import { attentionResource } from './attention'
 import { ledgerContextResource } from './ledger-context'
 import { bookingPacksResource } from './booking-packs'
 import { reconciliationSummaryResource } from './reconciliation-summary'
+import { arkivMapResource } from './arkiv-map'
+import { arkivMissingResource } from './arkiv-missing'
+import { arkivGraphResource } from './arkiv-graph'
 
 export const dataResources: McpResource[] = [
   companyCurrentResource,
@@ -21,6 +24,9 @@ export const dataResources: McpResource[] = [
   ledgerContextResource,
   bookingPacksResource,
   reconciliationSummaryResource,
+  arkivMapResource,
+  arkivMissingResource,
+  arkivGraphResource,
 ]
 
 export function findResource(uri: string): McpResource | null {

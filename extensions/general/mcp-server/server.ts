@@ -377,6 +377,8 @@ import {
   DOCUMENTS_BUCKET,
 } from '@/lib/core/documents/document-service'
 import { toSameOriginStorageUrl } from '@/lib/core/documents/storage-proxy'
+import { createArkivTools } from './arkiv-tools'
+import { isArkivEnabled } from '@/lib/arkiv/flag'
 import { createHash } from 'node:crypto'
 import { extractInvoiceFields, ExtractionSchema as InvoiceExtractionSchema, AgentExtractionSchema, fetchOwnCompanyIdentity } from '@/extensions/general/invoice-inbox/lib/extract-invoice-fields'
 import { mirrorExtractionToDocument } from '@/extensions/general/invoice-inbox/lib/mirror-extraction'
@@ -536,7 +538,7 @@ function resolveInvoiceLineFromArticle(
   }
 }
 
-interface ActorContext {
+export interface ActorContext {
   // 'anonymous': a client that has not connected an account yet (lazy
   // authentication, issue #1814). Only PUBLIC_TOOLS ever run under it.
   type: 'user' | 'api_key' | 'mcp_oauth' | 'cron' | 'anonymous'
@@ -585,7 +587,7 @@ interface JsonRpcResponse {
 
 // ── MCP Tool definition ──────────────────────────────────────
 
-interface McpToolAnnotations {
+export interface McpToolAnnotations {
   readOnlyHint?: boolean
   destructiveHint?: boolean
   idempotentHint?: boolean
@@ -724,7 +726,7 @@ function duplicateCandidateRefusal(
   )
 }
 
-interface McpTool {
+export interface McpTool {
   name: string
   // Top-level Tool.title per MCP spec 2025-06-18 (human-facing label for
   // directory listings; distinct from annotations.title). Short Title Case
@@ -5556,6 +5558,19 @@ export const tools: McpTool[] = [
           },
           required: ['tool', 'when', 'include'],
         },
+        arkiv: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Present when the company is in the Arkiv rollout: how much of the archive is structured, how to read it, and stable refs to start from.',
+          properties: {
+            documents: { type: 'integer' },
+            agreements: { type: 'integer' },
+            facts: { type: 'integer' },
+            instructions: { type: 'string' },
+            anchors: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { record_ref: { type: 'string' }, title: { type: 'string' } }, required: ['record_ref', 'title'] } },
+          },
+          required: ['documents', 'agreements', 'facts', 'instructions', 'anchors'],
+        },
         skatteverket_connection: {
           type: 'object',
           description:
@@ -5634,6 +5649,35 @@ export const tools: McpTool[] = [
                 last_booked: s.evidence.last_booked,
               },
             })),
+          }
+        } catch {
+          return null
+        }
+      })()
+
+      // Arkiv digest: only for companies in the rollout, best-effort, and
+      // short by design (the stanza stays under 1 500 tokens): counts, how
+      // to read the record, and a few refs to start from.
+      const safeArkivDigest = (async () => {
+        if (!isArkivEnabled(companyId)) return null
+        try {
+          const [documents, agreements, facts, anchors] = await Promise.all([
+            supabase.from('document_attachments').select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('admission_state', 'admitted'),
+            supabase.from('agreements').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+            supabase.from('company_facts').select('id', { count: 'exact', head: true }).eq('company_id', companyId).is('sys_to', null).neq('rank', 'deprecated').eq('status', 'confirmed'),
+            supabase.from('agreements').select('id, title').eq('company_id', companyId).eq('status', 'active').order('ends_on', { ascending: true, nullsFirst: false }).limit(5),
+          ])
+          if (documents.error || agreements.error || facts.error || anchors.error) return null
+          return {
+            documents: documents.count ?? 0,
+            agreements: agreements.count ?? 0,
+            facts: facts.count ?? 0,
+            instructions:
+              'Arkiv holds every document as a record with page citations. Read the resource Accounted://arkiv/map first: what the archive holds, running agreements, registered facts, what waits. For anything about a contract, registration, decision or what a document says: gnubok_search_records, then gnubok_get_record on the record_ref; gnubok_ask_document answers one question from the text with page and quote (journal_entry:<id> returns every attachment of a verifikat as a record). Cite the page you read from; gnubok_get_source shows the page text. Facts carry validity and belief windows: gnubok_get_fact_history when values changed. Never state a value the record does not hold; propose a correction with gnubok_propose_fact and let a person approve it. Accounted://arkiv/missing lists documents the books expect but the archive lacks, with evidence and the intake address to forward to; gather them with the person and close each with gnubok_resolve_missing. Accounted://arkiv/graph is the whole company as one graph with record references and evidence on every link; gnubok_get_neighbourhood (via gnubok_call_tool) walks the hops around one node.',
+            anchors: [
+              { record_ref: `company:${companyId}`, title: 'Bolagets fakta (subject_ref för gnubok_get_fact_history)' },
+              ...((anchors.data ?? []) as Array<{ id: string; title: string }>).map((a) => ({ record_ref: `agreement:${a.id}`, title: a.title })),
+            ],
           }
         } catch {
           return null
@@ -5876,6 +5920,7 @@ export const tools: McpTool[] = [
 
       const ledgerDigest = await safeLedgerDigest
       const skvConnection = await safeSkvConnection
+      const arkivDigest = await safeArkivDigest
 
       return {
         company,
@@ -5891,6 +5936,7 @@ export const tools: McpTool[] = [
         })),
         ...(dimensionsBlock ? { dimensions: dimensionsBlock } : {}),
         ...(ledgerDigest ? { ledger_context: ledgerDigest } : {}),
+        ...(arkivDigest ? { arkiv: arkivDigest } : {}),
         ...(skvConnection ? { skatteverket_connection: skvConnection } : {}),
 
         // Static per-workflow loadouts (issue #1098): lets a deferred-loading
@@ -14014,7 +14060,7 @@ export const tools: McpTool[] = [
         userId,
         completed.document.id,
         fileName,
-        mimeType,
+        completed.document.mime_type ?? mimeType,
         Buffer.from(completed.buffer),
         uploadId,
       )
@@ -14070,7 +14116,7 @@ export const tools: McpTool[] = [
         userId,
         doc.id,
         fileName,
-        mimeType,
+        doc.mime_type ?? mimeType,
         buffer,
       )
     },
@@ -17672,7 +17718,7 @@ export const tools: McpTool[] = [
       const { dayValueSek } = await import('@/lib/salary/semesterberedning')
       const { data: employee, error: empErr } = await supabase
         .from('employees')
-        .select('vacation_rule, vacation_days_per_year, vacation_pay_rate, semestertillagg_rate, salary_type, monthly_salary, hourly_rate, hours_per_week, workdays_per_week')
+        .select('vacation_rule, vacation_days_per_year, vacation_pay_rate, semestertillagg_rate, salary_type, monthly_salary, employment_degree, hourly_rate, hours_per_week, workdays_per_week')
         .eq('id', employeeId)
         .eq('company_id', companyId)
         .maybeSingle()
@@ -23297,6 +23343,7 @@ export const tools: McpTool[] = [
       )
     },
   },
+  ...createArkivTools({ readOnly: ANNOTATIONS_READ_ONLY, stagedWrite: ANNOTATIONS_STAGED_WRITE, stagedSchema: STAGED_OPERATION_SCHEMA, stagePendingOperation }),
 ]
 
 // Drift guard for the gnubok_get_agent_briefing recommended_tools loadouts:

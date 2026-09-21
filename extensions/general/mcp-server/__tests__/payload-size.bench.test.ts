@@ -528,7 +528,23 @@ describe('tools/list payload size guard', () => {
     //     zero is not seasonal (unlike the bokslut tools the 2026-08-31 entry
     //     kept). Named by no listed tool, skill or loadout; the salary
     //     calendar is its web door. Measured 61 844. Ceiling unchanged.
-    expect(approxTokens).toBeLessThan(62_200)
+    //   * Arkiv phase 5 (rebased onto main 2026-09-21 after the bridge, #2800):
+    //     two default-catalog tools, gnubok_search_records and gnubok_get_record
+    //     (the record behind a document, agreement, party or verifikat). The
+    //     four other Arkiv tools are catalogVisibility: 'search', reachable
+    //     through gnubok_call_tool. Measured 62 674 on the rebased branch.
+    //   * Arkiv phase 8 (schema on read): gnubok_ask_document joins the default
+    //     catalog, the one write-free way for an agent to read a clause the
+    //     record does not carry. Measured 63 090 on the rebased branch.
+    //   * Arkiv phase 9a (the agent door): gnubok_resolve_missing joins the
+    //     default catalog so an agent can close what it gathered; a direct
+    //     write, so the staging bridge cannot reach it. Measured 63 381 on
+    //     the rebased branch.
+    //   * Arkiv phase 9b (the graph): gnubok_get_neighbourhood is search-only,
+    //     reachable through gnubok_call_tool and named by the briefing, so the
+    //     graph walk costs the default catalog nothing. Measured 63 381 on
+    //     the rebased branch. Ceiling unchanged.
+    expect(approxTokens).toBeLessThan(63_500)
   })
 
   /**

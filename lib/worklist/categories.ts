@@ -122,6 +122,7 @@ export async function countInboxDocuments(
     .is('created_supplier_invoice_id', null)
     .is('created_journal_entry_id', null)
     .is('matched_transaction_id', null)
+    .is('routed_to_arkiv_at', null)
     .limit(INBOX_SCAN_CAP)
   if (error) return logAndZero('inbox_document', companyId, error)
 
@@ -248,6 +249,65 @@ export async function countVerifikatMissingDocument(
       err instanceof Error ? { message: err.message } : null,
     )
   }
+}
+
+/** Arkiv: documents held at the door, waiting for "rör det här bolaget?". */
+export async function countHeldDocuments(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('document_attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('admission_state', 'held')
+  if (error) return logAndZero('document_relevance', companyId, error)
+  return count ?? 0
+}
+
+/** Arkiv: admitted documents whose current model classification is 'other' or uncertain. */
+export async function countUnclassifiedDocuments(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('document_classifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('is_current', true)
+    .eq('decided_by', 'model')
+    .eq('relevance', 'relevant')
+    .or('doc_type.eq.other,confidence.lt.0.6')
+  if (error) return logAndZero('document_unclassified', companyId, error)
+  return count ?? 0
+}
+
+/** Arkiv: current extractions with fields a person must settle. */
+export async function countDocumentFieldReviews(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('document_extractions')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('is_current', true)
+    .not('review_fields', 'eq', '{}')
+  if (error) return logAndZero('document_field_review', companyId, error)
+  return count ?? 0
+}
+
+/** Arkiv: open findings of the nightly lint. */
+export async function countArkivFindings(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('arkiv_findings')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('status', 'open')
+  if (error) return logAndZero('arkiv_finding', companyId, error)
+  return count ?? 0
+}
+
+/** Arkiv: expected payments from agreements that never arrived. */
+export async function countMissedAgreementPayments(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('agreement_obligations')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('status', 'missed')
+  if (error) return logAndZero('agreement_payment_missed', companyId, error)
+  return count ?? 0
 }
 
 /** Overdue customer invoices (not credited). */

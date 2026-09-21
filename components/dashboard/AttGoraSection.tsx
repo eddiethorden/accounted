@@ -33,6 +33,7 @@ import {
   Scale,
   ShieldCheck,
   Stamp,
+  FileQuestion,
 } from 'lucide-react'
 import type {
   ExpensePayoutDue,
@@ -266,10 +267,15 @@ export default function AttGoraSection({
   const granskaRows =
     counts.supplier_invoice_approval > 0 ||
     counts.verifikat_missing_document > 0 ||
-    counts.pending_operations > 0
+    counts.pending_operations > 0 ||
+    counts.document_relevance > 0 ||
+    counts.document_unclassified > 0 ||
+    counts.document_field_review > 0 ||
+    counts.arkiv_finding > 0
   const bevakaRows =
     counts.overdue_invoice > 0 ||
     counts.deadline_action > 0 ||
+    counts.agreement_payment_missed > 0 ||
     counts.reconciliation_due > 0 ||
     expiringBankConnections.length > 0
   const allClear = !bokforRows && !betalaRows && !granskaRows && !bevakaRows
@@ -526,6 +532,41 @@ export default function AttGoraSection({
                         count={counts.pending_operations}
                       />
                     )}
+                    {counts.document_relevance > 0 && (
+                      <WorklistRow
+                        href="/arkiv/granska"
+                        icon={FileQuestion}
+                        label={t('row_document_relevance')}
+                        detail={t('row_document_relevance_detail')}
+                        count={counts.document_relevance}
+                      />
+                    )}
+                    {counts.document_unclassified > 0 && (
+                      <WorklistRow
+                        href="/arkiv/granska#typ"
+                        icon={FileQuestion}
+                        label={t('row_document_unclassified')}
+                        count={counts.document_unclassified}
+                      />
+                    )}
+                    {counts.document_field_review > 0 && (
+                      <WorklistRow
+                        href="/arkiv/granska#falt"
+                        icon={FileQuestion}
+                        label={t('row_document_field_review')}
+                        detail={t('row_document_field_review_detail')}
+                        count={counts.document_field_review}
+                      />
+                    )}
+                    {counts.arkiv_finding > 0 && (
+                      <WorklistRow
+                        href="/arkiv/granska#fynd"
+                        icon={FileQuestion}
+                        label={t('row_arkiv_finding')}
+                        detail={t('row_arkiv_finding_detail')}
+                        count={counts.arkiv_finding}
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -550,6 +591,15 @@ export default function AttGoraSection({
                         icon={CalendarClock}
                         label={t('row_deadlines')}
                         count={counts.deadline_action}
+                      />
+                    )}
+                    {counts.agreement_payment_missed > 0 && (
+                      <WorklistRow
+                        href="/arkiv/avtal"
+                        icon={CalendarClock}
+                        label={t('row_agreement_payment_missed')}
+                        detail={t('row_agreement_payment_missed_detail')}
+                        count={counts.agreement_payment_missed}
                       />
                     )}
                     {counts.reconciliation_due > 0 && (
