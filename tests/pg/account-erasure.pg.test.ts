@@ -78,6 +78,11 @@ const RETAINED = new Set([
   'depreciation_schedules.user_id',
   'document_attachments.uploaded_by',
   'document_attachments.user_id',
+  'document_classifications.decided_by_user_id', // Who settled a document's type or relevance.
+  'agents.user_id', // The person behind a review of an Arkiv record.
+  'document_links.created_by_user_id', // Who tied a document to a party, agreement or asset.
+  'company_facts.approved_by_user_id', // Who approved an agent's fact proposal.
+  'arkiv_findings.resolved_by_user_id', // Who closed a lint finding.
   'event_log.user_id',
   'fiscal_period_tax_adjustments.user_id',
   'fiscal_periods.user_id',

@@ -1098,6 +1098,21 @@ export const MASTER_DATA_DUMP_TABLES: MasterDataTableSpec[] = [
       'id, created_at, source, status, document_id, matched_transaction_id, ' +
       'created_journal_entry_id, created_supplier_invoice_id, channel_context',
   },
+  // Arkiv: what each archived document is and whether it belongs to the
+  // company, the model's reading and every person's decision, oldest first.
+  { name: 'document_classifications', file: 'document_classifications.json', orderBy: 'created_at' },
+  // Arkiv: the typed record of each document, every version including a
+  // person's corrections, and the extraction runs and reviews behind them.
+  { name: 'document_extractions', file: 'document_extractions.json', orderBy: 'created_at' },
+  { name: 'activities', file: 'activities.json', orderBy: 'started_at' },
+  // Arkiv: what each document is tied to, and the agreements with the
+  // payments they imply, as derived and as a person or the bank confirmed.
+  { name: 'document_links', file: 'document_links.json', orderBy: 'created_at' },
+  { name: 'agreements', file: 'agreements.json', orderBy: 'created_at' },
+  { name: 'agreement_obligations', file: 'agreement_obligations.json', orderBy: 'due_on' },
+  // Arkiv: the dated, sourced facts about the company and its agreements,
+  // every reading kept (superseded and deprecated rows included).
+  { name: 'company_facts', file: 'company_facts.json', orderBy: 'sys_from' },
   // Receipts
   { name: 'receipts', file: 'receipts.json', orderBy: 'receipt_date' },
   // `receipts` has no exchange_rate column, so only the currency is copied:
@@ -1266,6 +1281,14 @@ export const ARCHIVE_EXCLUDED_TABLES: Record<string, string> = {
   company_subscriptions: 'billing state',
   deadlines: 'regenerable operational calendar state',
   dimension_retag_log: 'operation log',
+  // Page text Arkiv reads out of each archived document (text layer or model
+  // transcription). Derived from the originals that ship under dokument/ and
+  // re-readable from them, so it is not räkenskapsinformation of its own.
+  document_pages: 'page text derived from the originals in dokument/; re-readable',
+  document_jobs: 'pipeline queue state (read, classify and extract jobs); no bookkeeping content',
+  arkiv_findings: 'nightly lint findings, recomputed from the archive and the settings; no bookkeeping content',
+  arkiv_autonomy: 'audit tallies per document type, recomputed nightly from activities',
+  arkiv_graph_snapshots: 'the last build of the company graph, recomputed from the ledger, the agreements, the documents and the facts; no content of its own',
   // Verification metadata ABOUT räkenskapsinformation, not räkenskapsinformation
   // itself: one row per nightly SHA-256 recompute of an archived document
   // (migration 20260901130000). The documents ship under dokument/ with their

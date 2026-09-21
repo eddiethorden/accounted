@@ -133,6 +133,40 @@ export const WORKLIST_CATEGORIES = [
    * a settled event; this one is money that has to move before a date.
    */
   'skattekonto_payment_due',
+  /**
+   * Arkiv (phase 2): documents held at the door because nothing ties them to
+   * the company. Pending: document_attachments.admission_state = 'held'.
+   * Done: a person admitted or removed the document.
+   */
+  'document_relevance',
+  /**
+   * Arkiv (phase 2): admitted documents the classifier could not type
+   * (doc_type 'other' from the model) or typed with low confidence.
+   * Done: a person picked the type.
+   */
+  'document_unclassified',
+  /**
+   * Arkiv (phase 3): admitted documents whose extraction has fields the two
+   * readings disagreed on or a check rejected. Pending: current
+   * document_extractions row with review_fields non-empty. Done: a person
+   * settled every field.
+   */
+  'document_field_review',
+  /**
+   * Arkiv (phase 4): a payment an agreement says was due, with nothing on
+   * the bank account within two weeks after the date. Pending:
+   * agreement_obligations.status = 'missed'. Done: a matching transaction
+   * arrives (the daily observation marks it matched) or the row is waived.
+   */
+  'agreement_payment_missed',
+  /**
+   * Arkiv (phase 6): a finding of the nightly lint that a person should look
+   * at: a setting that contradicts a Skatteverket decision, an agreement
+   * ending with an unknown notice period, a duplicate document, a document
+   * that could not be read. Pending: arkiv_findings.status = 'open'. Done:
+   * the person applies or dismisses it, or the next lint no longer sees it.
+   */
+  'arkiv_finding',
 ] as const
 
 export type WorklistCategory = (typeof WORKLIST_CATEGORIES)[number]

@@ -8,6 +8,7 @@ import { hasCapability } from '@/lib/entitlements/has-capability'
 import { CAPABILITY } from '@/lib/entitlements/keys'
 import { appendProcessingHistory } from '@/lib/processing-history/append'
 import { createServiceClientNoCookies } from '@/lib/auth/api-keys'
+import { routeClassifiedDocument, VOUCHER_TYPES } from './route-from-arkiv'
 import { matchSupplierId } from '@/lib/suppliers/match-supplier'
 import type { InvoiceExtractionResult } from '@/types'
 import { PDFDocument } from 'pdf-lib'
@@ -272,11 +273,11 @@ export async function uploadAndExtract(
  * `file` carries the same bytes the archive holds: the pipeline reads them
  * for page counting and extraction.
  */
-export async function processArchivedDocument(
+async function processArchivedDocumentInner(
   supabase: import('@supabase/supabase-js').SupabaseClient,
   userId: string,
   companyId: string,
-  doc: { id: string; deduplicated?: boolean },
+  doc: { id: string; mime_type: string | null; deduplicated?: boolean },
   file: { name: string; buffer: ArrayBuffer; type: string },
   source: 'upload' | 'email' | 'whatsapp',
   emailMeta?: EmailMeta,
@@ -284,6 +285,10 @@ export async function processArchivedDocument(
   opts: ArchivedDocumentProcessingOptions = {},
 ) {
   const correlationId = crypto.randomUUID()
+  // The archive validated the bytes and resolved their type. Use that type
+  // for history and both extraction paths, including signed-upload completion.
+  // Null is retained only for legacy documents without a known MIME type.
+  file = { ...file, type: doc.mime_type ?? file.type }
 
   if (doc.deduplicated) {
     // The company already archived this exact content. If an inbox item
@@ -821,4 +826,26 @@ function scheduleDeferredExtraction(job: DeferredExtractionJob): void {
   } catch {
     queueMicrotask(() => void run())
   }
+}
+
+/**
+ * The inbox row for an archived document, then the routing Arkiv would do:
+ * a document uploaded again (deduplicated) is already classified, so no
+ * classification event will come; if Arkiv knows it is not something booked
+ * from here, the row leaves the queue at once instead of waiting for a
+ * person to discover a loan agreement among the receipts.
+ */
+export async function processArchivedDocument(...args: Parameters<typeof processArchivedDocumentInner>): ReturnType<typeof processArchivedDocumentInner> {
+  const result = await processArchivedDocumentInner(...args)
+  const [supabase, userId, companyId, doc] = args
+  if (doc.deduplicated) {
+    const { data } = await supabase.from('document_attachments').select('doc_type, admission_state').eq('id', doc.id).maybeSingle()
+    const known = data as { doc_type: string | null; admission_state: 'held' | 'admitted' } | null
+    if (known?.doc_type && !VOUCHER_TYPES.has(known.doc_type)) {
+      await routeClassifiedDocument(supabase, { documentId: doc.id, companyId, userId, docType: known.doc_type, admission: known.admission_state }).catch((err: unknown) => {
+        console.error('[invoice-inbox] routing a deduplicated document failed:', err instanceof Error ? err.message : err)
+      })
+    }
+  }
+  return result
 }
