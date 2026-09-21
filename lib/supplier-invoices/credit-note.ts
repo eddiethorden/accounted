@@ -88,3 +88,25 @@ export function buildSupplierCreditNoteRow(
     default_dimensions: original.default_dimensions ?? {},
   }
 }
+
+/**
+ * What a supplier invoice row does to leverantörsskulder (244x), in SEK: the
+ * net credit its registration voucher shows.
+ *
+ * An invoice credits 2440 by its total. A kreditfaktura debits it (Dr 2440,
+ * Cr cost, Cr 2641), so its effect is the total negated: the row is stored in
+ * magnitudes beside is_credit_note (buildSupplierCreditNoteRow above), and a
+ * reader that compares the stored figure with the ledger would see every
+ * credit note as a mismatch. The migration's voucher linking is that reader
+ * (lib/invoices/link-migrated-registration-vouchers.ts corroborates the
+ * amount before it links). A row imported before #2838 holds the provider's
+ * negative total on an unflagged row and passes through unchanged.
+ */
+export function supplierPayableEffectSek(
+  totalSek: number | null | undefined,
+  isCreditNote: boolean | null | undefined,
+): number | null {
+  if (typeof totalSek !== 'number' || !Number.isFinite(totalSek)) return null
+  if (!isCreditNote) return totalSek
+  return totalSek === 0 ? 0 : -Math.abs(totalSek)
+}

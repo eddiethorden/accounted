@@ -118,6 +118,25 @@ describe('relinkRegistrationVouchers', () => {
     })
   })
 
+  it('corroborates a supplier credit note against the negated total: its verifikat debits 2440 (#2838)', async () => {
+    mSales.mockResolvedValue(hydrated([]))
+    mSupplier.mockResolvedValue(hydrated([
+      providerSupplier('K-1', '2025-05-02', { series: 'B', number: 6 }),
+      providerSupplier('K-0', '2025-04-02', { series: 'B', number: 2 }),
+    ]))
+    queueDb([], [
+      // Stored in magnitudes beside is_credit_note, as since #2838.
+      { id: 'scn-1', supplier_invoice_number: 'K-1', invoice_date: '2025-05-02', total_sek: 1250, currency: 'SEK', is_credit_note: true },
+      // A row from before #2838: the negative total on an unflagged row.
+      { id: 'scn-0', supplier_invoice_number: 'K-0', invoice_date: '2025-04-02', total_sek: -800, currency: 'SEK', is_credit_note: false },
+    ])
+
+    await relinkRegistrationVouchers({ supabase, companyId: 'company-1', consentId: 'consent-1' })
+
+    const inputs = mLink.mock.calls[0][0].invoices as { invoiceId: string; totalSek: number }[]
+    expect(inputs.map((i) => [i.invoiceId, i.totalSek])).toEqual([['scn-1', -1250], ['scn-0', -800]])
+  })
+
   it('flags an invoice whose detail payload was never fetched as refNotFetched instead of noRef', async () => {
     // Fortnox carries VoucherSeries/VoucherNumber only on the detail form. An
     // invoice the hydration budget did not reach has no ref in the DTO, but

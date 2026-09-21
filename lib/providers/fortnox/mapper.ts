@@ -115,7 +115,8 @@ function isFlaggedCredit(raw: Record<string, unknown>): boolean {
 }
 
 /**
- * The invoice a Fortnox credit invoice credits, from `CreditInvoiceReference`.
+ * The invoice a Fortnox credit invoice credits, from `CreditInvoiceReference`
+ * (sales) or `CreditReference` (supplier invoices, numbered by `GivenNumber`).
  *
  * Fortnox documents the field as "reference to the credit invoice, if one
  * exists", which is the debit invoice's side of the link. On the credit
@@ -132,10 +133,14 @@ function isFlaggedCredit(raw: Record<string, unknown>): boolean {
  * none, and an invoice's document number is both its id and its printed
  * number.
  */
-function creditedInvoiceRefOf(raw: Record<string, unknown>): CreditedInvoiceRefDto | undefined {
-  const value = raw['CreditInvoiceReference'];
+function creditedInvoiceRefOf(
+  raw: Record<string, unknown>,
+  referenceKey: 'CreditInvoiceReference' | 'CreditReference' = 'CreditInvoiceReference',
+  ownNumberKey: 'DocumentNumber' | 'GivenNumber' = 'DocumentNumber',
+): CreditedInvoiceRefDto | undefined {
+  const value = raw[referenceKey];
   const reference = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  if (!reference || reference === '0' || reference === String(raw['DocumentNumber'] ?? '')) return undefined;
+  if (!reference || reference === '0' || reference === String(raw[ownNumberKey] ?? '')) return undefined;
   return { id: reference, invoiceNumber: reference };
 }
 
@@ -335,6 +340,15 @@ export function mapFortnoxToSupplierInvoice(raw: Record<string, unknown>): Suppl
   // would otherwise leave balance = total alongside paid = true.
   const paid = isFullyPaid(raw);
   const balance = paid ? 0 : ((raw['Balance'] as number | undefined) ?? total);
+  // 381 for a supplier kreditfaktura: the one signal the importer reads
+  // (dto.ts). Fortnox's schema types `Credit` as a boolean here and as a
+  // string on the sales side, so both spellings are read. The negative total
+  // is the signal production proves: on 2026-09-21 it held 26 Fortnox
+  // supplier documents with a negative `Total`, and not one of them had been
+  // read as credited by the old `Credit === true` test (all 26 landed as
+  // 'paid', #2838). `Total` is read as a number whether Fortnox serialises it
+  // as one or as a string.
+  const invoiceTypeCode = creditNoteTypeCode(isFlaggedCredit(raw), readNumber(raw, ['Total']) ?? 0);
 
   const rows = (raw['SupplierInvoiceRows'] as Record<string, unknown>[] | undefined) ?? [];
   const lines: SupplierInvoiceLineDto[] = rows.map((row, idx) => {
@@ -377,10 +391,16 @@ export function mapFortnoxToSupplierInvoice(raw: Record<string, unknown>): Suppl
     invoiceNumber: String(raw['GivenNumber'] ?? ''),
     issueDate: (raw['InvoiceDate'] as string) ?? '',
     dueDate: raw['DueDate'] as string | undefined,
+    invoiceTypeCode,
+    // Amounts stay as Fortnox states them, negative on a credit invoice: the
+    // importer resolves the sign convention once for every provider. The
+    // reference is read only on a credit note; its direction on the credit
+    // invoice itself is as unconfirmed as on the sales side (see
+    // creditedInvoiceRefOf), and the importer pairs only with a different,
+    // existing, ordinary invoice of the same supplier.
+    creditedInvoiceRef: invoiceTypeCode ? creditedInvoiceRefOf(raw, 'CreditReference', 'GivenNumber') : undefined,
     currencyCode: currency,
-    // The supplier side is unchanged by #2789: see the PR for why its credit
-    // notes are a separate fix (the supplier importer normalises no sign).
-    status: deriveInvoiceStatus(raw, raw['Credit'] === true),
+    status: deriveInvoiceStatus(raw, invoiceTypeCode !== undefined),
     supplier: buildParty(
       (raw['SupplierName'] ?? '') as string,
       raw['OrganisationNumber'] as string | undefined,

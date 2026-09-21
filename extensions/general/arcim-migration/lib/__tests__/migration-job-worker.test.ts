@@ -302,7 +302,10 @@ it('recognizes the consent resolver’s structured authorization errors', async 
  */
 describe('pairMigratedCreditNotes', () => {
   type Update = { table: string; payload: unknown; filters: unknown[][] }
-  function pairingDb(answers: { chunkTarget?: string | null; invoicesByNumber?: { id: string }[]; updateError?: { code: string; message: string } } = {}) {
+  type SupplierFacts = { supplier_id: string; currency: string; total: number; is_credit_note: boolean }
+  function pairingDb(answers: { chunkTarget?: string | null; invoicesByNumber?: { id: string }[]; updateError?: { code: string; message: string }
+    /** supplier_invoices rows by id (the pairing facts), and the ids a number lookup answers with. */
+    supplierRows?: Record<string, SupplierFacts>; supplierIdsByNumber?: { id: string }[] } = {}) {
     const updates: Update[] = []
     const reads: { table: string; filters: unknown[][] }[] = []
     const from = vi.fn((table: string) => {
@@ -319,6 +322,10 @@ describe('pairMigratedCreditNotes', () => {
         reads.push({ table, filters })
         if (table === 'migration_job_chunks') return resolve({ data: answers.chunkTarget ? { target_id: answers.chunkTarget } : null, error: null })
         if (table === 'invoices') return resolve({ data: answers.invoicesByNumber ?? [], error: null })
+        if (table === 'supplier_invoices') {
+          const byId = filters.find(f => f[0] === 'eq' && f[1] === 'id')
+          return resolve({ data: byId ? answers.supplierRows?.[byId[2] as string] ?? null : answers.supplierIdsByNumber ?? [], error: null })
+        }
         return resolve({ data: null, error: null })
       }
       return chain
@@ -362,7 +369,7 @@ describe('pairMigratedCreditNotes', () => {
 
     const untouched = pairingDb({ chunkTarget: 'inv-row' })
     await pairMigratedCreditNotes(untouched.supabase, job, [
-      chunk({ resource: 'supplierInvoices' }),
+      chunk({ resource: 'customers' }),
       chunk({ receipt: { link: { kind: 'customer', sourceVoucher: null, invoiceDate: '2024-10-15', totalSek: 1250 } } }),
       chunk({ target_id: null }),
     ], deadline())
@@ -381,6 +388,64 @@ describe('pairMigratedCreditNotes', () => {
 
     const broken = pairingDb({ chunkTarget: 'inv-row', updateError: { code: '57014', message: 'canceling statement due to statement timeout' } })
     await expect(pairMigratedCreditNotes(broken.supabase, job, [chunk({})], deadline())).rejects.toThrow('statement timeout')
+  })
+
+  /**
+   * Supplier credit notes (#2838). supplier_invoices has no credit cap trigger
+   * and a supplier's invoice number is unique per supplier only, so the pass
+   * checks the pair itself: an ordinary invoice of the same supplier, in the
+   * same currency, not smaller than the credit.
+   */
+  describe('supplier credit notes', () => {
+    const supplierChunk = (over: Partial<MigrationChunk> = {}) => chunk({
+      resource: 'supplierInvoices', target_id: 'scn-row',
+      receipt: { link: { kind: 'supplier', sourceVoucher: null, invoiceDate: '2026-03-10', totalSek: -1250,
+        creditedInvoiceRef: { id: '311', invoiceNumber: '311' } } }, ...over,
+    })
+    const credit: SupplierFacts = { supplier_id: 'sup-1', currency: 'SEK', total: 1250, is_credit_note: true }
+    const original: SupplierFacts = { supplier_id: 'sup-1', currency: 'SEK', total: 5000, is_credit_note: false }
+
+    it('pairs through the job\'s own chunks, on supplier_invoices', async () => {
+      const db = pairingDb({ chunkTarget: 'orig-row', supplierRows: { 'scn-row': credit, 'orig-row': original } })
+      await pairMigratedCreditNotes(db.supabase, job, [supplierChunk()], deadline())
+      expect(db.updates).toEqual([{ table: 'supplier_invoices', payload: { credited_invoice_id: 'orig-row' }, filters: [
+        ['eq', 'id', 'scn-row'], ['eq', 'company_id', 'company'], ['is', 'credited_invoice_id', null],
+      ] }])
+      expect(db.reads.find(r => r.table === 'migration_job_chunks')).toMatchObject({
+        filters: expect.arrayContaining([['eq', 'resource', 'supplierInvoices'], ['eq', 'source_id', '311']]) })
+    })
+
+    it('resolves a number only among the same supplier\'s ordinary invoices', async () => {
+      const db = pairingDb({ chunkTarget: null, supplierIdsByNumber: [{ id: 'orig-row' }], supplierRows: { 'scn-row': credit, 'orig-row': original } })
+      await pairMigratedCreditNotes(db.supabase, job, [supplierChunk()], deadline())
+      expect(db.updates.map(u => u.payload)).toEqual([{ credited_invoice_id: 'orig-row' }])
+      expect(db.reads.find(r => r.table === 'supplier_invoices' && r.filters.some(f => f[1] === 'supplier_invoice_number'))).toMatchObject({
+        filters: expect.arrayContaining([['eq', 'company_id', 'company'], ['eq', 'supplier_invoice_number', '311'],
+          ['neq', 'id', 'scn-row'], ['eq', 'supplier_id', 'sup-1'], ['eq', 'is_credit_note', false]]) })
+    })
+
+    it.each([
+      ['another supplier\'s invoice', { ...original, supplier_id: 'sup-2' }],
+      ['another credit note', { ...original, is_credit_note: true }],
+      ['an invoice in another currency', { ...original, currency: 'EUR' }],
+      ['an invoice smaller than the credit', { ...original, total: 1000 }],
+    ])('never pairs with %s', async (_label, named) => {
+      const db = pairingDb({ chunkTarget: 'orig-row', supplierRows: { 'scn-row': credit, 'orig-row': named } })
+      await pairMigratedCreditNotes(db.supabase, job, [supplierChunk()], deadline())
+      expect(db.updates).toEqual([])
+    })
+
+    it('never points an unflagged row at an original, and pairs nothing without a reference', async () => {
+      const unflagged = pairingDb({ chunkTarget: 'orig-row', supplierRows: { 'scn-row': { ...credit, is_credit_note: false }, 'orig-row': original } })
+      await pairMigratedCreditNotes(unflagged.supabase, job, [supplierChunk()], deadline())
+      expect(unflagged.updates).toEqual([])
+
+      const noRef = pairingDb({ chunkTarget: 'orig-row', supplierRows: { 'scn-row': credit, 'orig-row': original } })
+      await pairMigratedCreditNotes(noRef.supabase, job, [supplierChunk({
+        receipt: { link: { kind: 'supplier', sourceVoucher: null, invoiceDate: '2026-03-10', totalSek: -1250 } } })], deadline())
+      expect(noRef.updates).toEqual([])
+      expect(noRef.reads).toEqual([])
+    })
   })
 
   it('carries the provider\'s reference into the receipt and reports only a reference-less credit note as unlinked', async () => {
@@ -405,6 +470,89 @@ describe('pairMigratedCreditNotes', () => {
         link: expect.objectContaining({ creditedInvoiceRef: { id: 'inv-1', invoiceNumber: 'IN-2024-001' } }),
         warnings: expect.objectContaining({ creditNoteUnlinked: false }),
       })],
+    }))
+  })
+})
+
+/**
+ * A supplier kreditfaktura through the import phase (#2838): the receipt
+ * carries what the registration voucher must show (a credit note DEBITS
+ * 2440), and a credit note the company already holds in the shape written
+ * before the sign was normalised is not inserted a second time.
+ */
+describe('supplier credit notes in the import phase', () => {
+  const raw = { id: 'scn-1', invoiceNumber: 'K-77', invoiceDate: '2026-03-10', dueDate: '2026-04-09', currency: 'SEK',
+    totalAmount: -1250, remainingAmount: 0, supplierRef: { id: 'supplier', name: 'Leverantör AB' },
+    lineItems: [{ description: 'Retur', quantity: 1, unitPrice: -1000, taxRate: 25 }] }
+  const mappedCredit = () => ({
+    invoice: { supplier_invoice_number: 'K-77', invoice_date: '2026-03-10', currency: 'SEK', total: 1250, subtotal: 1000,
+      vat_amount: 250, total_sek: 1250, is_credit_note: true },
+    items: [{ line_total: 1000, vat_amount: 250 }],
+    fxUnresolved: null, vatUnresolved: false, creditNoteUnlinked: true, creditedInvoiceRef: null,
+  })
+  function withSupplierInvoices(db: ReturnType<typeof database>, existing: { id: string }[]) {
+    const reads: unknown[][][] = []
+    const original = db.supabase.from.bind(db.supabase)
+    ;(db.supabase as unknown as { from: unknown }).from = (table: string) => {
+      if (table !== 'supplier_invoices') return original(table)
+      const filters: unknown[][] = []
+      const chain: Record<string, unknown> = {}
+      for (const name of ['select', 'eq', 'limit']) chain[name] = (...args: unknown[]) => { filters.push([name, ...args]); return chain }
+      chain.then = (resolve: (value: unknown) => void) => { reads.push(filters); return resolve({ data: existing, error: null }) }
+      return chain
+    }
+    return reads
+  }
+  function seed(db: ReturnType<typeof database>) {
+    const dto = mapBokioToSupplierInvoice(raw)
+    expect(dto.invoiceTypeCode).toBe('381')
+    vi.mocked(mapSupplierInvoice).mockReturnValueOnce(mappedCredit())
+    db.rows.push({ id: dto.id, source_id: dto.id, resource: 'supplierInvoices', state: 'pending', ...sealMigrationPayload(dto) })
+    mocks.hydrate.mockResolvedValueOnce({ invoices: [dto], unhydratedIds: new Set(), hydration: {} })
+  }
+
+  it('hands the registration link the negated total, and flags the reference-less credit note unlinked', async () => {
+    const db = database({ phase: 'import', resources: ['supplierInvoices'], provider: 'bokio' })
+    mocks.resolve.mockResolvedValue({ accessToken: 'token', consent: { provider: 'bokio', org_number: '556000-0000' } })
+    withSupplierInvoices(db, [])
+    seed(db)
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.rpc).toHaveBeenCalledWith('commit_provider_migration_records', expect.objectContaining({
+      p_records: [expect.objectContaining({
+        id: 'scn-1',
+        row: expect.objectContaining({ total: 1250, is_credit_note: true }),
+        link: expect.objectContaining({ kind: 'supplier', totalSek: -1250 }),
+        warnings: expect.objectContaining({ creditNoteUnlinked: true }),
+      })],
+    }))
+  })
+
+  it('skips a credit note the company already holds with the provider\'s negative total, instead of inserting it twice', async () => {
+    const db = database({ phase: 'import', resources: ['supplierInvoices'], provider: 'bokio' })
+    mocks.resolve.mockResolvedValue({ accessToken: 'token', consent: { provider: 'bokio', org_number: '556000-0000' } })
+    const reads = withSupplierInvoices(db, [{ id: 'legacy-row' }])
+    seed(db)
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(db.rpc).toHaveBeenCalledWith('commit_provider_migration_records', expect.objectContaining({
+      p_records: [{ id: 'scn-1', skip: 'creditNoteInOldShape' }],
+    }))
+    expect(reads[0]).toEqual(expect.arrayContaining([
+      ['eq', 'company_id', 'company'], ['eq', 'supplier_invoice_number', 'K-77'], ['eq', 'invoice_date', '2026-03-10'],
+      ['eq', 'currency', 'SEK'], ['eq', 'total', -1250],
+    ]))
+  })
+
+  it('asks nothing of the database for an ordinary supplier invoice', async () => {
+    const db = database({ phase: 'import', resources: ['supplierInvoices'], provider: 'bokio' })
+    mocks.resolve.mockResolvedValue({ accessToken: 'token', consent: { provider: 'bokio', org_number: '556000-0000' } })
+    const reads = withSupplierInvoices(db, [{ id: 'would-match' }])
+    const dto = mapBokioToSupplierInvoice({ ...raw, id: 'si-1', totalAmount: 1250, remainingAmount: 1250 })
+    db.rows.push({ id: dto.id, source_id: dto.id, resource: 'supplierInvoices', state: 'pending', ...sealMigrationPayload(dto) })
+    mocks.hydrate.mockResolvedValueOnce({ invoices: [dto], unhydratedIds: new Set(), hydration: {} })
+    await runProviderMigrationWorker({ supabase: db.supabase, jobId: db.job.id })
+    expect(reads).toEqual([])
+    expect(db.rpc).toHaveBeenCalledWith('commit_provider_migration_records', expect.objectContaining({
+      p_records: [expect.objectContaining({ id: 'si-1', link: expect.objectContaining({ totalSek: 125 }) })],
     }))
   })
 })

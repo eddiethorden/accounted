@@ -581,12 +581,14 @@ export interface MappedInvoice {
    * True for an imported kreditfaktura: the row AS MAPPED carries no pointer
    * at the invoice it credits.
    *
-   * `invoices` models that relation only through `credited_invoice_id`, an
+   * `invoices` and `supplier_invoices` model that relation only through
+   * `credited_invoice_id`, an
    * Accounted id the mapper cannot know: the original may be inserted in the
    * same run, a chunk later, or by an earlier run. So the importer pairs the
    * rows afterwards, from `creditedInvoiceRef`, when the provider named the
    * credited invoice (Bokio's invoiceRef and Fortnox's CreditInvoiceReference
-   * do; Visma, Briox, Björn Lundén and WINT send nothing), and counts what
+   * do on a sales credit note, Fortnox's CreditReference on a supplier one;
+   * Visma, Briox, Björn Lundén and WINT send nothing), and counts what
    * stayed unpaired into the migration summary
    * (`ext_arcim_credit_notes_unlinked_detail`). Guessing the original
    * from an amount would put a wrong pair in the AR ledger, so no reference
@@ -722,11 +724,27 @@ function negate(n: number): number {
  * share a sign that is the absolute value, as before. The unit price stays a
  * magnitude and the quantity carries the row's sign, which is how an in-app
  * credit note is written (lib/invoices/build-credit-note-item.ts).
+ *
+ * ONE normaliser for both registers (#2838). The two DTOs share the fields
+ * read here, and the question is the same on both sides: what would this
+ * document read as if it were the invoice it reverses. Only what happens
+ * next differs, and that stays with each mapper: a sales credit note is
+ * stored with the credit sign applied (invoices has no credit flag), a
+ * supplier credit note is stored in these magnitudes beside
+ * `is_credit_note`, which is how Kreditera writes one
+ * (lib/supplier-invoices/credit-note.ts).
+ *
+ * The supplier side is also where a row net of zero is the normal case and
+ * not a corner: Fortnox sends a supplier invoice's ACCOUNTING rows (the 2440
+ * row against the cost and VAT rows; 19 of the 19 Fortnox supplier credit
+ * notes with rows in production on 2026-09-21 balance to zero). The header
+ * decides there, so the net is compared in whole öre: a float residue from
+ * summing a balanced voucher must not pick the factor.
  */
-function withAbsoluteAmounts(dto: SalesInvoiceDto): SalesInvoiceDto {
+function withAbsoluteAmounts<T extends SalesInvoiceDto | SupplierInvoiceDto>(dto: T): T {
   const abs = (amount: AmountType): AmountType => ({ ...amount, value: Math.abs(amount.value) })
-  const rowNet = dto.lines.reduce((sum, line) => sum + line.lineExtensionAmount.value, 0)
-  // A net of exactly zero decides nothing either way; the header's sign does.
+  const rowNet = round2(dto.lines.reduce((sum, line) => sum + line.lineExtensionAmount.value, 0))
+  // A net of zero decides nothing either way; the header's sign does.
   const statedNegative = rowNet !== 0 ? rowNet < 0 : dto.legalMonetaryTotal.payableAmount.value < 0
   const factor = statedNegative ? -1 : 1
   const oriented = (amount: AmountType): AmountType => ({ ...amount, value: amount.value === 0 ? 0 : amount.value * factor })
@@ -752,7 +770,8 @@ function withAbsoluteAmounts(dto: SalesInvoiceDto): SalesInvoiceDto {
         : undefined,
       payableAmount: abs(dto.legalMonetaryTotal.payableAmount),
     },
-  }
+    // Both DTOs share every field rewritten above, so the spread keeps T.
+  } as T
 }
 
 /**
@@ -1048,8 +1067,23 @@ export function mapSupplierInvoice(
   supplierId: string,
   fxRates?: FxRateIndex
 ): MappedInvoice {
-  const total = round2(dto.legalMonetaryTotal.payableAmount.value)
-  const vat = resolveInvoiceVat(dto)
+  const isCreditNote = dto.invoiceTypeCode === CREDIT_NOTE_TYPE_CODE
+
+  // A supplier kreditfaktura is stored the way Kreditera writes one
+  // (lib/supplier-invoices/credit-note.ts): the amounts of the invoice it
+  // reverses, as magnitudes, beside is_credit_note. The flag carries the
+  // sign, and every AP consumer reads it that way (the kontantmetod cut-off
+  // negates a flagged row, the ledger and the payment paths skip it). The
+  // providers state a supplier credit note with negative amounts, and this
+  // mapper used to pass them through: a flagged row would then have been
+  // negative twice over, which is why the mappers could not type one, and an
+  // untyped one landed as an ordinary payable with a negative total (#2838).
+  // Same normaliser as the sales side, applied once, header and rows
+  // together; everything below reads `amounts`, never `dto`'s figures.
+  const amounts = isCreditNote ? withAbsoluteAmounts(dto) : dto
+
+  const total = round2(amounts.legalMonetaryTotal.payableAmount.value)
+  const vat = resolveInvoiceVat(amounts)
   const subtotal = vat.subtotal
   const vatAmount = vat.vatAmount
   const vatTreatment = vat.treatment
@@ -1064,9 +1098,8 @@ export function mapSupplierInvoice(
     credited: 'credited',
   }
 
-  const isCreditNote = dto.invoiceTypeCode === CREDIT_NOTE_TYPE_CODE
-
   // Payment-derived status and amounts, by the rule the repair pass shares.
+  // Never consulted for a credit note: see `settled` below.
   const settlement = resolveSupplierSettlement(dto.paymentStatus, total)
 
   // Status MUST stay consistent with the payment amounts. The provider's
@@ -1096,7 +1129,7 @@ export function mapSupplierInvoice(
   // supplier rather than settling anything, so it carries no open balance
   // either (prod: a credited Fora note landed with remaining_amount = its
   // total). Same rule as the customer side.
-  const amounts = isCreditNote
+  const settled = isCreditNote
     ? { paidAmount: 0, remainingAmount: 0 }
     : { paidAmount: settlement.paidAmount, remainingAmount: settlement.remainingAmount }
 
@@ -1134,25 +1167,26 @@ export function mapSupplierInvoice(
     paid_at: resolvedStatus === 'paid' || resolvedStatus === 'partially_paid'
       ? settlement.paidAt
       : null,
-    paid_amount: amounts.paidAmount,
-    remaining_amount: amounts.remainingAmount,
+    paid_amount: settled.paidAmount,
+    remaining_amount: settled.remainingAmount,
     is_credit_note: isCreditNote,
-    notes: isCreditNote ? creditNoteNote(dto.note, null) : (dto.note || null),
+    notes: isCreditNote ? creditNoteNote(dto.note, dto.creditedInvoiceRef) : (dto.note || null),
   }
 
-  const items = dto.lines.map((line, idx) => mapSupplierInvoiceLine(line, idx, vat.rate))
+  const items = amounts.lines.map((line, idx) => mapSupplierInvoiceLine(line, idx, vat.rate))
 
   return {
     invoice,
     items,
     fxUnresolved: fx.unresolved,
     vatUnresolved: vat.unresolved,
-    // supplier_invoices carries is_credit_note, so the row still reads as a
-    // kreditfaktura on its own; what is missing is the same pointer at the
-    // original that the sales side lacks. No provider names the credited
-    // supplier invoice yet, so there is nothing to pair by.
+    // supplier_invoices carries is_credit_note, so the row reads as a
+    // kreditfaktura on its own; what it lacks as mapped is the pointer at the
+    // original (credited_invoice_id), which the importer fills afterwards
+    // from the reference when the provider named one (Fortnox's
+    // CreditReference; Visma, Bokio, Briox and Björn Lundén send none).
     creditNoteUnlinked: isCreditNote,
-    creditedInvoiceRef: null,
+    creditedInvoiceRef: isCreditNote ? (dto.creditedInvoiceRef ?? null) : null,
   }
 }
 

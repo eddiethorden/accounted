@@ -56,9 +56,10 @@ vi.mock('../lib/insert-fallback', () => ({
 }))
 
 import { executeMigration } from '../lib/migration-orchestrator'
-import { fetchSalesInvoicesDirect, hydrateSalesInvoices } from '@/lib/providers/provider-data-fetcher'
+import { fetchSalesInvoicesDirect, hydrateSalesInvoices, fetchSupplierInvoicesDirect, hydrateSupplierInvoices } from '@/lib/providers/provider-data-fetcher'
+import { linkMigratedRegistrationVouchers } from '@/lib/invoices/link-migrated-registration-vouchers'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
-import type { SalesInvoiceDto } from '@/lib/providers/dto'
+import type { SalesInvoiceDto, SupplierInvoiceDto } from '@/lib/providers/dto'
 
 const HYDRATION = { needed: 0, hydrated: 0, failed: 0, skippedForBudget: 0 }
 
@@ -180,5 +181,91 @@ describe('executeMigration: credit note pairing', () => {
 
     expect(pairings(r.mock)).toEqual([])
     expect(results.salesInvoices).toMatchObject({ imported: 2, creditNotesLinked: 0, creditNotesUnlinked: 1 })
+  })
+})
+
+/**
+ * The supplier invoice step (#2838). A supplier credit note pairs by the
+ * provider's own id of the invoice it credits, among this run's inserts only
+ * (a supplier's invoice number is not unique in the company), and only with
+ * an ordinary invoice of the same supplier and currency that is not smaller
+ * than the credit. The registration link is handed what the voucher must
+ * show: a credit note DEBITS 2440.
+ */
+describe('executeMigration: supplier credit note pairing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function supplierDto(over: Partial<SupplierInvoiceDto> & { invoiceNumber: string }, total = 5000, supplier = 'Leverantör AB'): SupplierInvoiceDto {
+    return {
+      id: `src-${over.invoiceNumber}`,
+      issueDate: '2026-03-01',
+      dueDate: '2026-03-31',
+      currencyCode: 'SEK',
+      status: 'booked',
+      supplier: party(supplier),
+      buyer: party(''),
+      lines: [],
+      legalMonetaryTotal: { payableAmount: { value: total, currencyCode: 'SEK' } },
+      taxTotal: { taxAmount: { value: total * 0.2, currencyCode: 'SEK' } },
+      paymentStatus: { paid: false, balance: { value: total, currencyCode: 'SEK' } },
+      ...over,
+    }
+  }
+  const supplierCredit = (number: string, refId: string | undefined, total = -1250, supplier = 'Leverantör AB') => supplierDto({
+    invoiceNumber: number, invoiceTypeCode: '381', status: 'credited',
+    creditedInvoiceRef: refId ? { id: refId, invoiceNumber: refId.replace('src-', '') } : undefined,
+  }, total, supplier)
+
+  async function runSuppliers(invoices: SupplierInvoiceDto[]) {
+    const mock = createQueuedMockSupabase()
+    ;(fetchSupplierInvoicesDirect as Mock).mockResolvedValue(invoices)
+    ;(hydrateSupplierInvoices as Mock).mockImplementation(async (_p: unknown, _t: unknown, _c: unknown, given: unknown[]) => ({
+      invoices: given, hydration: HYDRATION, unhydratedIds: new Set(),
+    }))
+    ;(fetchAllRows as Mock).mockImplementation(async (build: (range: { from: number; to: number }) => unknown) => {
+      build({ from: 0, to: 999 })
+      const lastTable = mock.supabase.from.mock.calls.at(-1)?.[0]
+      return lastTable === 'suppliers'
+        ? [{ id: 'sup-1', org_number: null, name: 'Leverantör AB' }, { id: 'sup-2', org_number: null, name: 'Annan AB' }]
+        : []
+    })
+    const results = await executeMigration({
+      consentId: 'consent-1', companyId: 'company-1', userId: 'user-1',
+      supabase: mock.supabase as unknown as SupabaseClient,
+      createHistoryClient: async () => ({ from: vi.fn() }) as unknown as Pick<SupabaseClient, 'from'>,
+      importCompanyInfo: false, importCustomers: false, importSuppliers: false, importSalesInvoices: false,
+      importSupplierInvoices: true, importAssets: false, reconcileVouchers: false, suggestParties: false,
+    })
+    const updates = mock.calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => call.table === 'supplier_invoices' && call.method === 'update')
+      .map(({ call, index }) => ({
+        payload: call.args[0],
+        invoiceId: mock.calls.slice(index + 1).find((c) => c.table === 'supplier_invoices' && c.method === 'eq' && c.args[0] === 'id')?.args[1],
+      }))
+    return { results, updates }
+  }
+
+  it('pairs a supplier credit note with the invoice the provider named, and links on the negated total', async () => {
+    const { results, updates } = await runSuppliers([supplierCredit('312', 'src-311'), supplierDto({ invoiceNumber: '311' })])
+    expect(updates).toEqual([{ payload: { credited_invoice_id: 'supplier_invoices-2' }, invoiceId: 'supplier_invoices-1' }])
+    expect(results.supplierInvoices).toMatchObject({ imported: 2, creditNotesLinked: 1, creditNotesUnlinked: 0 })
+    const inputs = (linkMigratedRegistrationVouchers as Mock).mock.calls[0][0].invoices as { invoiceNumber: string; totalSek: number }[]
+    expect(inputs.map((i) => [i.invoiceNumber, i.totalSek])).toEqual([['312', -1250], ['311', 5000]])
+  })
+
+  it.each([
+    ['names nothing', [supplierCredit('312', undefined), supplierDto({ invoiceNumber: '311' })]],
+    ['names an invoice outside this run', [supplierCredit('312', 'src-900')]],
+    ['names another supplier\'s invoice', [supplierCredit('312', 'src-311'), supplierDto({ invoiceNumber: '311' }, 5000, 'Annan AB')]],
+    ['names another credit note', [supplierCredit('312', 'src-311'), supplierCredit('311', undefined, -5000)]],
+    ['names an invoice smaller than the credit', [supplierCredit('312', 'src-311'), supplierDto({ invoiceNumber: '311' }, 1000)]],
+  ])('leaves it unpaired, and counts it, when the credit note %s', async (_label, invoices) => {
+    const { results, updates } = await runSuppliers(invoices)
+    expect(updates).toEqual([])
+    expect(results.supplierInvoices?.creditNotesLinked).toBe(0)
+    expect(results.supplierInvoices?.creditNotesUnlinked).toBeGreaterThanOrEqual(1)
   })
 })

@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { mapSalesInvoice } from '../entity-mapper'
-import type { InvoiceStatusCode, PartyDto, SalesInvoiceDto } from '@/lib/providers/dto'
-import { mapFortnoxToSalesInvoice } from '@/lib/providers/fortnox/mapper'
-import { mapBrioxToSalesInvoice } from '@/lib/providers/briox/mapper'
+import { mapSalesInvoice, mapSupplierInvoice } from '../entity-mapper'
+import type { InvoiceStatusCode, PartyDto, SalesInvoiceDto, SupplierInvoiceDto } from '@/lib/providers/dto'
+import { mapFortnoxToSalesInvoice, mapFortnoxToSupplierInvoice } from '@/lib/providers/fortnox/mapper'
+import { mapBrioxToSalesInvoice, mapBrioxToSupplierInvoice } from '@/lib/providers/briox/mapper'
+import { mapBokioToSupplierInvoice } from '@/lib/providers/bokio/mapper'
+import { mapBLToSupplierInvoice } from '@/lib/providers/bjornlunden/mapper'
+import { mapVismaToSupplierInvoice } from '@/lib/providers/visma/mapper'
+import { buildSupplierCreditNoteRow, supplierPayableEffectSek } from '@/lib/supplier-invoices/credit-note'
 
 /**
  * Guards the kreditfaktura shape written by mapSalesInvoice.
@@ -364,5 +368,158 @@ describe('mapSalesInvoice: a provider credit note end to end (#2789)', () => {
     expect(invoice.subtotal).toBe(-900)
     expect(items[0]).toMatchObject({ quantity: -2, unit_price: 500, line_total: -1000, vat_amount: -250 })
     expect(items[1]).toMatchObject({ quantity: 1, unit_price: 100, line_total: 100, vat_amount: 25 })
+  })
+})
+
+/**
+ * The SUPPLIER kreditfaktura (#2838).
+ *
+ * supplier_invoices models a credit note the opposite way from invoices: the
+ * amounts of the invoice it reverses, as MAGNITUDES, beside is_credit_note
+ * (lib/supplier-invoices/credit-note.ts is what Kreditera writes). The
+ * providers state a supplier credit note with negative amounts and the
+ * importer passed them through, so no mapper could type one without storing
+ * a flagged row that was negative twice over, and an untyped one landed as an
+ * ordinary payable with a negative total. The migrated row must equal the
+ * native one, so nothing downstream needs a special case.
+ */
+describe('mapSupplierInvoice: kreditfaktura', () => {
+  function supplierDto(over: {
+    invoiceTypeCode?: string
+    signOfAmounts?: 1 | -1
+    status?: InvoiceStatusCode
+    paid?: boolean
+    balance?: number
+    lastPaymentDate?: string
+    note?: string
+    creditedInvoiceRef?: SupplierInvoiceDto['creditedInvoiceRef']
+    lines?: SupplierInvoiceDto['lines']
+  } = {}): SupplierInvoiceDto {
+    const s = over.signOfAmounts ?? 1
+    return {
+      id: 'sinv-1', invoiceNumber: 'K-5531', issueDate: '2026-03-10', dueDate: '2026-04-09',
+      invoiceTypeCode: over.invoiceTypeCode, currencyCode: 'SEK', status: over.status ?? 'credited',
+      supplier: party, buyer: party,
+      lines: over.lines ?? [{
+        id: '1', description: 'Retur', quantity: 2 * s, unitPrice: { value: 500, currencyCode: 'SEK' },
+        lineExtensionAmount: { value: 1000 * s, currencyCode: 'SEK' }, taxPercent: 25,
+        taxAmount: { value: 250 * s, currencyCode: 'SEK' }, accountNumber: '4010',
+      }],
+      taxTotal: { taxAmount: { value: 250 * s, currencyCode: 'SEK' } },
+      legalMonetaryTotal: { lineExtensionAmount: { value: 1000 * s, currencyCode: 'SEK' }, payableAmount: { value: 1250 * s, currencyCode: 'SEK' } },
+      paymentStatus: { paid: over.paid ?? true, balance: { value: over.balance ?? 0, currencyCode: 'SEK' }, lastPaymentDate: over.lastPaymentDate },
+      note: over.note,
+      creditedInvoiceRef: over.creditedInvoiceRef,
+    }
+  }
+  const mapSupplier = (dto: SupplierInvoiceDto) => mapSupplierInvoice(dto, 'user-1', 'company-1', 'supplier-1')
+
+  it('stores the magnitudes beside is_credit_note, whatever sign the provider states', () => {
+    const negative = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1 }))
+    const magnitude = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: 1 }))
+    expect(negative.invoice).toMatchObject({
+      is_credit_note: true, status: 'credited', subtotal: 1000, vat_amount: 250, total: 1250,
+      subtotal_sek: 1000, vat_amount_sek: 250, total_sek: 1250, vat_treatment: 'standard_25',
+      paid_amount: 0, remaining_amount: 0, paid_at: null,
+    })
+    expect(negative.items).toEqual([expect.objectContaining({ quantity: 2, unit_price: 500, line_total: 1000, vat_rate: 0.25, vat_amount: 250 })])
+    expect(magnitude.invoice).toEqual(negative.invoice)
+    expect(magnitude.items).toEqual(negative.items)
+  })
+
+  it('equals the row Kreditera writes for the same document, column for column', () => {
+    const original = mapSupplier(supplierDto({ status: 'booked', paid: false, balance: 1250 })).invoice
+    const native = buildSupplierCreditNoteRow(
+      { ...original, id: 'orig-1', supplier_invoice_number: 'K-5531' } as unknown as Parameters<typeof buildSupplierCreditNoteRow>[0],
+      { userId: 'user-1', companyId: 'company-1', arrivalNumber: 7, date: '2026-03-10' },
+    )
+    const migrated = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1 })).invoice
+    for (const column of ['status', 'currency', 'exchange_rate', 'vat_treatment', 'reverse_charge', 'subtotal', 'subtotal_sek',
+      'vat_amount', 'vat_amount_sek', 'total', 'total_sek', 'remaining_amount', 'is_credit_note'] as const) {
+      expect(migrated[column], column).toEqual(native[column])
+    }
+  })
+
+  it('collects nothing and owes nothing, even when the provider calls the credit note paid on a date', () => {
+    const { invoice } = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1, status: 'paid', paid: true, lastPaymentDate: '2026-03-12' }))
+    expect(invoice).toMatchObject({ status: 'credited', paid_amount: 0, remaining_amount: 0, paid_at: null })
+  })
+
+  it('never lands in a state supplier_invoices_credit_note_not_payable refuses', () => {
+    for (const status of ['draft', 'sent', 'booked', 'paid', 'overdue', 'cancelled', 'credited'] as InvoiceStatusCode[]) {
+      const { invoice } = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1, status }))
+      expect(['registered', 'approved', 'overdue', 'paid', 'partially_paid'], `status=${status}`).not.toContain(invoice.status)
+    }
+  })
+
+  it('flips accounting rows together: a balanced voucher reads as the invoice it reverses', () => {
+    // Fortnox sends the document's ACCOUNTING rows, which net to zero: the
+    // header decides the factor, and the 2440 row keeps the opposite sign of
+    // the cost rows, exactly as on an ordinary migrated Fortnox invoice.
+    const rows = [[2440, 1250], [4010, -1000], [2641, -250.00000000000003]].map(([account, total], i) => ({
+      id: String(i + 1), lineExtensionAmount: { value: total, currencyCode: 'SEK' }, accountNumber: String(account),
+    }))
+    const { items } = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1, lines: rows }))
+    expect(items.map((item) => [item.account_number, item.line_total])).toEqual([['2440', -1250], ['4010', 1000], ['2641', 250]])
+  })
+
+  it('keeps the relative sign of the rows on a credit note that also charges something', () => {
+    const line = (id: string, total: number) => ({ id, quantity: total < 0 ? -1 : 1, unitPrice: { value: Math.abs(total), currencyCode: 'SEK' },
+      lineExtensionAmount: { value: total, currencyCode: 'SEK' }, taxPercent: 25, taxAmount: { value: total * 0.25, currencyCode: 'SEK' } })
+    const { items, invoice } = mapSupplier({ ...supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1 }), lines: [line('1', -1200), line('2', 200)] })
+    expect(items.map((item) => [item.quantity, item.unit_price, item.line_total, item.vat_amount]))
+      .toEqual([[1, 1200, 1200, 300], [-1, 200, -200, -50]])
+    expect(items.reduce((sum, item) => sum + Number(item.line_total), 0)).toBe(invoice.subtotal)
+  })
+
+  it('names the credited invoice in notes and hands the reference to the pairing pass', () => {
+    const named = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1, note: 'Retur pall 4', creditedInvoiceRef: { id: '311', invoiceNumber: '311' } }))
+    expect(named.creditedInvoiceRef).toEqual({ id: '311', invoiceNumber: '311' })
+    expect(named.creditNoteUnlinked).toBe(true)
+    expect(named.invoice.notes).toBe('Retur pall 4\n\nKreditfaktura importerad vid systembyte. Krediterar faktura 311 i källsystemet.')
+    const unnamed = mapSupplier(supplierDto({ invoiceTypeCode: '381', signOfAmounts: -1 }))
+    expect(unnamed.creditedInvoiceRef).toBeNull()
+    expect(unnamed.invoice.notes).toContain('Referens till ursprungsfakturan saknas')
+  })
+
+  it('leaves an ordinary supplier invoice untouched, reference and all', () => {
+    const { invoice, items, creditNoteUnlinked, creditedInvoiceRef } = mapSupplier(
+      supplierDto({ status: 'booked', paid: false, balance: 1250, creditedInvoiceRef: { id: '9', invoiceNumber: '9' }, note: 'Hej' }))
+    expect(invoice).toMatchObject({ is_credit_note: false, status: 'registered', total: 1250, remaining_amount: 1250, notes: 'Hej' })
+    expect(items[0]).toMatchObject({ quantity: 2, line_total: 1000 })
+    expect(creditNoteUnlinked).toBe(false)
+    expect(creditedInvoiceRef).toBeNull()
+  })
+
+  it.each([
+    ['fortnox', () => mapFortnoxToSupplierInvoice({ GivenNumber: '312', SupplierName: 'Leverantör AB', InvoiceDate: '2026-03-10', DueDate: '2026-04-09',
+      Currency: 'SEK', Credit: true, CreditReference: 311, Booked: true, Total: -1250, VAT: -250, Balance: 0,
+      SupplierInvoiceRows: [{ Account: 2440, Total: 1250 }, { Account: 4010, Total: -1000 }, { Account: 2641, Total: -250 }] })],
+    ['visma', () => mapVismaToSupplierInvoice({ Id: 'v', InvoiceNumber: 'K-1', InvoiceDate: '2026-03-10', CurrencyCode: 'SEK', IsCreditInvoice: true,
+      TotalAmount: -1250, VatAmount: -250, PaymentStatus: 6, Status: 1, SupplierName: 'Leverantör AB', Rows: [] })],
+    ['bokio', () => mapBokioToSupplierInvoice({ id: 'b', invoiceNumber: 'K-1', invoiceDate: '2026-03-10', currency: 'SEK', totalAmount: -1250,
+      totalTax: -250, remainingAmount: 0, supplierRef: { id: 's', name: 'Leverantör AB' }, lineItems: [] })],
+    ['briox', () => mapBrioxToSupplierInvoice({ id: 81, invoice_number: 'K-1', invoice_date: '2026-03-10', total_amount: '-1250.00',
+      net_amount: '-1000.00', vat_amount: '-250.00', balance: '0.00', supplier_name: 'Leverantör AB', booked: true })],
+    ['bjornlunden', () => mapBLToSupplierInvoice({ entityId: 912, invoiceNumber: 'K-1', invoiceDate: '2026-03-10', currency: 'SEK',
+      supplierName: 'Leverantör AB', amountInLocalCurrency: -1250, amountPaidInLocalCurrency: -1250, paid: true, status: [2] })],
+  ])('%s: a wire-shaped supplier credit note lands as a native-shaped kreditfaktura', (_provider, build) => {
+    const { invoice } = mapSupplier(build())
+    expect(invoice).toMatchObject({ is_credit_note: true, status: 'credited', total: 1250, total_sek: 1250, paid_amount: 0, remaining_amount: 0, paid_at: null })
+    expect(Number(invoice.subtotal)).toBeGreaterThanOrEqual(0)
+    expect(Number(invoice.vat_amount)).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('supplierPayableEffectSek', () => {
+  it('negates a credit note, whatever sign the row holds, and passes an invoice through', () => {
+    expect(supplierPayableEffectSek(1250, true)).toBe(-1250)
+    expect(supplierPayableEffectSek(-1250, true)).toBe(-1250)
+    expect(supplierPayableEffectSek(1250, false)).toBe(1250)
+    // A row from before #2838: the provider's negative total on an unflagged row.
+    expect(supplierPayableEffectSek(-1250, false)).toBe(-1250)
+    expect(Object.is(supplierPayableEffectSek(0, true), 0)).toBe(true)
+    expect(supplierPayableEffectSek(null, true)).toBeNull()
+    expect(supplierPayableEffectSek(undefined, false)).toBeNull()
   })
 })
