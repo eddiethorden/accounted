@@ -64,6 +64,7 @@ Relevance:
 - relevant: the document concerns this company's finances, obligations, structure, ownership, people or business. A receipt or invoice with an amount is relevant even when the buyer is not named: it may be an expense claim.
 - ask: nothing ties the document to the company (no amount, no counterparty, no organisation number, no text about the business), or it is clearly addressed to a different company.
 - irrelevant: clearly private or unrelated content (a holiday photo, a screenshot of a chat).
+An agreement.* type is the document that binds the parties: the contract, the terms, the policy or the order form. A document that bills, confirms payment of or reports on an agreement (an invoice, a receipt, a payment notice, a statement) is never the agreement itself, even when it names the subscription, the period or the renewal date: classify it by what it is.
 Never guess a type to avoid 'other'. Never invent facts that are not in the text.`
 }
 
