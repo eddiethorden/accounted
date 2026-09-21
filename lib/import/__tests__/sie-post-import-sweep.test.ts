@@ -201,22 +201,28 @@ describe('runPendingSIEBankSweeps', () => {
   })
 
   it('nominates recent completed imports with no finished receipt and lets the claim decide', async () => {
+    const done = { ...job({ id: '66666666-6666-4666-8666-666666666666' }), bank_sweep: { state: 'done' } }
+    const unswept = { ...job(), bank_sweep: null }
+    const stale = { ...job({ id: '55555555-5555-4555-8555-555555555555' }), bank_sweep: { state: 'running' } }
     mock.enqueueMany([
-      { data: [job(), job({ id: '55555555-5555-4555-8555-555555555555' })] },
-      { data: true }, // first import: claimed
+      { data: [done, unswept, stale] },
+      { data: true }, // unswept: claimed
       { count: 0 },
       { data: true },
-      { data: false }, // second import: someone else holds it
+      { data: false }, // running: the claim RPC says it is not stale yet
     ])
 
     const result = await runPendingSIEBankSweeps({ supabase })
 
     expect(result).toEqual({ considered: 2, swept: 1 })
+    expect(mock.supabase.rpc).not.toHaveBeenCalledWith(
+      'claim_sie_import_bank_sweep',
+      expect.objectContaining({ p_import_id: done.id }),
+    )
     expect(mock.findCalls('sie_imports', 'eq')).toEqual([
       ['job_state', 'completed'],
       ['job_kind', 'import'],
     ])
-    expect(mock.findCall('sie_imports', 'or')).toEqual(['bank_sweep.is.null,bank_sweep->>state.eq.running'])
     const since = mock.findCall('sie_imports', 'gte') as [string, string]
     expect(since[0]).toBe('imported_at')
     const ageMs = Date.now() - new Date(since[1]).getTime()

@@ -196,17 +196,22 @@ export async function runPendingSIEBankSweeps(
   try {
     const supabase = options.supabase ?? createServiceClientNoCookies()
     const since = new Date(Date.now() - PENDING_WINDOW_MS).toISOString()
+    // The receipt filter runs here, not in the query: a day of completed
+    // imports is a handful of rows, and a JSON path inside a PostgREST or()
+    // is one more thing that can only fail in production.
     const { data, error } = await supabase
       .from('sie_imports')
-      .select('id, company_id, user_id, execution_actor_id, job_state, job_kind, manifest, fiscal_year_start, fiscal_year_end')
+      .select('id, company_id, user_id, execution_actor_id, job_state, job_kind, manifest, fiscal_year_start, fiscal_year_end, bank_sweep')
       .eq('job_state', 'completed')
       .eq('job_kind', 'import')
       .gte('imported_at', since)
-      .or('bank_sweep.is.null,bank_sweep->>state.eq.running')
       .order('imported_at')
-      .limit(options.limit ?? 10)
+      .limit(200)
     if (error) throw new Error(error.message)
-    for (const job of (data ?? []) as SIEBankSweepJob[]) {
+    const pending = ((data ?? []) as Array<SIEBankSweepJob & { bank_sweep: { state?: string } | null }>)
+      .filter((row) => !row.bank_sweep || row.bank_sweep.state === 'running')
+      .slice(0, options.limit ?? 10)
+    for (const job of pending) {
       if (Date.now() > deadline || !runsSIEJobs()) break
       considered++
       if (await sweepBankRowsAfterSIEImport(supabase, job)) swept++
