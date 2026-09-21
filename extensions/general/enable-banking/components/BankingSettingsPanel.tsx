@@ -177,6 +177,14 @@ export default function BankingSettingsPanel() {
           .maybeSingle()
         const ownerId = (data as { company_id?: string } | null)?.company_id
         if (!ownerId) return
+        if (ownerId === company?.id) {
+          // The row IS this company's: the list above was just stale or came
+          // back without it. Naming the active company as "another company"
+          // would be wrong; bring the row in and open its picker instead.
+          await fetchConnectionsRef.current()
+          setPickerConnectionId(targetId)
+          return
+        }
         const owner = companies.find((c) => c.company.id === ownerId)
         setPickerCompanyMismatch(owner?.company.name ?? 'ett annat bolag')
       })()
@@ -186,7 +194,7 @@ export default function BankingSettingsPanel() {
     const newQuery = params.toString()
     const newUrl = `${window.location.pathname}${newQuery ? `?${newQuery}` : ''}`
     window.history.replaceState({}, '', newUrl)
-  }, [isLoading, bankConnections, companies, supabase])
+  }, [isLoading, bankConnections, companies, supabase, company?.id])
 
   function releaseConnectingLock() {
     connectingRef.current = false
