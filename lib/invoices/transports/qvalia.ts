@@ -5,13 +5,15 @@
  * only place that knows Qvalia's HTTP surface; everything else speaks the
  * provider-neutral `PeppolTransport` boundary.
  *
- * API facts (https://api.qvalia.io, verified 2026-08-21):
- * - Production `https://api.qvalia.com`, sandbox `https://api-test.qvalia.com`
- *   (the public docs say api-qa; the onboarding mail says api-test and that one
- *   answers), separate keys per environment.
+ * API facts (https://api.qvalia.io; verified live 2026-08-21, re-read against
+ * the docs 2026-09-21 after Qvalia's API update):
+ * - Production `https://api.qvalia.com`, sandbox `https://api-test.qvalia.com`,
+ *   separate keys per environment. (The docs named api-qa in August; they now
+ *   name api-test, the host that always answered.)
  * - Auth: the bare key in `Authorization: <key>` (verified live against the
- *   sandbox 2026-08-21; the `ApiKey <key>` form in the newest docs answers 401
- *   for this key, so it is opt-in via QVALIA_AUTH_SCHEME=apikey).
+ *   sandbox 2026-08-21, and what the docs say since the September correction).
+ *   The `ApiKey <key>` form from the August docs answered 401 and stays opt-in
+ *   via QVALIA_AUTH_SCHEME=apikey.
  * - Partner model: every call is `/partner/{partnerRegNo}/...`; transactions
  *   are `/partner/{partnerRegNo}/transaction/{accountRegNo}/invoices/outgoing`.
  *   In the consolidated setup all customer Peppol IDs live under one account
@@ -19,11 +21,30 @@
  * - Outgoing invoice: POST the BIS Billing 3 UBL XML with
  *   `content-type: application/xml`; the response carries an `integrationId`
  *   (UUID) that identifies the message at Qvalia. The same document id for the
- *   same receiver answers `409`.
+ *   same receiver answers `409`. `integrationId` appears in several places of
+ *   the response, always with the same value (by design per Qvalia). Since
+ *   September the docs also describe an `Idempotency-Key` request header (a
+ *   repeat within 24 h returns the original response and `integrationId`);
+ *   this adapter does not send it yet and relies on the 409 recovery below.
  * - Recipient lookup: GET `/partner/{p}/peppol/lookup/{scheme:id}?docTypeRoot=Invoice`.
- * - Webhooks are plain HTTPS POSTs without a signature; the partner attaches
- *   an outbound auth header of its own choosing. Delivery is at-least-once and
- *   the documented dedupe key is eventType + globalTransactionId + status.status.
+ * - Webhooks: since September Qvalia signs deliveries with HMAC-SHA256
+ *   (`X-Qvalia-Signature: t=<unix>,v1=<hex>` over `<t>.<raw body>`, plus
+ *   `X-Qvalia-Event-Id`; the signing secret is returned once by the first
+ *   `PUT .../webhook/configure`). The payload carries `eventId`, which is the
+ *   documented dedupe key, and `occurredAt` for ordering. This adapter
+ *   predates that: it still authenticates on the outbound auth header the
+ *   partner configures (shared secret) and dedupes on eventType +
+ *   globalTransactionId + status.status. Moving to signature verification is
+ *   a follow-up.
+ * - Webhook delivery is NOT retried by Qvalia: a non-2xx answer, a timeout
+ *   (10 s) or an unreachable endpoint loses the event for good, so webhooks
+ *   can never be the only source of truth. `pollDeliveryStatus` is the safety
+ *   net and stays.
+ * - Status values are documented since September: `pending`, `delayed`
+ *   (a Peppol send inside its retry window, up to 24 h; also its own event
+ *   type `document_delayed`) and `warning` are non-terminal; `processed`,
+ *   `processed_with_warning` and `error` are terminal. The field is still
+ *   declared free text, so unknown wording must keep meaning "no change".
  */
 
 import { timingSafeEqual } from 'node:crypto'

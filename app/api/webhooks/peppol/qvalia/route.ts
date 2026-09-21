@@ -29,15 +29,18 @@ const EVIDENCE_STATUSES = new Set([
 /**
  * POST /api/webhooks/peppol/qvalia
  *
- * Unauthenticated by design: Qvalia does not sign webhooks, so authenticity
- * comes from the shared secret Accounted configured as Qvalia's outbound auth
- * header (`QVALIA_WEBHOOK_SECRET`), checked constant-time in the adapter. The
- * raw body is hashed before parsing so every verified event keeps an exact
- * fingerprint.
+ * No session auth by design: authenticity comes from the shared secret
+ * Accounted configured as Qvalia's outbound auth header
+ * (`QVALIA_WEBHOOK_SECRET`), checked constant-time in the adapter. Qvalia did
+ * not sign webhooks when this was built (2026-08-21); since September 2026 it
+ * does (HMAC-SHA256 in `X-Qvalia-Signature`, replay id in `X-Qvalia-Event-Id`),
+ * and verifying that signature here is a follow-up. The raw body is hashed
+ * before parsing so every verified event keeps an exact fingerprint.
  *
- * Delivery is at-least-once; the append-only event table dedupes on the
- * provider event id, so replays are harmless. Unknown submissions answer 200:
- * they are logged, and a retry would not make them known.
+ * The same event can arrive more than once; the append-only event table
+ * dedupes on the provider event id, so replays are harmless. Unknown
+ * submissions answer 200: they are logged, and a retry would not make them
+ * known.
  */
 export async function POST(request: Request) {
   const config = readQvaliaConfigFromEnv()
@@ -127,7 +130,9 @@ export async function POST(request: Request) {
     }
   }
 
-  // A persistence failure is ours, not Qvalia's: answer 500 so they retry.
+  // A persistence failure is ours, not Qvalia's: answer 500 so it shows up as
+  // a failed delivery on their side. Qvalia does not retry a failed webhook
+  // (docs, 2026-09), so the status poll cron is what recovers the transition.
   if (failed > 0 && recorded === 0) {
     return NextResponse.json({ received: true, recorded, unmatched, failed }, { status: 500 })
   }
