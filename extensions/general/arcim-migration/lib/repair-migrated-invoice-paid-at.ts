@@ -52,6 +52,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLogger } from '@/lib/logger'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { ISO_DATE_RE } from '@/lib/invariants'
 import { paidAtFromDate } from '@/lib/invoices/paid-at'
 import { INVOICE_ROWS_COMPLETED_EVENT } from '@/lib/invoices/complete-invoice-rows'
 
@@ -81,7 +82,6 @@ export const PROVIDERS_WITHOUT_SETTLEMENT_DATE: readonly string[] = [
   'bjornlunden',
 ]
 
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 const TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[T ]\d{2}:\d{2}:\d{2}(?:\.(\d+))?(?:Z|[+-]\d{2}(?::?\d{2})?)$/
 
 /** Ids per `.in()` filter: keeps the request line well under proxy limits. */
@@ -109,7 +109,7 @@ export type PaidAtResolution =
 
 function isoDay(value: string | null | undefined): string | null {
   const day = typeof value === 'string' ? value.slice(0, 10) : ''
-  if (!ISO_DAY.test(day)) return null
+  if (!ISO_DATE_RE.test(day)) return null
   const parsed = new Date(`${day}T00:00:00Z`)
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day ? day : null
 }
