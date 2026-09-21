@@ -364,18 +364,33 @@ COMMENT ON FUNCTION public.delete_never_posted_asset(uuid, uuid)
 -- posted_at NULL, amount kept), the period is proposed again, and the asset
 -- counts as never having reached the books if that was its only posting.
 --
--- The unlink sits beside the document_attachments unlink, inside the
--- allow_delete window the function already opens, and is the single
--- transition section 2 admits. A disposal voucher is still refused by
--- assets_disposal_journal_entry_id_fkey, and that refusal rolls this unlink
--- back with it: un-disposing an asset is not something a voucher delete does.
+-- BUILDS ON 20260920190000 AND MUST APPLY AFTER IT. That migration (PR #2821)
+-- made delete_last_voucher find the registers hanging on a verifikat by FK and
+-- revert them inside the delete's transaction: refusals first, mutations
+-- after, one 'register_effects' key in the audit snapshot. A
+-- depreciation_schedules row is one more such register, so this function is
+-- 20260920190000's text verbatim with four additions in that structure.
+-- Verified by diff against 20260920190000's function: 0 lines removed or
+-- changed, 53 added. Both migrations CREATE OR REPLACE the same function, so
+-- whichever applies last wins: version order (190000, then 190200) is what
+-- keeps both changes. Do not renumber either file.
 --
--- The unposted rows are added to the voucher's audit_log old_state (key
--- unposted_depreciation_schedules), so the register change is traceable
--- from the same entry that records the voucher delete. The description
--- text is untouched.
+--   1. Refusal, with the others and before any mutation: an avskrivning may
+--      not be pulled out from under a DISPOSED asset, whose gain or loss was
+--      computed on it. Checked under the asset row lock that
+--      commit_asset_disposal takes. This also gives the disposal voucher
+--      itself (it carries the disposal-date avskrivning) a named reason
+--      instead of a raw assets_disposal_journal_entry_id_fkey error.
+--   2. Snapshot: the rows as they were when posted join 'register_effects' as
+--      'unposted_depreciation_schedules' (always present, [] when none): one
+--      snapshot shape, not two. The description text is untouched.
+--   3. Revert: beside the document_attachments unlink, inside the allow_delete
+--      window the function already opens. The window is NOT opened earlier
+--      for this, so no other statement runs with the flag that did not before.
+--      It is the single transition section 2 admits.
 --
--- Everything else in the function is byte-for-byte 20260908095907.
+-- A refusal that fires late (a RESTRICT foreign key at the final DELETE)
+-- raises, and the exception rolls back every revert above it.
 
 CREATE OR REPLACE FUNCTION public.delete_last_voucher(p_company_id uuid, p_entry_id uuid)
  RETURNS jsonb
@@ -392,6 +407,10 @@ DECLARE
   v_snapshot         jsonb;
   v_lines_snapshot   jsonb;
   v_is_period_ib     boolean := false;
+  v_claim_ids        uuid[];
+  v_removed_payments jsonb := '[]'::jsonb;
+  v_touched_invoices uuid[];
+  v_register_effects jsonb := '{}'::jsonb;
   v_unposted_schedules jsonb;
 BEGIN
   SELECT cm.role INTO v_caller_role
@@ -494,6 +513,181 @@ BEGIN
       v_ref_count;
   END IF;
 
+  -- ===== Registers that hang on this verifikat (see the file header) =====
+  -- Refusals first, mutations after: nothing below may change a row before
+  -- every reason to refuse the whole delete has been checked.
+
+  -- Utlagg, by the forward FK and by the entry's own source link (covers a
+  -- failed back-link write). Locked: create_expense_payout_batch and
+  -- settle_expense_claims_via_salary_run lock the same rows, so payout state
+  -- cannot appear between this check and the delete.
+  SELECT array_agg(c.id) INTO v_claim_ids
+  FROM (
+    SELECT ec.id
+    FROM expense_claims ec
+    WHERE ec.company_id = p_company_id
+      AND (
+        ec.journal_entry_id = p_entry_id
+        OR (v_entry.source_type = 'expense_claim' AND ec.id = v_entry.source_id)
+      )
+    FOR UPDATE
+  ) c;
+
+  IF v_claim_ids IS NOT NULL THEN
+    -- Money that has moved outranks the delete. Refuse here, while the
+    -- verifikat still exists, instead of leaving a paid claim without one.
+    IF EXISTS (
+      SELECT 1 FROM expense_claims ec
+      WHERE ec.id = ANY (v_claim_ids)
+        AND (ec.status = 'paid' OR ec.payout_batch_id IS NOT NULL)
+    ) THEN
+      RAISE EXCEPTION 'Verifikatet kan inte raderas: utlägget är redan utbetalt eller ligger i en utbetalning. Ångra utbetalningen först.';
+    END IF;
+
+    -- Any payslip line, draft included: deleting a verifikat is not a request
+    -- to change a salary run. The register's own delete handles a draft line.
+    IF EXISTS (
+      SELECT 1 FROM salary_line_items sli
+      WHERE sli.source_expense_claim_id = ANY (v_claim_ids)
+    ) THEN
+      RAISE EXCEPTION 'Verifikatet kan inte raderas: utlägget ligger på ett lönebesked. Ta bort raden från lönebeskedet först.';
+    END IF;
+  END IF;
+
+  -- #2779: planenlig avskrivning posted by this verifikat. Its register row
+  -- (depreciation_schedules) is one more register hanging on the verifikat by
+  -- FK. The refusal sits here with the others; the revert runs further down,
+  -- inside the allow_delete window. The asset row lock is the one
+  -- commit_asset_disposal and commit_asset_depreciation take, so a disposal
+  -- cannot land between this check and the delete.
+  PERFORM 1
+  FROM assets a
+  WHERE a.company_id = p_company_id
+    AND a.id IN (
+      SELECT ds.asset_id
+      FROM depreciation_schedules ds
+      WHERE ds.company_id = p_company_id
+        AND ds.journal_entry_id = p_entry_id
+    )
+  FOR UPDATE;
+
+  -- A disposal's gain or loss was computed on the depreciation posted up to
+  -- it, so an avskrivning may not be pulled out from under a disposed asset.
+  -- This also names the reason for the disposal voucher itself, which carries
+  -- the disposal-date avskrivning and would otherwise die on a raw FK error.
+  IF EXISTS (
+    SELECT 1
+    FROM depreciation_schedules ds
+    JOIN assets a ON a.id = ds.asset_id
+    WHERE ds.company_id = p_company_id
+      AND ds.journal_entry_id = p_entry_id
+      AND (a.disposed_at IS NOT NULL OR a.disposal_journal_entry_id IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'Verifikatet kan inte raderas: det bokför avskrivning på en tillgång som är avyttrad. Gör en rättelse (storno) i stället.';
+  END IF;
+
+  -- Supplier payment rows on this entry, by FK. Removed by id and kept whole
+  -- in the snapshot: the table has no audit trigger of its own.
+  WITH removed AS (
+    DELETE FROM supplier_invoice_payments sip
+    WHERE sip.company_id = p_company_id
+      AND sip.journal_entry_id = p_entry_id
+    RETURNING sip.*
+  )
+  SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) INTO v_removed_payments
+  FROM removed r;
+
+  -- Revert each invoice by exactly its removed share. An invoice whose
+  -- payment verifikat this is but that has no payment row (cash payment:
+  -- always a full payment) is reverted in full, as the TS sync does.
+  WITH share AS (
+    SELECT (p ->> 'supplier_invoice_id')::uuid AS invoice_id,
+           SUM((p ->> 'amount')::numeric)      AS amount
+    FROM jsonb_array_elements(v_removed_payments) p
+    GROUP BY 1
+  ),
+  target AS (
+    SELECT si.id,
+           GREATEST(ROUND(si.paid_amount - COALESCE(s.amount, si.paid_amount), 2), 0) AS new_paid
+    FROM supplier_invoices si
+    LEFT JOIN share s ON s.invoice_id = si.id
+    WHERE si.company_id = p_company_id
+      AND (s.invoice_id IS NOT NULL OR si.payment_journal_entry_id = p_entry_id)
+    FOR UPDATE OF si
+  ),
+  reverted AS (
+    UPDATE supplier_invoices si
+    SET paid_amount      = t.new_paid,
+        remaining_amount = ROUND(si.total - t.new_paid, 2),
+        -- Back to what the row's own facts say. 'approved' only if someone
+        -- attested it: a privately paid invoice is inserted as 'paid' and was
+        -- never approved, so claiming 'approved' would invent an attest.
+        status = CASE
+          WHEN t.new_paid > 0 THEN 'partially_paid'
+          WHEN si.due_date IS NOT NULL AND si.due_date < CURRENT_DATE THEN 'overdue'
+          WHEN si.approved_at IS NOT NULL THEN 'approved'
+          ELSE 'registered'
+        END,
+        paid_at = CASE WHEN t.new_paid > 0 THEN si.paid_at ELSE NULL END,
+        payment_journal_entry_id = CASE
+          WHEN si.payment_journal_entry_id = p_entry_id THEN NULL
+          ELSE si.payment_journal_entry_id
+        END,
+        -- "Paid with private funds" describes a payment. With nothing paid
+        -- it is no longer true, and the row is an ordinary unpaid invoice.
+        paid_with_private_funds = CASE WHEN t.new_paid > 0 THEN si.paid_with_private_funds ELSE false END
+    FROM target t
+    WHERE si.id = t.id
+    RETURNING si.id
+  )
+  SELECT array_agg(id) INTO v_touched_invoices FROM reverted;
+
+  -- Release the bank lines: the pointer FK clears itself on delete, but
+  -- supplier_invoice_id / category / is_business do not, and they keep the
+  -- line out of the inbox. Only lines tied to this entry or its payment rows.
+  UPDATE transactions t
+  SET journal_entry_id    = NULL,
+      supplier_invoice_id = NULL,
+      is_business         = NULL,
+      category            = NULL
+  WHERE t.company_id = p_company_id
+    AND v_touched_invoices IS NOT NULL
+    AND t.supplier_invoice_id = ANY (v_touched_invoices)
+    AND (
+      t.journal_entry_id = p_entry_id
+      OR t.id IN (
+        SELECT (p ->> 'transaction_id')::uuid
+        FROM jsonb_array_elements(v_removed_payments) p
+        WHERE p ->> 'transaction_id' IS NOT NULL
+      )
+    );
+
+  -- Eligibility was settled above, under lock. salary_line_items is
+  -- ON DELETE RESTRICT, so a line that appeared anyway still refuses here.
+  IF v_claim_ids IS NOT NULL THEN
+    DELETE FROM expense_claims ec
+    WHERE ec.company_id = p_company_id
+      AND ec.id = ANY (v_claim_ids);
+  END IF;
+
+  v_register_effects := jsonb_build_object(
+    'removed_expense_claim_ids',       COALESCE(to_jsonb(v_claim_ids), '[]'::jsonb),
+    'removed_supplier_payments',       v_removed_payments,
+    'reverted_supplier_invoice_ids',   COALESCE(to_jsonb(v_touched_invoices), '[]'::jsonb)
+  );
+
+  -- #2779: the rows as they were when posted. Once unlinked, nothing else
+  -- records which register row this verifikat had been linked to.
+  SELECT jsonb_agg(to_jsonb(ds)) INTO v_unposted_schedules
+  FROM depreciation_schedules ds
+  WHERE ds.company_id = p_company_id
+    AND ds.journal_entry_id = p_entry_id;
+
+  v_register_effects := v_register_effects || jsonb_build_object(
+    'unposted_depreciation_schedules', COALESCE(v_unposted_schedules, '[]'::jsonb)
+  );
+  v_snapshot := v_snapshot || jsonb_build_object('register_effects', v_register_effects);
+
   IF v_entry.reverses_id IS NOT NULL THEN
     PERFORM set_config('gnubok.allow_delete', 'true', true);
     UPDATE journal_entries
@@ -548,19 +742,10 @@ BEGIN
   SET journal_entry_id = NULL
   WHERE journal_entry_id = p_entry_id;
 
-  -- #2779: the planenlig avskrivning this voucher posted is no longer on the
-  -- books, so its register row goes back to an unposted proposal. The rows
-  -- are snapshotted into the audit entry first: once unlinked, nothing else
-  -- records which register row this voucher had been linked to.
-  SELECT jsonb_agg(to_jsonb(ds)) INTO v_unposted_schedules
-  FROM depreciation_schedules ds
-  WHERE ds.company_id = p_company_id
-    AND ds.journal_entry_id = p_entry_id;
-
-  IF v_unposted_schedules IS NOT NULL THEN
-    v_snapshot := v_snapshot || jsonb_build_object('unposted_depreciation_schedules', v_unposted_schedules);
-  END IF;
-
+  -- #2779: the avskrivning is no longer on the books, so its register row
+  -- goes back to an unposted proposal (amount kept). This is the single
+  -- transition enforce_depreciation_schedule_immutability admits, and only
+  -- inside this window.
   UPDATE depreciation_schedules
   SET journal_entry_id = NULL, posted_at = NULL
   WHERE company_id = p_company_id

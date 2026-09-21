@@ -582,7 +582,7 @@ describe('delete_last_voucher returns the schedule row to unposted', () => {
         deleted: result.rows[0].result.deleted,
         row: row.rows[0],
         entryLeft: entry.rowCount,
-        audited: audit.rows[0]?.old_state?.unposted_depreciation_schedules,
+        audited: audit.rows[0]?.old_state?.register_effects?.unposted_depreciation_schedules,
         assetOutcome: deletable.rows[0].outcome,
       }
     })
@@ -635,5 +635,130 @@ describe('delete_last_voucher returns the schedule row to unposted', () => {
       client.release()
     }
     expect(Number((await scheduleRows(posted.assetId))[0].planned_depreciation)).toBe(20000)
+  })
+})
+
+describe('delete_last_voucher: the depreciation register inside the #2821 register mechanism', () => {
+  // 20260920190000 (PR #2821) made delete_last_voucher find the registers that
+  // hang on a verifikat by FK: refusals first, reverts after, one
+  // register_effects snapshot. The schedule row is one more such register.
+  // These tests pin the UNION: both migrations replace the same function, so
+  // if either change were lost to the other, one half of each test fails.
+
+  async function linkClaim(posted: Seed & { entryId: string }, status: 'registered' | 'paid') {
+    const claimId = randomUUID()
+    // expense_claims_check1: a paid claim must sit on a payout batch.
+    let batchId: string | null = null
+    if (status === 'paid') {
+      batchId = randomUUID()
+      await getPool().query(
+        `INSERT INTO public.expense_payout_batches
+           (id, company_id, user_id, claimant_name, payout_date, cash_account, liability_account, total_sek)
+         VALUES ($1, $2, $3, 'Agare', CURRENT_DATE, '1930', '2018', 40)`,
+        [batchId, posted.companyId, posted.userId],
+      )
+    }
+    await getPool().query(
+      `INSERT INTO public.expense_claims
+         (id, company_id, user_id, claimant_name, description, expense_date,
+          amount_sek, vat_sek, expense_account, journal_entry_id, status, payout_batch_id)
+       VALUES ($1, $2, $3, 'Agare', 'Kvitto', CURRENT_DATE - 10, 40, 0, '5410', $4, $5, $6)`,
+      [claimId, posted.companyId, posted.userId, posted.entryId, status, batchId],
+    )
+    return claimId
+  }
+
+  const deleteVoucher = (client: PoolClient, posted: Seed & { entryId: string }) =>
+    client.query(`SELECT public.delete_last_voucher($1::uuid, $2::uuid) AS result`, [
+      posted.companyId,
+      posted.entryId,
+    ])
+
+  it('a #2821 refusal fires before the schedule row is touched', async () => {
+    // Registers are found by FK, not by source_type, so a paid utlagg hanging
+    // on this verifikat must stop the delete. Refusal first: the depreciation
+    // row may not have been unposted by the time the refusal is raised.
+    const posted = await seedPostedDepreciation()
+    await linkClaim(posted, 'paid')
+
+    await expect(
+      withUserContext(posted.userId, (client) => deleteVoucher(client, posted)),
+    ).rejects.toThrow(/redan utbetalt/)
+
+    const rows = await scheduleRows(posted.assetId)
+    expect(rows[0].journal_entry_id).toBe(posted.entryId)
+    expect(rows[0].posted_at).not.toBeNull()
+    expect((await entryState(posted.entryId))?.status).toBe('posted')
+  })
+
+  it('one delete reverts both registers and records them in ONE snapshot', async () => {
+    const posted = await seedPostedDepreciation()
+    const claimId = await linkClaim(posted, 'registered')
+
+    const outcome = await withUserContext(posted.userId, async (client) => {
+      await deleteVoucher(client, posted)
+      const claim = await client.query(`SELECT 1 FROM public.expense_claims WHERE id = $1`, [claimId])
+      const row = await client.query(
+        `SELECT journal_entry_id, posted_at FROM public.depreciation_schedules WHERE id = $1`,
+        [posted.scheduleId],
+      )
+      const audit = await client.query(
+        `SELECT old_state FROM public.audit_log
+          WHERE record_id = $1 AND table_name = 'journal_entries' AND action = 'DELETE'
+            AND description LIKE '%delete_last_voucher RPC%'`,
+        [posted.entryId],
+      )
+      return { claimLeft: claim.rowCount, row: row.rows[0], oldState: audit.rows[0].old_state }
+    })
+
+    // #2821's revert: the utlagg is gone with its verifikat.
+    expect(outcome.claimLeft).toBe(0)
+    // #2779's revert: the register row is an unposted proposal again.
+    expect(outcome.row).toEqual({ journal_entry_id: null, posted_at: null })
+    // One snapshot shape carrying both, and no second top-level key.
+    expect(outcome.oldState.register_effects).toMatchObject({
+      removed_expense_claim_ids: [claimId],
+      unposted_depreciation_schedules: [{ id: posted.scheduleId, journal_entry_id: posted.entryId }],
+    })
+    expect(outcome.oldState.unposted_depreciation_schedules).toBeUndefined()
+  })
+
+  it('an ordinary voucher reports an empty list, not a missing key', async () => {
+    const seed = await seedCompany()
+    const entryId = await insertDepreciationDraft(seed, { sourceType: 'manual' })
+    await getPool().query(
+      `UPDATE public.journal_entries SET status = 'posted', voucher_number = 1 WHERE id = $1`,
+      [entryId],
+    )
+
+    const oldState = await withUserContext(seed.userId, async (client) => {
+      await deleteVoucher(client, { ...seed, entryId })
+      const audit = await client.query(
+        `SELECT old_state FROM public.audit_log
+          WHERE record_id = $1 AND action = 'DELETE' AND description LIKE '%delete_last_voucher RPC%'`,
+        [entryId],
+      )
+      return audit.rows[0].old_state
+    })
+    expect(oldState.register_effects.unposted_depreciation_schedules).toEqual([])
+  })
+
+  it('refuses to pull an avskrivning out from under a disposed asset, and changes nothing', async () => {
+    // The disposal's gain or loss was computed on the depreciation posted up
+    // to it. Before #2779 every such delete died on the RESTRICT foreign key;
+    // having opened that door, this is the case that must stay shut.
+    const posted = await seedPostedDepreciation()
+    await getPool().query(
+      `UPDATE public.assets SET disposed_at = '2026-12-31', disposed_proceeds = 0 WHERE id = $1`,
+      [posted.assetId],
+    )
+
+    await expect(
+      withUserContext(posted.userId, (client) => deleteVoucher(client, posted)),
+    ).rejects.toThrow(/tillgång som är avyttrad/)
+
+    const rows = await scheduleRows(posted.assetId)
+    expect(rows[0].journal_entry_id).toBe(posted.entryId)
+    expect((await entryState(posted.entryId))?.status).toBe('posted')
   })
 })
