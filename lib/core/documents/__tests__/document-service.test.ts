@@ -58,6 +58,16 @@ vi.mock('@/lib/auth/api-keys', () => ({
   createServiceClientNoCookies: vi.fn(() => serviceClientOverride ?? makeClient()),
 }))
 
+// after() throws outside a request scope, which is where every test runs.
+// That is the default here too; the deferral tests swap in a capturing
+// implementation to stand in for a live request.
+const afterMock = vi.hoisted(() => vi.fn())
+vi.mock('next/server', () => ({ after: afterMock }))
+
+function afterOutsideRequestScope(): never {
+  throw new Error('after() called outside a request scope')
+}
+
 import {
   uploadDocument,
   createNewVersion,
@@ -90,6 +100,7 @@ function pdfBuffer(payload = 'test'): ArrayBuffer {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  afterMock.mockImplementation(afterOutsideRequestScope)
   eventBus.clear()
   _resetBucketVerified()
   resultIdx = 0
@@ -574,6 +585,131 @@ describe('uploadDocument', () => {
 
     expect(supabase.from).toHaveBeenCalledTimes(1)
     expect(serviceRemove).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('uploadDocument: document.uploaded subscribers and the response', () => {
+  const file = () => ({ name: 'kvitto.pdf', buffer: pdfBuffer('receipt'), type: 'application/pdf' })
+  const stored = () => [{ data: makeDocumentAttachment({ id: 'doc-slow' }), error: null }]
+
+  /** A subscriber that stays pending until the test releases it. */
+  function slowHandler() {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const finished = vi.fn()
+    const handler = vi.fn(async () => {
+      await gate
+      finished()
+    })
+    return { handler, finished, release }
+  }
+
+  const drain = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+  it('awaits subscribers by default: bulk callers rely on the await to pace them', async () => {
+    results = stored()
+    const slow = slowHandler()
+    eventBus.on('document.uploaded', slow.handler)
+
+    let settled = false
+    const upload = uploadDocument(makeClient() as never, 'user-1', 'company-1', file()).then((doc) => {
+      settled = true
+      return doc
+    })
+
+    await drain()
+    expect(slow.handler).toHaveBeenCalledOnce()
+    expect(settled).toBe(false)
+
+    slow.release()
+    await upload
+    expect(slow.finished).toHaveBeenCalledOnce()
+    expect(afterMock).not.toHaveBeenCalled()
+  })
+
+  it('deferred: resolves while a slow subscriber is still pending, and the subscriber still runs', async () => {
+    results = stored()
+    const slow = slowHandler()
+    eventBus.on('document.uploaded', slow.handler)
+
+    const doc = await uploadDocument(makeClient() as never, 'user-1', 'company-1', file(), {
+      deferUploadedEvent: true,
+    })
+
+    // The caller has its row; the subscriber has not finished.
+    expect(doc.id).toBe('doc-slow')
+    expect(slow.finished).not.toHaveBeenCalled()
+
+    await drain()
+    expect(slow.handler).toHaveBeenCalledOnce()
+    expect(slow.handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.objectContaining({ id: 'doc-slow' }),
+        userId: 'user-1',
+        companyId: 'company-1',
+      }),
+    )
+    expect(slow.finished).not.toHaveBeenCalled()
+
+    slow.release()
+    await drain()
+    expect(slow.finished).toHaveBeenCalledOnce()
+  })
+
+  it('deferred, inside a request: hands the subscribers to after() and runs nothing before the response', async () => {
+    results = stored()
+    const handler = vi.fn()
+    eventBus.on('document.uploaded', handler)
+    const scheduled: Array<() => unknown> = []
+    afterMock.mockImplementation((task: () => unknown) => { scheduled.push(task) })
+
+    await uploadDocument(makeClient() as never, 'user-1', 'company-1', file(), {
+      deferUploadedEvent: true,
+    })
+    await drain()
+
+    expect(scheduled).toHaveLength(1)
+    expect(handler).not.toHaveBeenCalled()
+
+    await scheduled[0]()
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('deferred: a throwing subscriber is logged, does not fail the upload, and does not starve the others', async () => {
+    results = stored()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const healthy = vi.fn()
+    eventBus.on('document.uploaded', async function extractionHandler() {
+      throw new Error('model call failed')
+    })
+    eventBus.on('document.uploaded', healthy)
+
+    const doc = await uploadDocument(makeClient() as never, 'user-1', 'company-1', file(), {
+      deferUploadedEvent: true,
+    })
+    await drain()
+
+    expect(doc.id).toBe('doc-slow')
+    expect(healthy).toHaveBeenCalledOnce()
+    const logged = errorSpy.mock.calls.map((call) => call.map(String).join(' ')).join('\n')
+    expect(logged).toContain('handler failed')
+    expect(logged).toContain('document.uploaded')
+    expect(logged).toContain('company-1')
+    errorSpy.mockRestore()
+  })
+
+  it('checks the documents bucket once per process, not once per upload', async () => {
+    const service = makeClient()
+    serviceClientOverride = service
+
+    for (let i = 0; i < 3; i++) {
+      resultIdx = 0
+      results = stored()
+      await uploadDocument(makeClient() as never, 'user-1', 'company-1', file())
+    }
+
+    expect(service.storage.getBucket).toHaveBeenCalledTimes(1)
+    expect(service.storage.createBucket).not.toHaveBeenCalled()
   })
 })
 

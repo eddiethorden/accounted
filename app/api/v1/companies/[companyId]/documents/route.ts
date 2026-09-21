@@ -267,6 +267,10 @@ export const POST = withApiV1<{ params: Promise<{ companyId: string }> }>(
           upload_source: uploadSource,
           journal_entry_id: journalEntryId,
           journal_entry_line_id: journalEntryLineId,
+          // No v1 read exposes extraction fields, so nothing a client can
+          // observe depends on the subscribers having finished. Awaiting
+          // them held the 201 for the length of a model call.
+          deferUploadedEvent: true,
         },
       )
       // `storage_path` is deliberately omitted from the public response:

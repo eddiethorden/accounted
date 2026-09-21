@@ -69,6 +69,11 @@ export const POST = withRouteContext(
         upload_source: uploadSource,
         journal_entry_id: journalEntryId || undefined,
         journal_entry_line_id: journalEntryLineId || undefined,
+        // The response is the stored row and nothing else; extraction is
+        // read later through /api/documents/:id/extraction-status, which
+        // reports 'running' until the handler stamps the row. Awaiting the
+        // subscribers here held every upload for the length of a model call.
+        deferUploadedEvent: true,
       })
 
       return NextResponse.json({ data: document })

@@ -1,9 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { after } from 'next/server'
 import { createServiceClientNoCookies } from '@/lib/auth/api-keys'
 import { dbError } from '@/lib/errors/db-error'
 import { eventBus } from '@/lib/events'
-import type { DocumentExtractionOwner } from '@/lib/events/types'
+import type { CoreEvent, DocumentExtractionOwner } from '@/lib/events/types'
+import { createLogger } from '@/lib/logger'
 import type { DocumentAttachment, DocumentUploadSource } from '@/types'
+
+const log = createLogger('document-service')
 
 /**
  * Document Service - WORM-style document archive
@@ -761,6 +765,57 @@ async function deterministicDocumentId(
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+type DocumentUploadedEvent = Extract<CoreEvent, { type: 'document.uploaded' }>
+
+/**
+ * Announce a stored document, either inside the caller's await (default) or
+ * after the HTTP response.
+ *
+ * Everything a document.uploaded subscriber does is work ABOUT a document
+ * that is already durable: bytes stored, row written, hash recorded. One
+ * subscriber (document-extraction) makes a paid model call that measured
+ * p50 14 s / p90 21 s on production, and the bus awaits every handler, so an
+ * awaited emit put that whole call between a person and "uploaded".
+ *
+ * Deferral is per call site, not a new default: bulk callers (bank sync,
+ * provider underlag import) emit thousands of times in one request and rely
+ * on the await to pace them. Deferring those would release every handler at
+ * once when the response ends.
+ *
+ * Same after() idiom as lib/webhooks/dispatch-kick.ts: after() keeps the
+ * serverless instance alive until the handlers settle; outside a request
+ * scope (tests, scripts, a plain node server) it throws and the work runs as
+ * a floating promise instead. The bus already logs each rejected handler;
+ * the catch here covers the emit itself so deferred work can never surface
+ * as an unhandled rejection on a request that has already answered.
+ */
+async function announceDocumentUploaded(
+  event: DocumentUploadedEvent,
+  defer: boolean,
+): Promise<void> {
+  if (!defer) {
+    await eventBus.emit(event)
+    return
+  }
+
+  const run = async (): Promise<void> => {
+    try {
+      await eventBus.emit(event)
+    } catch (err) {
+      log.error('deferred document.uploaded emit failed', err, {
+        documentId: event.payload.document.id,
+        companyId: event.payload.companyId,
+      })
+    }
+  }
+
+  try {
+    after(() => run())
+  } catch {
+    queueMicrotask(() => void run())
+  }
+}
+
 /**
  * Upload a document and create a record with SHA-256 integrity hash
  */
@@ -792,6 +847,13 @@ export async function uploadDocument(
      * caller already knows the booking). Default: the extension extracts.
      */
     extractionOwner?: DocumentExtractionOwner
+    /**
+     * Run document.uploaded subscribers after the HTTP response instead of
+     * inside this call. For doors where a person (or API client) waits on
+     * the upload and nothing in the response depends on a subscriber: see
+     * announceDocumentUploaded. Default false: the emit is awaited.
+     */
+    deferUploadedEvent?: boolean
   } = {}
 ): Promise<DocumentAttachment & { deduplicated?: boolean }> {
   await ensureDocumentsBucket()
@@ -932,15 +994,18 @@ export async function uploadDocument(
 
   const result = data as DocumentAttachment
 
-  await eventBus.emit({
-    type: 'document.uploaded',
-    payload: {
-      document: result,
-      userId,
-      companyId,
-      ...(metadata.extractionOwner ? { extractionOwner: metadata.extractionOwner } : {}),
+  await announceDocumentUploaded(
+    {
+      type: 'document.uploaded',
+      payload: {
+        document: result,
+        userId,
+        companyId,
+        ...(metadata.extractionOwner ? { extractionOwner: metadata.extractionOwner } : {}),
+      },
     },
-  })
+    metadata.deferUploadedEvent === true,
+  )
 
   return result
 }
