@@ -195,6 +195,11 @@ describe('expectedDocuments', () => {
     const drafts = expectedDocuments([line('2359', '2025-10-01', 0, 500000)], [], '2026-10-01')
     expect(drafts.map((d) => d.key)).toEqual(['document_expected:loan'])
     expect(drafts[0].detail.evidence).toMatchObject({ balance_months: 6, cost_months: 0, accounts: ['2359'] })
+    // On the 31st a date minus a month overflows: the six months must still be the six calendar months.
+    const marchEnd = expectedDocuments([line('2359', '2025-10-01', 0, 500000)], [], '2026-03-31')
+    expect(marchEnd[0].detail.evidence).toMatchObject({ balance_months: 6 })
+    // Two months of balance is not yet evidence.
+    expect(expectedDocuments([line('2359', '2026-02-15', 0, 500000)], [], '2026-03-31')).toEqual([])
     // Repaid in full before the window: no loan to document.
     expect(expectedDocuments([line('2359', '2025-10-01', 0, 500000), line('2359', '2026-03-15', 500000, 0)], [], '2026-10-01')).toEqual([])
   })

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { createLogger } from '@/lib/logger'
 import { addDays } from '@/lib/arkiv/agreements/dates'
 import { AUDIT_WINDOW_DAYS, autonomyLevel, tallyAudits } from './autonomy'
@@ -193,13 +194,16 @@ async function loadLedgerLines(supabase: SupabaseClient, companyId: string, toda
       .gte('journal_entries.entry_date', since.toISOString().slice(0, 10))
       .or('and(account_number.gte.8410,account_number.lte.8419),and(account_number.gte.5010,account_number.lte.5019)')
       .limit(5000),
-    base()
-      .or('and(account_number.gte.2350,account_number.lte.2359),and(account_number.gte.2390,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
-      .limit(5000),
+    // Every posting, paged: a balance is the sum of all of them, and PostgREST caps a single read.
+    fetchAllRows((range) =>
+      base()
+        .or('and(account_number.gte.2350,account_number.lte.2359),and(account_number.gte.2390,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
+        .order('id', { ascending: true })
+        .range(range.from, range.to),
+    ),
   ])
   if (cost.error) throw new Error(`ledger fetch failed: ${cost.error.message}`)
-  if (balance.error) throw new Error(`ledger fetch failed: ${balance.error.message}`)
-  const rows = [...(cost.data ?? []), ...(balance.data ?? [])] as unknown as Array<{
+  const rows = [...(cost.data ?? []), ...balance] as unknown as Array<{
     account_number: string | number
     debit_amount: number | string | null
     credit_amount: number | string | null

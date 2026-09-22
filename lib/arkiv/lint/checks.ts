@@ -317,10 +317,14 @@ function monthEnd(month: string): string {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
 }
 
-/** The six months up to and including today's, as YYYY-MM. */
+/** The six months up to and including today's, as YYYY-MM. Year and month arithmetic only: a date minus a month overflows on the 29th to the 31st. */
 function recentMonths(today: string): string[] {
+  const [y, m] = today.slice(0, 7).split('-').map(Number)
   const months: string[] = []
-  for (let n = 5; n >= 0; n--) months.push(monthOf(monthsBack(today, n)))
+  for (let n = 5; n >= 0; n--) {
+    const index = y * 12 + (m - 1) - n
+    months.push(`${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`)
+  }
   return months
 }
 
