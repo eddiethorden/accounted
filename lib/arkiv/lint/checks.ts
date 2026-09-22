@@ -311,7 +311,42 @@ function monthsBack(today: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-/** A recurring cost or a moving balance in the last six months with no active agreement of that kind in the archive. */
+/** The last day of the month an ISO date falls in. */
+function monthEnd(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+}
+
+/** The six months up to and including today's, as YYYY-MM. Year and month arithmetic only: a date minus a month overflows on the 29th to the 31st. */
+function recentMonths(today: string): string[] {
+  const [y, m] = today.slice(0, 7).split('-').map(Number)
+  const months: string[] = []
+  for (let n = 5; n >= 0; n--) {
+    const index = y * 12 + (m - 1) - n
+    months.push(`${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`)
+  }
+  return months
+}
+
+/**
+ * Months in the window where the rule's balance accounts carry a balance,
+ * computed from every line given: a loan paid out a year ago moves nothing
+ * for months and is still a loan (the first rollout company: 992 610 kr on
+ * 2359, zero balance months under the old movement count).
+ */
+function monthsWithBalance(lines: LedgerLine[], ranges: Array<{ from: string; to: string }>, today: string): number {
+  const onAccounts = lines.filter((l) => ranges.some((r) => inRange(l.account_number, r)))
+  if (onAccounts.length === 0) return 0
+  let months = 0
+  for (const month of recentMonths(today)) {
+    const end = monthEnd(month)
+    const balance = onAccounts.filter((l) => l.entry_date <= end).reduce((n, l) => n + l.credit - l.debit, 0)
+    if (Math.abs(balance) >= 0.01) months++
+  }
+  return months
+}
+
+/** A recurring cost or a standing balance in the last six months with no active agreement of that kind in the archive. */
 export function expectedDocuments(lines: LedgerLine[], agreements: AgreementForLint[], today: string): FindingDraft[] {
   const since = monthsBack(today, 6)
   const recent = lines.filter((l) => l.entry_date >= since)
@@ -321,9 +356,9 @@ export function expectedDocuments(lines: LedgerLine[], agreements: AgreementForL
     const costLines = rule.cost ? recent.filter((l) => inRange(l.account_number, rule.cost as { from: string; to: string }) && l.debit > 0) : []
     const costMonths = new Set(costLines.map((l) => monthOf(l.entry_date)))
     const costTotal = costLines.reduce((n, l) => n + l.debit, 0)
-    const balanceLines = rule.balance ? recent.filter((l) => (rule.balance ?? []).some((r) => inRange(l.account_number, r))) : []
-    const balanceMonths = new Set(balanceLines.map((l) => monthOf(l.entry_date)))
-    if (costMonths.size < rule.minMonths && balanceMonths.size < rule.minMonths) continue
+    const balanceMonths = rule.balance ? monthsWithBalance(lines, rule.balance, today) : 0
+    const balanceLines = rule.balance ? lines.filter((l) => (rule.balance ?? []).some((r) => inRange(l.account_number, r))) : []
+    if (costMonths.size < rule.minMonths && balanceMonths < rule.minMonths) continue
     drafts.push({
       kind: 'document_expected',
       key: `document_expected:${rule.id}`,
@@ -336,7 +371,7 @@ export function expectedDocuments(lines: LedgerLine[], agreements: AgreementForL
         evidence: {
           cost_months: costMonths.size,
           cost_total: roundOre(costTotal),
-          balance_months: balanceMonths.size,
+          balance_months: balanceMonths,
           accounts: [...new Set([...costLines, ...balanceLines].map((l) => l.account_number))].sort(),
           since,
         },
