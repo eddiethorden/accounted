@@ -261,6 +261,10 @@ describe('SIE database execution protocol', () => {
     expect(finished.job_result.journalEntriesCreated).toBe(205)
     expect((await client.query('SELECT count(*)::int n FROM journal_entry_no_doc_required WHERE company_id=$1',[company])).rows[0].n).toBe(205)
     expect((await client.query("SELECT count(*)::int n FROM sie_import_chunks WHERE import_id=$1 AND phase='vouchers' AND payload IS NOT NULL",[job])).rows[0].n).toBe(0)
+    // Issue #2835: the worker follows a completed import with the bank sweep and
+    // leaves its receipt. This company has no bank rows, so the matcher is skipped.
+    expect(finished.bank_sweep).toMatchObject({state:'done',attempt:1,skipped:'no_unlinked_bank_rows',
+      auto_linked:0,date_from:'2026-01-01',date_to:'2026-12-31'})
   },60_000)
   it('keeps a replacement queued through resume and hands over the hold atomically', async () => {
     await prepare([[voucher(0)]])

@@ -1,20 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { ResourceType, CREDIT_NOTE_TYPE_CODE, type SalesInvoiceDto } from '../dto'
+import { ResourceType, CREDIT_NOTE_TYPE_CODE, type SalesInvoiceDto, type SupplierInvoiceDto } from '../dto'
 import { FORTNOX_RESOURCE_CONFIGS } from '../fortnox/config'
 import { VISMA_RESOURCE_CONFIGS } from '../visma/config'
 import { BOKIO_RESOURCE_CONFIGS } from '../bokio/config'
 import { BRIOX_RESOURCE_CONFIGS } from '../briox/config'
 import { BL_RESOURCE_CONFIGS } from '../bjornlunden/config'
 import { WINT_RESOURCE_CONFIGS } from '../wint/config'
-import { mapFortnoxToSalesInvoice } from '../fortnox/mapper'
-import { mapVismaToSalesInvoice } from '../visma/mapper'
-import { mapBokioToSalesInvoice, mapBokioToCreditNote } from '../bokio/mapper'
-import { mapBrioxToSalesInvoice } from '../briox/mapper'
-import { mapBLToSalesInvoice } from '../bjornlunden/mapper'
+import { mapFortnoxToSalesInvoice, mapFortnoxToSupplierInvoice } from '../fortnox/mapper'
+import { mapVismaToSalesInvoice, mapVismaToSupplierInvoice } from '../visma/mapper'
+import { mapBokioToSalesInvoice, mapBokioToCreditNote, mapBokioToSupplierInvoice } from '../bokio/mapper'
+import { mapBrioxToSalesInvoice, mapBrioxToSupplierInvoice } from '../briox/mapper'
+import { mapBLToSalesInvoice, mapBLToSupplierInvoice } from '../bjornlunden/mapper'
 import { mapWintToSalesInvoice } from '../wint/mapper'
 
 /**
- * The credit-note contract of SalesInvoiceDto, enforced for EVERY provider.
+ * The credit-note contract of SalesInvoiceDto and SupplierInvoiceDto, enforced
+ * for EVERY provider and both registers.
  *
  * The migration importer reads one signal to decide that a sales document is
  * a kreditfaktura: `invoiceTypeCode` 381 (lib/providers/dto.ts). A mapper
@@ -28,14 +29,22 @@ import { mapWintToSalesInvoice } from '../wint/mapper'
  * mapper wishes it were: the Fortnox mapper tested `Credit === true` while
  * Fortnox's OpenAPI schema types the flag as the string "true", and not one
  * Fortnox credit note in production ever read as credited.
+ *
+ * The supplier register had the mirror defect (#2838): no supplier mapper but
+ * Visma's typed a credit note at all, so a provider's supplier kreditfaktura
+ * landed as an ordinary payable with a negative total (about 40 rows in
+ * production, from Fortnox, Bokio and Björn Lundén). The same contract now
+ * runs over every registered SUPPLIER mapper, with the same rule: a flag where
+ * the provider documents one, and a negative payable total for everyone.
  */
 
 type Raw = Record<string, unknown>
-type SalesMapper = (raw: Raw) => SalesInvoiceDto
+type InvoiceDto = SalesInvoiceDto | SupplierInvoiceDto
+type InvoiceMapper = (raw: Raw) => InvoiceDto
 
 interface ContractCase {
   provider: string
-  mapper: SalesMapper
+  mapper: InvoiceMapper
   /** A credit note as the provider flags it. Absent when no flag is documented. */
   flaggedCredit?: Raw
   /**
@@ -56,7 +65,7 @@ interface ContractCase {
   /** Sign the provider states a credit note's total with. */
   statedSign: 'negative' | 'magnitude'
   /** The credited invoice the flagged fixture names, when the provider names one. */
-  expectedRef?: SalesInvoiceDto['creditedInvoiceRef']
+  expectedRef?: InvoiceDto['creditedInvoiceRef']
 }
 
 const CASES: ContractCase[] = [
@@ -214,7 +223,11 @@ describe('credit-note contract: every provider sales mapper', () => {
     }
   })
 
-  for (const c of CASES) {
+  describeContractCases(CASES)
+})
+
+function describeContractCases(cases: ContractCase[]) {
+  for (const c of cases) {
     describe(c.provider, () => {
       if (c.flaggedCredit) {
         it('types a credit note the provider flags as 381', () => {
@@ -265,7 +278,7 @@ describe('credit-note contract: every provider sales mapper', () => {
       }
     })
   }
-})
+}
 
 describe('mapFortnoxToSalesInvoice: the Credit flag on the wire', () => {
   const credit = CASES[0].flaggedCredit!
@@ -293,5 +306,174 @@ describe('mapFortnoxToSalesInvoice: the Credit flag on the wire', () => {
 
   it('never lets a credit note name itself as the invoice it credits', () => {
     expect(mapFortnoxToSalesInvoice({ ...credit, CreditInvoiceReference: '1043' }).creditedInvoiceRef).toBeUndefined()
+  })
+})
+
+/**
+ * The supplier register. No provider but Fortnox and Visma documents a credit
+ * flag on a supplier invoice, and only Fortnox names the credited invoice
+ * (`CreditReference`); for the rest the negative payable total is the one
+ * signal there is, and none is invented.
+ */
+const SUPPLIER_CASES: ContractCase[] = [
+  {
+    provider: 'fortnox',
+    mapper: mapFortnoxToSupplierInvoice,
+    // SupplierInvoice (GET /3/supplierinvoices/{GivenNumber}). Fortnox's
+    // OpenAPI types `Credit` as a boolean and `CreditReference` as an integer
+    // here. SupplierInvoiceRows are the ACCOUNTING rows of the document, so
+    // they balance to zero and the 2440 row carries the opposite sign of the
+    // header: on a credit note 2440 is debited (production shape).
+    flaggedCredit: {
+      GivenNumber: '312', SupplierNumber: '7', SupplierName: 'Leverantör AB', InvoiceNumber: 'K-5531',
+      InvoiceDate: '2026-03-10', DueDate: '2026-04-09', Currency: 'SEK',
+      Credit: true, CreditReference: 311, Booked: true, Cancelled: false,
+      Total: -1250, VAT: -250, Balance: 0,
+      SupplierInvoiceRows: [
+        { Account: 2440, Debit: 1250, Credit: 0, Total: 1250 },
+        { Account: 4010, Debit: 0, Credit: 1000, Total: -1000 },
+        { Account: 2641, Debit: 0, Credit: 250, Total: -250 },
+      ],
+    },
+    // The list form, and any payload that leaves the flag out.
+    negativeTotal: {
+      GivenNumber: '312', SupplierNumber: '7', SupplierName: 'Leverantör AB', InvoiceNumber: 'K-5531',
+      InvoiceDate: '2026-03-10', DueDate: '2026-04-09', Currency: 'SEK', Booked: true, Cancelled: false, Total: -1250, Balance: 0,
+    },
+    ordinary: {
+      GivenNumber: '311', SupplierNumber: '7', SupplierName: 'Leverantör AB', InvoiceNumber: '5530',
+      InvoiceDate: '2026-03-01', DueDate: '2026-03-31', Currency: 'SEK',
+      Credit: false, CreditReference: 0, Booked: true, Cancelled: false, Total: 5000, VAT: 1000, Balance: 5000,
+    },
+    // The debit invoice once credited: Fortnox points it at its credit invoice.
+    creditedOriginal: {
+      GivenNumber: '311', SupplierNumber: '7', SupplierName: 'Leverantör AB', InvoiceNumber: '5530',
+      InvoiceDate: '2026-03-01', DueDate: '2026-03-31', Currency: 'SEK',
+      Credit: false, CreditReference: 312, Booked: true, Cancelled: false, Total: 5000, VAT: 1000, Balance: 3750,
+    },
+    statedSign: 'negative',
+    expectedRef: { id: '311', invoiceNumber: '311' },
+  },
+  {
+    provider: 'visma',
+    mapper: mapVismaToSupplierInvoice,
+    // SupplierInvoiceApi: Rows are accounting rows stated as magnitudes.
+    flaggedCredit: {
+      Id: 'v-scn', InvoiceNumber: 'K-5531', InvoiceDate: '2026-03-10', DueDate: '2026-04-09', CurrencyCode: 'SEK',
+      IsCreditInvoice: true, TotalAmount: -1250, VatAmount: -250, PaymentStatus: 6, Status: 1, SupplierName: 'Leverantör AB',
+      Rows: [{ LineNumber: 1, AccountNumber: 2440, DebetAmount: 1250, CreditAmount: 0 }, { LineNumber: 2, AccountNumber: 4010, DebetAmount: 0, CreditAmount: 1000 }],
+    },
+    negativeTotal: {
+      Id: 'v-scn', InvoiceNumber: 'K-5531', InvoiceDate: '2026-03-10', DueDate: '2026-04-09', CurrencyCode: 'SEK',
+      TotalAmount: -1250, PaymentStatus: 6, Status: 1, SupplierName: 'Leverantör AB', Rows: [],
+    },
+    ordinary: {
+      Id: 'v-si', InvoiceNumber: '5530', InvoiceDate: '2026-03-01', DueDate: '2026-03-31', CurrencyCode: 'SEK',
+      IsCreditInvoice: false, TotalAmount: 5000, PaymentStatus: 3, Status: 1, SupplierName: 'Leverantör AB', Rows: [],
+    },
+    statedSign: 'negative',
+  },
+  {
+    provider: 'bokio',
+    mapper: mapBokioToSupplierInvoice,
+    // supplierInvoiceGet has no status, no credit flag and no reference.
+    negativeTotal: {
+      id: 'b-scn', invoiceNumber: 'K-5531', invoiceDate: '2026-03-10', dueDate: '2026-04-09', currency: 'SEK',
+      totalAmount: -1250, remainingAmount: 0, supplierRef: { id: 's1', name: 'Leverantör AB' }, journalEntryRef: { id: 'je-1' },
+      lineItems: [{ id: 1, description: 'Retur', quantity: 1, unitPrice: -1000, taxRate: 25 }],
+    },
+    ordinary: {
+      id: 'b-si', invoiceNumber: '5530', invoiceDate: '2026-03-01', dueDate: '2026-03-31', currency: 'SEK',
+      totalAmount: 5000, remainingAmount: 5000, supplierRef: { id: 's1', name: 'Leverantör AB' }, journalEntryRef: { id: 'je-0' }, lineItems: [],
+    },
+    statedSign: 'negative',
+  },
+  {
+    provider: 'briox',
+    mapper: mapBrioxToSupplierInvoice,
+    negativeTotal: {
+      id: 81, invoice_number: 'K-5531', invoice_date: '2026-03-10', due_date: '2026-04-09',
+      total_amount: '-1250.00', net_amount: '-1000.00', vat_amount: '-250.00', balance: '0.00', supplier_name: 'Leverantör AB', booked: true,
+      rows: [{ id: 1, description: 'Retur', quantity: '-1', price: '1000.00', total: '-1000.00', account_number: 4010 }],
+    },
+    ordinary: {
+      id: 80, invoice_number: '5530', invoice_date: '2026-03-01', due_date: '2026-03-31',
+      total_amount: '5000.00', net_amount: '4000.00', vat_amount: '1000.00', balance: '5000.00', supplier_name: 'Leverantör AB', booked: true,
+    },
+    // As on the sales side: `credited` beside positive amounts is the ORIGINAL.
+    creditedOriginal: {
+      id: 80, invoice_number: '5530', invoice_date: '2026-03-01', due_date: '2026-03-31', status: 'credited',
+      total_amount: '5000.00', net_amount: '4000.00', vat_amount: '1000.00', balance: '0.00', supplier_name: 'Leverantör AB', booked: true,
+    },
+    statedSign: 'negative',
+  },
+  {
+    provider: 'bjornlunden',
+    mapper: mapBLToSupplierInvoice,
+    negativeTotal: {
+      entityId: 912, invoiceNumber: 'K-5531', invoiceDate: '2026-03-10', dueDate: '2026-04-09', currency: 'SEK',
+      supplierId: 'L7', supplierName: 'Leverantör AB', amountInLocalCurrency: -1250, amountPaidInLocalCurrency: -1250,
+      amountRemainingInLocalCurrency: 0, paid: true, status: [2],
+    },
+    ordinary: {
+      entityId: 911, invoiceNumber: '5530', invoiceDate: '2026-03-01', dueDate: '2026-03-31', currency: 'SEK',
+      supplierId: 'L7', supplierName: 'Leverantör AB', amountInLocalCurrency: 5000, amountPaidInLocalCurrency: 0,
+      amountRemainingInLocalCurrency: 5000, paid: false, status: [0],
+    },
+    statedSign: 'negative',
+  },
+]
+
+describe('credit-note contract: every provider supplier mapper', () => {
+  it('has a contract case for every supplier mapper a provider registers', () => {
+    const configs = [
+      FORTNOX_RESOURCE_CONFIGS, VISMA_RESOURCE_CONFIGS, BOKIO_RESOURCE_CONFIGS,
+      BRIOX_RESOURCE_CONFIGS, BL_RESOURCE_CONFIGS, WINT_RESOURCE_CONFIGS,
+    ] as Partial<Record<ResourceType, { mapper: unknown }>>[]
+    const registered = configs.flatMap((config) =>
+      config[ResourceType.SupplierInvoices] ? [config[ResourceType.SupplierInvoices]!.mapper] : [])
+    // WINT registers no supplier-invoice resource.
+    expect(registered).toHaveLength(5)
+    const covered = new Set<unknown>(SUPPLIER_CASES.map((c) => c.mapper))
+    for (const mapper of registered) {
+      expect(covered.has(mapper), `no credit-note contract case for ${(mapper as { name: string }).name}`).toBe(true)
+    }
+  })
+
+  it('gives every supplier mapper the negative-total backstop, whatever flag it also reads', () => {
+    for (const c of SUPPLIER_CASES) expect(c.negativeTotal, c.provider).toBeDefined()
+  })
+
+  describeContractCases(SUPPLIER_CASES)
+})
+
+describe('mapFortnoxToSupplierInvoice: the credit fields on the wire', () => {
+  const credit = SUPPLIER_CASES[0].flaggedCredit!
+
+  it('reads the flag as a boolean or a string, and the total as a number or a string', () => {
+    for (const flag of [true, 'true', 'True']) {
+      const dto = mapFortnoxToSupplierInvoice({ ...credit, Credit: flag, Total: 0, VAT: 0 })
+      expect(dto.invoiceTypeCode, `Credit=${JSON.stringify(flag)}`).toBe(CREDIT_NOTE_TYPE_CODE)
+      expect(dto.status).toBe('credited')
+    }
+    const { Credit: _flag, ...unflagged } = credit
+    expect(mapFortnoxToSupplierInvoice({ ...unflagged, Total: '-1250.00' }).invoiceTypeCode).toBe(CREDIT_NOTE_TYPE_CODE)
+    for (const flag of ['false', false, undefined, null, 0]) {
+      const dto = mapFortnoxToSupplierInvoice({ ...SUPPLIER_CASES[0].ordinary, Credit: flag })
+      expect(dto.invoiceTypeCode, `Credit=${JSON.stringify(flag)}`).toBeUndefined()
+    }
+  })
+
+  it('reads CreditReference as a number or a string, ignores an empty one and never a self-reference', () => {
+    expect(mapFortnoxToSupplierInvoice({ ...credit, CreditReference: '311' }).creditedInvoiceRef)
+      .toEqual({ id: '311', invoiceNumber: '311' })
+    for (const empty of ['0', 0, '', null, undefined, '312', 312]) {
+      expect(mapFortnoxToSupplierInvoice({ ...credit, CreditReference: empty }).creditedInvoiceRef,
+        `CreditReference=${JSON.stringify(empty)}`).toBeUndefined()
+    }
+  })
+
+  it('a cancelled credit invoice stays cancelled in the DTO', () => {
+    expect(mapFortnoxToSupplierInvoice({ ...credit, Cancelled: true }).status).toBe('cancelled')
   })
 })

@@ -48,6 +48,8 @@ import {
   linkMigratedRegistrationVouchers,
   type MigratedInvoiceLinkInput,
 } from '@/lib/invoices/link-migrated-registration-vouchers'
+import { supplierPayableEffectSek } from '@/lib/supplier-invoices/credit-note'
+import { ORE_TOLERANCE } from '@/lib/money'
 import {
   buildCustomerMetadataEnrichment,
   type CustomerMetadataEnrichment,
@@ -1432,14 +1434,21 @@ export async function executeMigration(options: MigrationOptions): Promise<Migra
         )
         let fxUnresolved = 0
         let vatUnresolved = 0
+        let creditNotesUnlinked = 0
+        let creditNotesLinked = 0
+        // Supplier credit notes whose provider named the invoice they credit,
+        // paired once every row of the run is inserted (the original may come
+        // after its credit note). Keyed by the provider's id of the invoice.
+        const insertedBySourceId = new Map<string, { id: string; supplierId: string; currency: string; total: number; isCreditNote: boolean }>()
+        const creditNotesToPair: { invoiceId: string; sourceId: string; refId: string; invoiceNumber: string }[] = []
 
         for (const batch of chunk(ready, INSERT_CHUNK_SIZE)) {
           const mappedBatch = batch.map((r) => {
-            const { invoice, items, fxUnresolved: fx, vatUnresolved: vatMissing } = mapSupplierInvoice(
+            const { invoice, items, fxUnresolved: fx, vatUnresolved: vatMissing, creditedInvoiceRef } = mapSupplierInvoice(
               r.dto, userId, companyId, r.supplierId, fxRates
             )
             invoice.arrival_number = nextArrivalNumber++
-            return { invoice, items, fxUnresolved: fx, vatUnresolved: vatMissing, dto: r.dto }
+            return { invoice, items, fxUnresolved: fx, vatUnresolved: vatMissing, creditedInvoiceRef, dto: r.dto, supplierId: r.supplierId }
           })
 
           const outcome = await insertWithPerRowFallback(
@@ -1474,10 +1483,33 @@ export async function executeMigration(options: MigrationOptions): Promise<Migra
               sourceVoucher: mappedBatch[i].dto.sourceVoucher ?? null,
               refNotFetched: unhydratedIds.has(mappedBatch[i].dto.id),
               invoiceDate: mappedBatch[i].dto.issueDate,
-              totalSek: mappedBatch[i].invoice.total_sek as number | null,
+              // What the registration voucher must show: a credit note is
+              // stored in magnitudes but DEBITS 2440.
+              totalSek: supplierPayableEffectSek(
+                mappedBatch[i].invoice.total_sek as number | null,
+                mappedBatch[i].invoice.is_credit_note as boolean,
+              ),
               currencyCode: mappedBatch[i].dto.currencyCode || 'SEK',
               invoiceNumber: mappedBatch[i].dto.invoiceNumber || null,
             })
+            const isCreditNote = mappedBatch[i].invoice.is_credit_note === true
+            if (mappedBatch[i].dto.id) {
+              insertedBySourceId.set(mappedBatch[i].dto.id, {
+                id: String(invoiceId),
+                supplierId: mappedBatch[i].supplierId,
+                currency: String(mappedBatch[i].invoice.currency),
+                total: Number(mappedBatch[i].invoice.total),
+                isCreditNote,
+              })
+            }
+            if (isCreditNote) {
+              const refId = mappedBatch[i].creditedInvoiceRef?.id
+              if (refId && mappedBatch[i].dto.id) {
+                creditNotesToPair.push({ invoiceId: String(invoiceId), sourceId: mappedBatch[i].dto.id, refId, invoiceNumber: mappedBatch[i].dto.invoiceNumber })
+              } else {
+                creditNotesUnlinked++
+              }
+            }
             const fx = mappedBatch[i].fxUnresolved
             if (fx) {
               fxUnresolved++
@@ -1503,11 +1535,43 @@ export async function executeMigration(options: MigrationOptions): Promise<Migra
           }
         }
 
+        // Pair each supplier credit note with the invoice it credits, by the
+        // provider's own id of that invoice and only among this run's
+        // inserts: a supplier's invoice number is not unique in the company,
+        // so nothing is resolved by number here, and never by amount. The
+        // same checks as the job worker's pairing pass: an ordinary invoice
+        // of the same supplier, in the same currency, not smaller than the
+        // credit. Anything else stays unpaired, with the number the provider
+        // named on the row's notes.
+        for (const credit of creditNotesToPair) {
+          const own = insertedBySourceId.get(credit.sourceId)
+          const original = insertedBySourceId.get(credit.refId)
+          const pairable = own && original && original.id !== credit.invoiceId && !original.isCreditNote
+            && original.supplierId === own.supplierId && original.currency === own.currency
+            && Math.abs(own.total) <= Math.abs(original.total) + ORE_TOLERANCE
+          if (!pairable) {
+            creditNotesUnlinked++
+            console.warn(`[migration] Supplier credit note ${credit.invoiceNumber}: the invoice it names is not among this run's imports; imported unpaired.`)
+            continue
+          }
+          const { error } = await supabase
+            .from('supplier_invoices')
+            .update({ credited_invoice_id: original.id })
+            .eq('id', credit.invoiceId)
+            .eq('company_id', companyId)
+          if (error) {
+            creditNotesUnlinked++
+            console.error(`[migration] Supplier credit note ${credit.invoiceNumber}: pairing failed:`, error.message)
+            continue
+          }
+          creditNotesLinked++
+        }
+
         if (excluded.length > 0) {
           skipReasons.outsideFiscalYears = excluded.length
           skipped += excluded.length
         }
-        results.supplierInvoices = { total: listedAll.length, imported, skipped, skipReasons, fxUnresolved, vatUnresolved, hydration, errorSample: errorSample ?? undefined }
+        results.supplierInvoices = { total: listedAll.length, imported, skipped, skipReasons, fxUnresolved, vatUnresolved, creditNotesUnlinked, creditNotesLinked, hydration, errorSample: errorSample ?? undefined }
         console.log(`[migration] Supplier invoices: ${imported} imported, ${skipped} skipped (${elapsedSeconds(stepStartedAt)} s)`)
       } catch (err) {
         console.error('Failed to import supplier invoices:', err)

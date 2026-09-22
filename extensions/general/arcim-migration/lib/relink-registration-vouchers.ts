@@ -39,6 +39,7 @@ import {
   type MigratedInvoiceLinkInput,
   type RegistrationLinkResult,
 } from '@/lib/invoices/link-migrated-registration-vouchers'
+import { supplierPayableEffectSek } from '@/lib/supplier-invoices/credit-note'
 
 export interface RelinkRegistrationVouchersOptions {
   supabase: SupabaseClient
@@ -76,6 +77,7 @@ interface UnlinkedSupplierRow {
   invoice_date: string
   total_sek: number | null
   currency: string | null
+  is_credit_note: boolean | null
 }
 
 /**
@@ -136,7 +138,7 @@ export async function relinkRegistrationVouchers(
     fetchAllRows<UnlinkedSupplierRow>(({ from, to }) =>
       supabase
         .from('supplier_invoices')
-        .select('id, supplier_invoice_number, invoice_date, total_sek, currency')
+        .select('id, supplier_invoice_number, invoice_date, total_sek, currency, is_credit_note')
         .eq('company_id', companyId)
         .is('registration_journal_entry_id', null)
         .order('id', { ascending: true })
@@ -177,7 +179,8 @@ export async function relinkRegistrationVouchers(
       sourceVoucher: dto.sourceVoucher ?? null,
       refNotFetched: supplier.unhydratedIds.has(dto.id),
       invoiceDate: row.invoice_date,
-      totalSek: row.total_sek,
+      // A credit note is stored in magnitudes but DEBITS 2440.
+      totalSek: supplierPayableEffectSek(row.total_sek, row.is_credit_note),
       currencyCode: row.currency,
       invoiceNumber: dto.invoiceNumber || null,
     })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getActiveCompanyId } from '@/lib/company/context'
 import type { CompanyRole } from '@/types'
+import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 
 /**
  * Write-permission guard for API routes.
@@ -85,6 +86,54 @@ export async function requireWritePermission(
   }
 
   return { ok: true }
+}
+
+/**
+ * Owner/admin predicate for routes that write a table whose RLS policy is
+ * `user_is_company_admin(company_id)`: company_settings, companies,
+ * company_members, company_invitations, api_keys, invoice_payee_defaults.
+ *
+ * `requireWritePermission()` lets a `member` through, and RLS then refuses
+ * the write without raising: the UPDATE matches zero rows and the route has
+ * to guess why. That is two definitions of "may write here" that disagree
+ * for exactly one role. This does not restate the rule in TypeScript: it asks
+ * the database the SAME predicate the policy evaluates
+ * (public.user_is_company_admin, 20260422120000), so the route and the row
+ * can never disagree about who is an administrator. Routes opt in through
+ * `withRouteContext(..., { requireAdmin: true })`.
+ *
+ * Owner and admin are both non-viewer roles, so a route gated here does not
+ * also need `requireWritePermission()`.
+ *
+ * Throws when the predicate cannot be evaluated: "we could not check" must
+ * not read as "you are not allowed" (withRouteContext maps the throw to the
+ * canonical 500 envelope). A null answer fails closed.
+ */
+export async function isCompanyAdmin(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('user_is_company_admin', {
+    p_company_id: companyId,
+  })
+  if (error) throw error
+  return data === true
+}
+
+/**
+ * The canonical 403 for an owner/admin-only action: one envelope, whether the
+ * wrapper's gate refused or a handler found that RLS refused the row.
+ */
+export function companyAdminRequiredResponse(
+  log: Parameters<typeof errorResponseFromCode>[1],
+  requestId: string,
+): NextResponse {
+  return errorResponseFromCode('FORBIDDEN', log, {
+    requestId,
+    messageSv: 'Bara företagets ägare eller en administratör kan göra det här.',
+    messageEn: 'Only the company owner or an administrator can do this.',
+    details: { required_roles: ['owner', 'admin'] },
+  })
 }
 
 /**

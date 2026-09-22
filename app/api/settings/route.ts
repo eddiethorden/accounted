@@ -318,5 +318,8 @@ export const PUT = withRouteContext(
 
     return NextResponse.json({ data })
   },
-  { requireWrite: true },
+  // company_settings is writable by owner/admin only (RLS,
+  // user_is_company_admin). With requireWrite a `member` reached the UPDATE,
+  // matched zero rows and was told "Inställningarna hittades inte." (404).
+  { requireAdmin: true },
 )

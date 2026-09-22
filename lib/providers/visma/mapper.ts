@@ -15,6 +15,7 @@ import {
   multiplyIfBothPresent,
 } from '../amounts';
 import { parseSourceVoucherRef } from '../source-voucher';
+import { creditNoteTypeCode } from '../dto';
 
 function amount(value: number | undefined | null, currency: string = 'SEK'): AmountType {
   return { value: value ?? 0, currencyCode: currency };
@@ -112,10 +113,11 @@ function deriveInvoiceStatus(raw: Record<string, unknown>): InvoiceStatusCode {
 function deriveSupplierInvoiceStatus(
   raw: Record<string, unknown>,
   paid: boolean,
+  isCreditNote: boolean,
 ): InvoiceStatusCode {
   const status = raw['Status'] as number | undefined;
   if (status === 2) return 'cancelled';
-  if (raw['IsCreditInvoice'] === true) return 'credited';
+  if (isCreditNote) return 'credited';
   if (paid) return 'paid';
   if (status === 0) return 'draft';
   const ps = raw['PaymentStatus'] as number | undefined;
@@ -277,14 +279,21 @@ export function mapVismaToSupplierInvoice(raw: Record<string, unknown>): Supplie
     source: ps != null ? 'enum' : 'balance',
   };
 
+  // 381 for a supplier kreditfaktura: the one signal the importer reads
+  // (dto.ts). `IsCreditInvoice` is eAccounting's own flag; the negative total
+  // is the same backstop every supplier mapper has, for a payload that omits
+  // the flag. SupplierInvoiceApi names no credited invoice, so the credit
+  // note lands unpaired.
+  const invoiceTypeCode = creditNoteTypeCode(raw['IsCreditInvoice'] === true, total);
+
   return {
     id: String(raw['Id'] ?? ''),
     invoiceNumber: String(raw['InvoiceNumber'] ?? ''),
     issueDate: (raw['InvoiceDate'] as string) ?? '',
     dueDate: raw['DueDate'] as string | undefined,
     currencyCode: currency,
-    status: deriveSupplierInvoiceStatus(raw, paid),
-    invoiceTypeCode: raw['IsCreditInvoice'] === true ? '381' : undefined,
+    status: deriveSupplierInvoiceStatus(raw, paid, invoiceTypeCode !== undefined),
+    invoiceTypeCode,
     supplier: buildParty((raw['SupplierName'] ?? '') as string),
     buyer: buildParty(''),
     lines,

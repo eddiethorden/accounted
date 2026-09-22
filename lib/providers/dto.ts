@@ -139,22 +139,27 @@ export interface CreditedInvoiceRefDto {
 export const CREDIT_NOTE_TYPE_CODE = '381';
 
 /**
- * The `invoiceTypeCode` a sales document carries: 381 for a credit note,
- * nothing for an ordinary invoice. The mappers whose provider sends negative
- * credit amounts (Fortnox, Briox, Björn Lundén, WINT) set the field through
- * this function, so the rule is stated once; Visma and Bokio set it from their
- * own credit flag, which the contract test pins.
+ * The `invoiceTypeCode` a sales or a supplier document carries: 381 for a
+ * credit note, nothing for an ordinary invoice. The sales mappers whose
+ * provider sends negative credit amounts (Fortnox, Briox, Björn Lundén, WINT)
+ * and EVERY supplier mapper set the field through this function, so the rule
+ * is stated once; the Visma and Bokio sales mappers set it from their own
+ * credit flag, which the contract test pins.
  *
  * A document is a credit note when the provider flags it as one, OR when its
  * payable total is negative. The second half is not a guess: a sales document
- * that owes the customer money cannot be a claim on them, whatever the source
- * system calls it, and it is the only signal several payloads carry at all
+ * that owes the customer money cannot be a claim on them, and a supplier
+ * document that owes US money cannot be a payable, whatever the source
+ * system calls it. It is the only signal several payloads carry at all
  * (Fortnox's list form has no `Credit` field; Briox, Björn Lundén and WINT
- * document no credit flag this code could be verified against). It is also
+ * document no credit flag this code could be verified against; Bokio's
+ * supplier invoice has none). It is also
  * what keeps a wrong guess about the flag's wire format from failing silently:
  * the Fortnox mapper tested `Credit === true` while Fortnox's schema types the
  * flag as the string "true", and 3 200 credit notes reached production as
- * paid invoices without a single one ever reading as credited (#2789).
+ * paid invoices without a single one ever reading as credited (#2789). The
+ * supplier side had the mirror defect: about 40 supplier credit notes reached
+ * production as ordinary invoices with a negative total (#2838).
  *
  * `flaggedByProvider` must mean "this document IS a credit note". A status
  * that says the document HAS BEEN credited (Bokio `credited`, WINT
@@ -290,7 +295,21 @@ export interface SupplierInvoiceDto {
   issueDate: string;
   dueDate?: string;
   deliveryDate?: string;
+  /**
+   * UNCL1001 document type: '381' marks a supplier kreditfaktura. Every
+   * supplier mapper MUST set it through creditNoteTypeCode; it is the one
+   * signal the importer reads, and a mapper that leaves it unset lands the
+   * credit note as an ordinary payable with a negative total (#2838).
+   * Enforced for every registered supplier mapper by
+   * lib/providers/__tests__/credit-note-contract.test.ts.
+   *
+   * Amounts keep the sign the provider states them with: the importer
+   * resolves the convention once, to the magnitudes beside
+   * `is_credit_note` that an in-app supplier credit note carries.
+   */
   invoiceTypeCode?: string;
+  /** The supplier invoice this credit note credits, when the provider names it. */
+  creditedInvoiceRef?: CreditedInvoiceRefDto;
   currencyCode: string;
   status: InvoiceStatusCode;
   supplier: PartyDto;

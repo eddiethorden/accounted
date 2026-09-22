@@ -819,10 +819,39 @@ function resolveMcpDocumentMimeType(fileName: string, requestedMimeType: unknown
 
 interface DocumentInboxResult {
   document_id: string
-  inbox_item_id: string
+  inbox_item_id: string | null
   status: string
   extracted_data: Record<string, unknown>
   matched_supplier_id: string | null
+  /** The bytes were already in the archive: this is the existing document, nothing new was created. */
+  deduplicated?: boolean
+}
+
+/**
+ * The same bytes uploaded again land on the document the archive already
+ * holds, and the answer says so instead of minting a second inbox item. The
+ * first rollout company had one filing uploaded eight times before this;
+ * the nightly lint found the copies, the upload never did.
+ */
+async function alreadyArchivedResult(supabase: SupabaseClient, companyId: string, documentId: string): Promise<DocumentInboxResult> {
+  const { data, error } = await supabase
+    .from('invoice_inbox_items')
+    .select('id, status, extracted_data, matched_supplier_id')
+    .eq('company_id', companyId)
+    .eq('document_id', documentId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(`Failed to look up the archived document's inbox item: ${error.message}`)
+  const item = data as { id: string; status: string; extracted_data: Record<string, unknown> | null; matched_supplier_id: string | null } | null
+  return {
+    document_id: documentId,
+    inbox_item_id: item?.id ?? null,
+    status: item?.status ?? 'archived',
+    extracted_data: item?.extracted_data ?? {},
+    matched_supplier_id: item?.matched_supplier_id ?? null,
+    deduplicated: true,
+  }
 }
 
 async function findCompletedDocumentInboxItem(
@@ -3933,7 +3962,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         tools: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -4089,7 +4117,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         companies: {
           type: 'array',
@@ -4752,7 +4779,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         provider: { type: 'string' },
         provider_name: { type: 'string' },
@@ -4806,7 +4832,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         company_id: { type: 'string' },
         bank_name: { type: ['string', 'null'] },
@@ -5059,7 +5084,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         skills: {
           type: 'array',
@@ -5175,7 +5199,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         slug: { type: 'string' },
         name: { type: 'string' },
@@ -5250,7 +5273,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         id: { type: 'string', description: 'Deprecated: read fact_id instead' },
         fact_id: { type: 'string' },
@@ -5347,7 +5369,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         id: { type: 'string', description: 'Deprecated: read fact_id instead' },
         fact_id: { type: 'string' },
@@ -5405,7 +5426,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         recorded: { type: 'boolean' },
         message: { type: 'string' },
@@ -5481,7 +5501,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         company: {
           type: 'object',
@@ -5982,7 +6001,6 @@ export const tools: McpTool[] = [
     description: 'Stage bank/cash-account transactions; each becomes a pending operation. For external rows (Airtable, CSV); max 10. A transaction models a cash-account movement: for cashless events (privat utlägg) use gnubok_create_voucher.',
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         staged_count: { type: 'number', description: 'Number of items successfully staged.' },
         operations: {
@@ -6395,7 +6413,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         items: {
           type: 'array',
@@ -6671,7 +6688,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         transactions: { type: 'array', items: { type: 'object' } },
         categories: { type: 'array', items: { type: 'string' } },
@@ -6718,7 +6734,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         customers: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -7188,7 +7203,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         articles: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -7494,7 +7508,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         invoice_id: { type: 'string' },
         invoice_number: { type: ['string', 'null'], description: 'null until sent' },
@@ -8056,7 +8069,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         ...SALES_ORDER_SUMMARY_PROPS,
         source_invoice_id: { type: ['string', 'null'], description: 'Proforma or offert the order was converted from, if any' },
@@ -8649,7 +8661,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         rows: { type: 'array', items: { type: 'object' } },
         total_debit: { type: 'number' },
@@ -8793,7 +8804,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         period: { type: 'object' },
         period_label: { type: 'string' },
@@ -9115,7 +9125,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         deliveries: {
           type: 'array',
@@ -9296,7 +9305,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         suppliers: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -9350,7 +9358,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         party: { type: ['object', 'null'] },
         found: { type: 'boolean' },
@@ -9542,7 +9549,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         invoices: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -9696,7 +9702,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         templates: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -9746,7 +9751,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         suggestions: { type: 'object' },
         counterparty_matches: { type: 'object' },
@@ -9894,7 +9898,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         accounts: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -10204,7 +10207,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         dimensions: {
           type: 'array',
@@ -10286,7 +10288,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         dimension: {
           type: 'object',
@@ -10841,7 +10842,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         dimension: {
           type: 'object',
@@ -11086,7 +11086,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         lines: { type: 'array', items: { type: 'object' } },
         truncated: { type: 'boolean', description: 'True if more matching lines exist than were returned' },
@@ -12678,7 +12677,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         invoice_id: { type: 'string' },
         invoice_status: { type: 'string' },
@@ -12833,7 +12831,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         supplier_invoice_id: { type: 'string' },
         invoice_status: { type: 'string' },
@@ -12985,7 +12982,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         dry_run: { type: 'boolean' },
         confidence_threshold: { type: 'number' },
@@ -13166,7 +13162,6 @@ export const tools: McpTool[] = [
     inputSchema: { type: 'object', additionalProperties: false, properties: {} },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         periods: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -13881,7 +13876,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         cash_accounts: {
           type: 'array',
@@ -13972,7 +13966,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         upload_id: { type: 'string' },
         upload_url: { type: 'string' },
@@ -14036,15 +14029,15 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         document_id: { type: 'string' },
-        inbox_item_id: { type: 'string' },
+        inbox_item_id: { type: ['string', 'null'], description: 'Null when the bytes were already archived without an inbox item.' },
         status: { type: 'string' },
         extracted_data: { type: 'object' },
         matched_supplier_id: { type: ['string', 'null'] },
+        deduplicated: { type: 'boolean', description: 'True when the same bytes were already in the archive: document_id is the existing document and nothing new was created.' },
       },
-      required: ['document_id', 'inbox_item_id', 'status'],
+      required: ['document_id', 'status'],
     },
     annotations: ANNOTATIONS_IDEMPOTENT_WRITE,
     async execute(args, companyId, userId, supabase) {
@@ -14068,8 +14061,9 @@ export const tools: McpTool[] = [
         fileName,
         mimeType,
         undefined,
-        { extractionOwner: 'invoice-inbox' },
+        { extractionOwner: 'invoice-inbox', dedupeByContent: true },
       )
+      if (completed.document.deduplicated) return alreadyArchivedResult(supabase, companyId, completed.document.id)
       return createDocumentInboxItem(
         supabase,
         companyId,
@@ -14100,7 +14094,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         document_id: { type: 'string' },
         inbox_item_id: { type: 'string' },
@@ -14160,7 +14153,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         items: {
           type: 'array',
@@ -14899,7 +14891,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         items: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -15076,7 +15067,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         document_id: { type: 'string' },
         file_name: { type: 'string' },
@@ -15617,7 +15607,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         trips: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -15856,7 +15845,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         employees: { type: 'array', items: { type: 'object' } },
         count: { type: 'number' },
@@ -16606,7 +16594,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         employee_id: { type: 'string' },
         first_name: { type: 'string' },
@@ -16706,7 +16693,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         salary_run_employee_id: { type: 'string' },
         salary_run_id: { type: 'string' },
@@ -16806,7 +16792,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         absence_days: { type: 'array', items: { type: 'object' }, description: 'Each with salary_absence_day_id' },
         count: { type: 'number' },
@@ -17705,7 +17690,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         employee_vacation_balance_id: { type: 'string' },
         employee_id: { type: 'string' },
@@ -18155,7 +18139,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         content: { type: 'string' },
         byte_size: { type: 'number' },
@@ -18229,7 +18212,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         deduction_type: { type: 'string' },
         eligible: { type: 'array', items: { type: 'object' } },
@@ -18639,7 +18621,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         imported: { type: 'number' },
         already_imported: { type: 'number' },
@@ -18714,7 +18695,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         download_url: { type: ['string', 'null'], description: 'Signed download URL, valid 1 hour, on the app origin (direct Storage URL only when NEXT_PUBLIC_APP_URL is unset); null when estimate_only=true.' },
         storage_path: { type: ['string', 'null'] },
@@ -18866,7 +18846,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         period: { type: 'object' },
         ready: { type: 'boolean' },
@@ -19313,7 +19292,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         gaps: { type: 'array', items: { type: 'object' } },
         total_gaps: { type: 'number' },
@@ -20406,7 +20384,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         upload_id: { type: 'string' },
         upload_url: { type: 'string' },
@@ -21838,7 +21815,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         assets: { type: 'array', items: ASSET_TOOL_ITEM_SCHEMA },
         count: { type: 'number' },
@@ -21869,7 +21845,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         asset: ASSET_TOOL_ITEM_SCHEMA,
         depreciation_schedule: {
@@ -22401,7 +22376,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         status: { type: 'string', enum: ['committed', 'rejected', 'failed'] },
         operation_id: { type: 'string' },
@@ -22554,7 +22528,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         status: { type: 'string', enum: ['rejected'] },
         operation_id: { type: 'string' },
@@ -22669,7 +22642,6 @@ export const tools: McpTool[] = [
     },
     outputSchema: {
       type: 'object',
-      additionalProperties: false,
       properties: {
         inbox_item_id: { type: 'string' },
         matched_supplier_id: { type: ['string', 'null'] },
