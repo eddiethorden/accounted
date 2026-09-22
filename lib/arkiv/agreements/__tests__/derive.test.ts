@@ -191,6 +191,34 @@ describe('phase 6 kinds', () => {
     expect(customer.obligations.map((o) => o.dueOn).slice(0, 3)).toEqual(['2026-08-01', '2026-09-01', '2026-10-01'])
   })
 
+  it('files an adherence agreement under the joining party, not as a second copy of the main agreement', () => {
+    const adherence = deriveAgreement({
+      schemaType: 'agreement.shareholder',
+      payload: { parties_summary: f('Boltonshield AB ansluter'), company_name: f('Arcim Technology AB'), adherence: f('yes'), adhering_party_name: f('Boltonshield AB'), adhering_party_org_number: f('5594605627') },
+      reviewFields: [],
+      today,
+    })!
+    expect(adherence.agreement).toMatchObject({ kind: 'shareholder', title: 'Anslutningsavtal Boltonshield AB till aktieägaravtal Arcim Technology AB', counterparty: { name: 'Boltonshield AB', orgNumber: '5594605627' } })
+    const investment = deriveAgreement({
+      schemaType: 'agreement.investment',
+      payload: { investor_name: f('Boltonshield AB'), investment_amount: f(1000000), adherence: f('yes') },
+      reviewFields: [],
+      today,
+    })!
+    expect(investment.agreement.title).toBe('Investering Boltonshield AB (anslutning)')
+  })
+
+  it('shows a counterparty name that is under review as a hint, never as a source', () => {
+    const loan = deriveAgreement({
+      schemaType: 'agreement.loan',
+      payload: { lender_name: f('Propel Capital VII AB'), lender_org_number: f('5595138057'), principal: f(400000), disbursed_on: f('2025-10-13'), interest_terms: f('10% compounded, added to the loan') },
+      reviewFields: ['lender_name'],
+      today,
+    })!
+    expect(loan.agreement).toMatchObject({ title: 'Lån Propel Capital VII AB', counterparty: { name: 'Propel Capital VII AB', orgNumber: '5595138057' } })
+    expect(loan.agreement.sources).not.toHaveProperty('lender_name')
+  })
+
   it('records a shareholders agreement and any other agreement without inventing payments', () => {
     const sha = deriveAgreement({ schemaType: 'agreement.shareholder', payload: { parties_summary: f('A och B'), company_name: f('Arcim Technology AB'), effective_on: f('2026-01-01') }, reviewFields: [], today })!
     expect(sha.agreement).toMatchObject({ kind: 'shareholder', title: 'Aktieägaravtal Arcim Technology AB', startsOn: '2026-01-01', amount: null })
