@@ -26,7 +26,11 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/require-auth'
-import { requireWritePermission } from '@/lib/auth/require-write'
+import {
+  companyAdminRequiredResponse,
+  isCompanyAdmin,
+  requireWritePermission,
+} from '@/lib/auth/require-write'
 import { getActiveCompanyId } from '@/lib/company/context'
 import { createLogger, type Logger } from '@/lib/logger'
 import { errorResponse, errorResponseFromCode } from '@/lib/errors/get-structured-error'
@@ -66,6 +70,18 @@ interface RouteContextOptions {
    * lines of boilerplate.
    */
   requireWrite?: boolean
+  /**
+   * Defaults to false. When true, the wrapper rejects callers who are not
+   * `owner` or `admin` of the active company, by asking the database the same
+   * predicate the admin-only RLS policies evaluate (user_is_company_admin).
+   * Use it on every route that writes a table gated by that predicate
+   * (company_settings, companies, company_members, company_invitations,
+   * api_keys, invoice_payee_defaults): `requireWrite` lets a `member` through
+   * and RLS then refuses the write silently, as a zero-row UPDATE. Implies
+   * `requireWrite` (owner and admin are non-viewer roles), so the two are
+   * never checked together.
+   */
+  requireAdmin?: boolean
   /** File exports must not escape while a company has an incomplete import. */
   requireCompleteLedger?: boolean | ((request: Request) => boolean)
 }
@@ -93,7 +109,7 @@ export function withRouteContext<P extends DynamicParams = { params: Promise<Rec
   handler: RouteHandler<P>,
   options: RouteContextOptions = {},
 ): (request: Request, params: P) => Promise<Response> {
-  const { requireWrite = false } = options
+  const { requireWrite = false, requireAdmin = false } = options
 
   return async function wrapped(request: Request, params: P): Promise<Response> {
     const requestId = generateRequestId()
@@ -136,7 +152,11 @@ export function withRouteContext<P extends DynamicParams = { params: Promise<Rec
         return errorResponseFromCode('COMPANY_CONTEXT_MISSING', userLog, { requestId })
       }
 
-      if (requireWrite) {
+      if (requireAdmin) {
+        if (!(await isCompanyAdmin(supabase, companyId))) {
+          return companyAdminRequiredResponse(userLog.child({ companyId }), requestId)
+        }
+      } else if (requireWrite) {
         // Delegate to the existing helper so tests that already mock it
         // continue to work. The helper returns its own 403 NextResponse;
         // we wrap it in our request-id header for traceability. The

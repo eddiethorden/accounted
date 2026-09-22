@@ -1248,13 +1248,16 @@ describe('POST :id/match-supplier-invoice', () => {
       }
     }
 
-    function cashMethodTables(cashAccountId: string | null) {
+    function cashMethodTables(
+      cashAccountId: string | null,
+      amounts: { bank: number; remaining: number; paid?: number } = { bank: 5000, remaining: 5000 },
+    ) {
       return {
         company_members: { data: { company_id: COMPANY_ID, role: 'owner' }, error: null },
         transactions: {
           data: {
             id: TX_ID,
-            amount: -5000,
+            amount: -amounts.bank,
             date: '2026-05-12',
             currency: 'SEK',
             amount_sek: null,
@@ -1269,9 +1272,9 @@ describe('POST :id/match-supplier-invoice', () => {
             data: {
               id: SI_ID,
               status: 'approved',
-              total: 5000,
-              paid_amount: 0,
-              remaining_amount: 5000,
+              total: amounts.remaining + (amounts.paid ?? 0),
+              paid_amount: amounts.paid ?? 0,
+              remaining_amount: amounts.remaining,
               currency: 'SEK',
               exchange_rate: null,
               supplier: { name: 'Acme', supplier_type: 'swedish_business' },
@@ -1333,8 +1336,88 @@ describe('POST :id/match-supplier-invoice', () => {
       expect(createSupplierInvPmtJE).not.toHaveBeenCalled()
       const args = createSupplierInvCashJE.mock.calls[0]
       expect(args[8]).toBe('1940')
-      // Pure SEK settlement: no settledBankSek override.
-      expect(args[9]).toBeUndefined()
+      // Pure SEK settlement: the bank amount is handed over so a sub-krona
+      // difference to the invoice total can land on 3740 (#2852). An exact
+      // amount, as here, books exactly as before.
+      expect(args[9]).toBe(5000)
+    })
+
+    // #2852: a whole-krona bank row within the öre band settles a
+    // kontantmetoden invoice in full; the builder credits the bank amount and
+    // books the residual on 3740. Same rule as the dashboard route.
+    it('cash-method branch: a rounded-DOWN whole-krona row settles in full and records the debt settled', async () => {
+      const supa = makeFlexibleSupabase(cashMethodTables('ca-1940', { bank: 1234, remaining: 1234.44 }))
+      mockServiceClient.mockReturnValue(supa)
+      const res = await matchSIPOST(
+        makeRequest(
+          `https://x.test/api/v1/companies/${COMPANY_ID}/transactions/${TX_ID}/match-supplier-invoice`,
+          { supplier_invoice_id: SI_ID },
+        ),
+        txParams(TX_ID),
+      )
+      expect(res.status).toBe(200)
+      expect(createSupplierInvCashJE).toHaveBeenCalledTimes(1)
+      expect(createSupplierInvCashJE.mock.calls[0][9]).toBe(1234)
+      const invoiceUpdate = updatePayloads(supa, 'supplier_invoices')[0]
+      expect(invoiceUpdate).toMatchObject({ status: 'paid', remaining_amount: 0, paid_amount: 1234.44 })
+      const paymentInsert = supa.calls.find(
+        (c) => c.table === 'supplier_invoice_payments' && c.method === 'insert',
+      )?.args[0] as { amount: number }
+      // The debt settled, not the cash moved: the 0,44 lives on 3740.
+      expect(paymentInsert.amount).toBe(1234.44)
+    })
+
+    it('cash-method branch: a rounded-UP whole-krona row records the debt settled, not an overpayment', async () => {
+      const supa = makeFlexibleSupabase(cashMethodTables('ca-1940', { bank: 1235, remaining: 1234.56 }))
+      mockServiceClient.mockReturnValue(supa)
+      const res = await matchSIPOST(
+        makeRequest(
+          `https://x.test/api/v1/companies/${COMPANY_ID}/transactions/${TX_ID}/match-supplier-invoice`,
+          { supplier_invoice_id: SI_ID },
+        ),
+        txParams(TX_ID),
+      )
+      expect(res.status).toBe(200)
+      expect(createSupplierInvCashJE.mock.calls[0][9]).toBe(1235)
+      expect(updatePayloads(supa, 'supplier_invoices')[0]).toMatchObject({
+        status: 'paid',
+        remaining_amount: 0,
+        paid_amount: 1234.56,
+      })
+    })
+
+    it('cash-method branch: a shortfall of a krona or more is still a rejected partial', async () => {
+      mockServiceClient.mockReturnValue(
+        makeFlexibleSupabase(cashMethodTables('ca-1940', { bank: 1233, remaining: 1234.44 })),
+      )
+      const res = await matchSIPOST(
+        makeRequest(
+          `https://x.test/api/v1/companies/${COMPANY_ID}/transactions/${TX_ID}/match-supplier-invoice`,
+          { supplier_invoice_id: SI_ID },
+        ),
+        txParams(TX_ID),
+      )
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { error: { code: string } }
+      expect(body.error.code).toBe('SI_CASH_PARTIAL_UNSUPPORTED')
+      expect(createSupplierInvCashJE).not.toHaveBeenCalled()
+    })
+
+    it('cash-method branch: a previously part-paid invoice stays blocked inside the öre band', async () => {
+      mockServiceClient.mockReturnValue(
+        makeFlexibleSupabase(cashMethodTables('ca-1940', { bank: 500, remaining: 500.4, paid: 500 })),
+      )
+      const res = await matchSIPOST(
+        makeRequest(
+          `https://x.test/api/v1/companies/${COMPANY_ID}/transactions/${TX_ID}/match-supplier-invoice`,
+          { supplier_invoice_id: SI_ID },
+        ),
+        txParams(TX_ID),
+      )
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { error: { code: string } }
+      expect(body.error.code).toBe('SI_CASH_PARTIAL_UNSUPPORTED')
+      expect(createSupplierInvCashJE).not.toHaveBeenCalled()
     })
 
     it('cash-method branch: falls back to 1930 when the transaction has no linked cash account', async () => {

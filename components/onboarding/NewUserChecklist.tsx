@@ -14,6 +14,7 @@ import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { useFormat } from '@/lib/hooks/use-format'
 import { isAnalyticsEnabled } from '@/lib/analytics/enabled'
 import {
+  canRecordInitialSetup,
   checklistNumbers,
   claudeConnectorLink,
   completionPatchBody,
@@ -23,7 +24,7 @@ import {
   type VatDeadlineLine,
 } from '@/lib/onboarding/checklist'
 import { ENABLED_EXTENSION_IDS } from '@/lib/extensions/_generated/enabled-extensions'
-import { useAssistantAvailable, useCapability } from '@/contexts/CompanyContext'
+import { useAssistantAvailable, useCapability, useCompanyOptional } from '@/contexts/CompanyContext'
 import { CAPABILITY } from '@/lib/entitlements/keys'
 import type { InitialSetupPath, InitialSetupState } from '@/types'
 import { useBranding } from '@/lib/branding/brand-context'
@@ -98,6 +99,10 @@ export default function NewUserChecklist({
   const { formatDateLong } = useFormat()
   const hasAi = useCapability(CAPABILITY.ai)
   const assistantAvailable = useAssistantAvailable()
+  // Only owner/admin can record the setup state (company_settings RLS). A
+  // member still gets every step as plain navigation: see
+  // canRecordInitialSetup.
+  const canRecord = canRecordInitialSetup(useCompanyOptional()?.role)
   const [state, setState] = useState(initialState)
   const [saving, setSaving] = useState<InitialSetupPath | 'dismiss' | 'complete' | null>(null)
   // The completion signature: 'verdict' shows the orb check-morph and the
@@ -177,6 +182,7 @@ export default function NewUserChecklist({
     // manual way out. The signature beat latches via retireStartedRef so a
     // failed persist can retry the PATCH without replaying the beat.
     if (
+      canRecord &&
       !state.completedAt &&
       step1Done && step2Done && step3Done && step4Done && step5Done &&
       saving === null &&
@@ -196,7 +202,7 @@ export default function NewUserChecklist({
   // persist intentionally stays out: its identity follows the toast hook and
   // would retrigger this completion sync after every render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step1Done, step2Done, step3Done, step4Done, step5Done, saving, state.completedAt])
+  }, [canRecord, step1Done, step2Done, step3Done, step4Done, step5Done, saving, state.completedAt])
 
   // Beat timing: hold the verdict, then fade, then stay retired.
   useEffect(() => {
@@ -220,6 +226,10 @@ export default function NewUserChecklist({
   // server truth either way.
   if (retiring === 'done') return null
   if (state.completedAt && !retiring) return null
+  // Every step done, but this member cannot record the completion: nothing
+  // left to offer. The block retires for good on an owner's or admin's next
+  // visit to Hem.
+  if (!canRecord && step1Done && step2Done && step3Done && step4Done && step5Done) return null
 
   if (retiring) {
     return (
@@ -242,8 +252,10 @@ export default function NewUserChecklist({
     )
   }
 
+  // Recording the chosen path is owner/admin only; the step itself is not.
+  // A member skips the write and goes straight to the step.
   const goMigration = async () => {
-    const updated = await persist({ path: 'migration' }, 'migration')
+    const updated = canRecord ? await persist({ path: 'migration' }, 'migration') : state
     if (updated) {
       captureSetup('onboarding_setup_step_started', { step: 'books', path: 'migration' })
       router.push(hasMigration ? '/import?mode=migration' : '/import?mode=sie')
@@ -254,7 +266,7 @@ export default function NewUserChecklist({
       if (updated) captureSetup('onboarding_setup_step_started', { step: 'books', path: 'fresh' })
     })
   const goBank = async () => {
-    const updated = await persist({ path: state.path ?? 'bank' }, 'bank')
+    const updated = canRecord ? await persist({ path: state.path ?? 'bank' }, 'bank') : state
     if (updated) {
       captureSetup('onboarding_setup_step_started', { step: 'bank' })
       router.push(hasBanking ? '/import?mode=psd2' : '/import?mode=bank')
@@ -311,14 +323,16 @@ export default function NewUserChecklist({
     <section className={className} aria-label={t('title', { count: stepCount })}>
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm">{t('title', { count: stepCount })}</h2>
-        <button
-          type="button"
-          disabled={saving !== null}
-          onClick={dismiss}
-          className="shrink-0 text-xs text-muted-foreground underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
-        >
-          {t('dismiss')}
-        </button>
+        {canRecord && (
+          <button
+            type="button"
+            disabled={saving !== null}
+            onClick={dismiss}
+            className="shrink-0 text-xs text-muted-foreground underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+          >
+            {t('dismiss')}
+          </button>
+        )}
       </div>
 
       <ol className="mt-3" role="list">
@@ -346,16 +360,24 @@ export default function NewUserChecklist({
             </>
           }
         >
-          {t('step_books_description')}{' '}
-          <button
-            type="button"
-            disabled={saving !== null}
-            onClick={goFresh}
-            className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
-          >
-            {t('step_books_fresh_link')}
-          </button>{' '}
-          {t('step_books_fresh_suffix')}
+          {canRecord ? (
+            <>
+              {t('step_books_description')}{' '}
+              <button
+                type="button"
+                disabled={saving !== null}
+                onClick={goFresh}
+                className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+              >
+                {t('step_books_fresh_link')}
+              </button>{' '}
+              {t('step_books_fresh_suffix')}
+            </>
+          ) : (
+            // "Starta från början" only records the path, which a member
+            // cannot do: say who can, instead of offering a dead link.
+            t('step_books_description_member')
+          )}
         </Step>
 
         <Step

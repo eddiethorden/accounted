@@ -7,6 +7,7 @@ const authState = vi.hoisted(() => ({
 }))
 
 const requireWriteMock = vi.hoisted(() => vi.fn())
+const isAdminMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/auth/require-auth', () => ({
   requireAuth: vi.fn(async () => {
@@ -21,9 +22,15 @@ vi.mock('@/lib/company/context', () => ({
   getActiveCompanyId: vi.fn(),
 }))
 
-vi.mock('@/lib/auth/require-write', () => ({
-  requireWritePermission: (...args: unknown[]) => requireWriteMock(...args),
-}))
+// The real envelope builder stays: only the database predicate is mocked.
+vi.mock('@/lib/auth/require-write', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth/require-write')>()
+  return {
+    requireWritePermission: (...args: unknown[]) => requireWriteMock(...args),
+    isCompanyAdmin: (...args: unknown[]) => isAdminMock(...args),
+    companyAdminRequiredResponse: actual.companyAdminRequiredResponse,
+  }
+})
 
 const supabaseRef = vi.hoisted(() => ({ supabase: null as unknown }))
 
@@ -39,6 +46,7 @@ describe('withRouteContext', () => {
     supabaseRef.supabase = createMockSupabase().supabase
     vi.mocked(getActiveCompanyId).mockResolvedValue('company-1')
     requireWriteMock.mockResolvedValue({ ok: true })
+    isAdminMock.mockResolvedValue(true)
   })
 
   it('resolves the company once and hands it to the write guard on write routes', async () => {
@@ -83,6 +91,59 @@ describe('withRouteContext', () => {
     expect(res.status).toBe(403)
     expect(res.headers.get('X-Request-Id')).toMatch(/^req_/)
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('asks the owner/admin predicate for the resolved company on requireAdmin routes, instead of the write guard', async () => {
+    const handler = vi.fn(async () => NextResponse.json({ ok: true }))
+    const route = withRouteContext('test.admin', handler, { requireAdmin: true })
+
+    const res = await route(new Request('http://localhost/api/test', { method: 'PATCH' }), EMPTY_PARAMS)
+
+    expect(res.status).toBe(200)
+    expect(isAdminMock).toHaveBeenCalledTimes(1)
+    expect(isAdminMock).toHaveBeenCalledWith(supabaseRef.supabase, 'company-1')
+    // Owner and admin are non-viewer roles: the write guard would be a
+    // second round trip that can only agree.
+    expect(requireWriteMock).not.toHaveBeenCalled()
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers the canonical 403 envelope with a request id and skips the handler when the predicate says no', async () => {
+    isAdminMock.mockResolvedValue(false)
+    const handler = vi.fn(async () => NextResponse.json({ ok: true }))
+    const route = withRouteContext('test.admin', handler, { requireAdmin: true, requireWrite: true })
+
+    const res = await route(new Request('http://localhost/api/test', { method: 'PATCH' }), EMPTY_PARAMS)
+
+    expect(res.status).toBe(403)
+    expect(res.headers.get('X-Request-Id')).toMatch(/^req_/)
+    const body = await res.json() as { error: { code: string; message: string; details: { required_roles: string[] } } }
+    expect(body.error.code).toBe('FORBIDDEN')
+    expect(body.error.message).toBe('Bara företagets ägare eller en administratör kan göra det här.')
+    expect(body.error.details.required_roles).toEqual(['owner', 'admin'])
+    expect(handler).not.toHaveBeenCalled()
+    expect(requireWriteMock).not.toHaveBeenCalled()
+  })
+
+  it('answers 500, not 403, when the admin predicate cannot be evaluated', async () => {
+    isAdminMock.mockRejectedValue(new Error('rpc unavailable'))
+    const handler = vi.fn(async () => NextResponse.json({ ok: true }))
+    const route = withRouteContext('test.admin', handler, { requireAdmin: true })
+
+    const res = await route(new Request('http://localhost/api/test', { method: 'PATCH' }), EMPTY_PARAMS)
+
+    expect(res.status).toBe(500)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('never asks the admin predicate on routes that did not opt in', async () => {
+    const route = withRouteContext('test.write', async () => NextResponse.json({ ok: true }), {
+      requireWrite: true,
+    })
+
+    await route(new Request('http://localhost/api/test', { method: 'POST' }), EMPTY_PARAMS)
+
+    expect(isAdminMock).not.toHaveBeenCalled()
   })
 
   it('returns COMPANY_CONTEXT_MISSING before the guard when no company resolves', async () => {

@@ -176,6 +176,12 @@ export function mapBrioxToSupplierInvoice(raw: Record<string, unknown>): Supplie
   // fully unpaid, paid forces balance to 0.
   const paid = isFullyPaid(raw);
   const balance = paid ? 0 : (num(raw['balance']) ?? total);
+  // 381 for a supplier kreditfaktura: the one signal the importer reads
+  // (dto.ts). As on the sales side, no Briox credit flag could be verified
+  // (no public API reference, no fixture, no Briox supplier credit note in
+  // production), so none is invented: the negative total is the only signal,
+  // and `status: 'credited'` beside positive amounts stays the ORIGINAL.
+  const invoiceTypeCode = creditNoteTypeCode(false, total);
 
   const rows = (raw['rows'] as Record<string, unknown>[] | undefined) ?? [];
   // Same string-coercion hardening as the sales path (Briox serializes
@@ -213,8 +219,9 @@ export function mapBrioxToSupplierInvoice(raw: Record<string, unknown>): Supplie
     invoiceNumber: String(raw['invoice_number'] ?? raw['id'] ?? ''),
     issueDate: (raw['invoice_date'] as string) ?? '',
     dueDate: raw['due_date'] as string | undefined,
+    invoiceTypeCode,
     currencyCode: currency,
-    status: deriveInvoiceStatus(raw),
+    status: deriveInvoiceStatus(raw, invoiceTypeCode !== undefined),
     supplier: buildParty(
       (raw['supplier_name'] ?? '') as string,
       raw['supplier_org_number'] as string | undefined,

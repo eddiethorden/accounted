@@ -15,6 +15,13 @@ describe('outputSchema coverage', () => {
     }
   })
 
+  it('no outputSchema is closed at the top level: clients cache tools/list and validate against it', () => {
+    // 2026-09-21: a field added to gnubok_ask_document under additionalProperties: false made every
+    // session connected before the deploy refuse the response. Inputs stay closed (strict-schemas.test.ts).
+    const closed = tools.filter((t) => (t.outputSchema as { additionalProperties?: boolean } | undefined)?.additionalProperties === false)
+    expect(closed.map((t) => t.name)).toEqual([])
+  })
+
   it('every tool has a tight description (<= 280 chars)', () => {
     const tooLong = tools.filter((t) => t.description.length > 280)
     expect(tooLong.map((t) => `${t.name}: ${t.description.length} chars`)).toEqual([])

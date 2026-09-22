@@ -12,10 +12,10 @@ import { z } from 'zod'
 import { withRouteContext } from '@/lib/api/with-route-context'
 import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { cashPartialBlockReason } from '@/lib/bookkeeping/booking-mode'
-import { resolveSekAmount } from '@/lib/bookkeeping/currency-utils'
-import { generateSlpLines, isSlpPensionAccount } from '@/lib/bookkeeping/slp-lines'
+import { buildSupplierInvoiceCashLines } from '@/lib/bookkeeping/supplier-invoice-entries'
 import { buildSupplierPaymentClearingLines } from '@/lib/bookkeeping/supplier-payment-lines'
 import { resolveSettlementAccount } from '@/lib/bookkeeping/settlement-account'
+import { planSupplierPayment } from '@/lib/invoices/apply-supplier-payment'
 import { ORE_TOLERANCE } from '@/lib/money'
 import type { SupplierInvoice, SupplierInvoiceItem } from '@/types'
 
@@ -65,7 +65,9 @@ export const GET = withRouteContext(
 
     const { data: invoice, error: invErr } = await supabase
       .from('supplier_invoices')
-      .select('*, items:supplier_invoice_items(*)')
+      // supplier_type drives the reverse-charge lines of the cash entry, as in
+      // the POST handler.
+      .select('*, supplier:suppliers(supplier_type), items:supplier_invoice_items(*)')
       .eq('id', supplier_invoice_id)
       .eq('company_id', companyId)
       .single()
@@ -95,7 +97,10 @@ export const GET = withRouteContext(
     const siAlreadyBooked = !!(invoice as { registration_journal_entry_id?: string | null }).registration_journal_entry_id
     const useCashEntry = !siAlreadyBooked && accountingMethod === 'cash'
 
-    const si = invoice as SupplierInvoice & { items?: SupplierInvoiceItem[] }
+    const si = invoice as SupplierInvoice & {
+      items?: SupplierInvoiceItem[]
+      supplier?: { supplier_type?: string | null } | null
+    }
 
     // Amount resolution, byte-identical to the POST handler: same inputs, same
     // `Math.round(x * 100) / 100` form. This preview is what the user approves
@@ -143,9 +148,18 @@ export const GET = withRouteContext(
     const originalBookedSek = bookedSek ?? actualBankSek
     const exchangeRateDifference =
       Math.round((originalBookedSek - actualBankSek) * 100) / 100
+    // Same decision as the POST handler (planSupplierPayment with öre
+    // absorption on pure SEK): a whole-krona bank row within the öre band of
+    // the remaining balance settles in full, under both methods. An overshoot
+    // the POST will reject still previews as a full settlement, as before.
+    const isPureSek = transaction.currency === 'SEK' && si.currency === 'SEK'
+    const paymentPlan = planSupplierPayment(
+      { total: si.total, paid_amount: si.paid_amount, remaining_amount: remainingInvoiceCurrency },
+      paymentAmountInvoiceCurrency,
+      { absorbOreRounding: isPureSek },
+    )
     const fullSettlement =
-      transaction.currency !== si.currency ||
-      txAmountAbs >= remainingInvoiceCurrency - 0.005
+      transaction.currency !== si.currency || !paymentPlan.ok || paymentPlan.plan.isFullyPaid
 
     // The POST handler rejects cash-method partials and part-paid completions
     // for never-booked invoices (the cash builder books the full invoice), so
@@ -172,89 +186,31 @@ export const GET = withRouteContext(
 
     if (useCashEntry) {
       entryType = 'cash'
-      const items = si.items ?? []
-
-      // Kontantmetoden books the expense AT PAYMENT at the payment-date rate.
-      // The POST handler passes createSupplierInvoiceCashEntry a settledBankSek
-      // override only for a full foreign settlement whose rate actually moved;
-      // the builder then derives its rate as settledBankSek / invoice.total and
-      // otherwise keeps the invoice's stored rate. Mirror that derivation
-      // exactly (createSupplierInvoiceCashEntry's `effectiveRate`).
-      const settledBankSek =
-        exchangeRateDifference !== 0 && fullSettlement ? actualBankSek : undefined
-      const cashRate =
-        settledBankSek != null && settledBankSek > 0 && si.currency !== 'SEK' && si.total > 0
-          ? settledBankSek / si.total
-          : si.exchange_rate
-      // The builder routes every leg through toSekOrThrow, which refuses a
-      // foreign invoice with no usable rate rather than posting it as if
-      // 1 EUR = 1 SEK. Refuse the same rows here so the dialog can't display
-      // amounts the commit will reject.
-      if (si.currency !== 'SEK' && !(cashRate != null && cashRate > 0)) {
-        return errorResponseFromCode('SI_FX_RATE_MISSING', log, {
-          requestId,
-          details: { invoice_currency: si.currency },
-        })
-      }
-
-      // Mirror createSupplierInvoiceCashEntry: per-item expense debit + VAT
-      // debit + bank credit. We only need a faithful preview, not exact
-      // account-mapping fidelity: show one aggregate expense line per item
-      // (or a single fallback line if items are missing).
-      let totalAmountSek = 0
-      let totalVatSek = 0
-      if (items.length > 0) {
-        for (const it of items) {
-          const lineTotal = resolveSekAmount(it.line_total, null, si.currency, cashRate)
-          const vat = resolveSekAmount(it.vat_amount, null, si.currency, cashRate)
-          const expenseAcct = (it as { expense_account?: string | null }).expense_account ?? '4000'
-          lines.push({
-            account_number: expenseAcct,
-            debit_amount: Math.round((lineTotal - vat) * 100) / 100,
-            credit_amount: 0,
-            description: it.description ?? 'Kostnad',
-          })
-          totalAmountSek += lineTotal
-          totalVatSek += vat
-        }
-      } else {
-        // Pass null for the pre-computed SEK so cashRate (payment-date rate)
-        // drives the translation: resolveSekAmount would otherwise prefer the
-        // invoice-rate *_sek columns and ignore the rate.
-        const subSek = resolveSekAmount(si.subtotal, null, si.currency, cashRate)
-        const vatSek = resolveSekAmount(si.vat_amount, null, si.currency, cashRate)
-        lines.push({
-          account_number: '4000',
-          debit_amount: Math.round(subSek * 100) / 100,
-          credit_amount: 0,
-          description: 'Kostnad',
-        })
-        totalAmountSek = subSek + vatSek
-        totalVatSek = vatSek
-      }
-
-      if (totalVatSek > 0) {
-        lines.push({
-          account_number: '2641',
-          debit_amount: Math.round(totalVatSek * 100) / 100,
-          credit_amount: 0,
-          description: 'Ingående moms',
-        })
-      }
-
-      // Mirror createSupplierInvoiceCashEntry's SLP pair: items flagged
-      // apply_slp on a 741x pension account book 7533 D / 2514 K at the same
-      // rate the expense lines above use. The pair nets to zero, so the bank
-      // credit below is untouched; without it the dialog shows fewer lines
-      // than the POST actually books.
-      let slpBase = 0
-      for (const it of items) {
-        if (it.apply_slp !== true) continue
-        if (!isSlpPensionAccount(it.account_number)) continue
-        slpBase += resolveSekAmount(it.line_total, null, si.currency, cashRate)
-      }
-      if (slpBase > 0) {
-        for (const l of generateSlpLines(slpBase)) {
+      // The lines come from buildSupplierInvoiceCashLines, the same pure
+      // builder createSupplierInvoiceCashEntry books from, with the same
+      // settledBankSek the POST handler passes. This preview used to re-model
+      // the entry by hand and had drifted from it (one line per item on a
+      // non-existent expense_account, VAT subtracted from an ex-VAT
+      // line_total, no reverse-charge lines, no 3740): the user approved one
+      // verifikat and another was booked.
+      //
+      // settledBankSek: a foreign invoice is pinned to the payment-date rate
+      // (the SEK that left the bank); on a pure-SEK match a sub-krona
+      // difference to the invoice total is booked on 3740 (öresavrundning).
+      try {
+        const built = buildSupplierInvoiceCashLines(
+          si,
+          si.items ?? [],
+          si.supplier?.supplier_type || 'swedish_business',
+          {
+            paymentAccount,
+            settledBankSek:
+              (isPureSek || exchangeRateDifference !== 0) && fullSettlement
+                ? actualBankSek
+                : undefined,
+          },
+        )
+        for (const l of built.lines) {
           lines.push({
             account_number: l.account_number,
             debit_amount: l.debit_amount,
@@ -262,17 +218,22 @@ export const GET = withRouteContext(
             description: l.line_description ?? '',
           })
         }
+        oreRounding = built.oreDiffSek !== 0
+      } catch (err) {
+        // The builder routes every leg through toSekOrThrow, which refuses a
+        // foreign invoice with no usable rate rather than posting it as if
+        // 1 EUR = 1 SEK. The POST handler returns the same code for the same
+        // row, so the dialog can't display amounts the commit will reject.
+        if ((err as { code?: unknown })?.code === 'SI_FX_RATE_MISSING') {
+          return errorResponseFromCode('SI_FX_RATE_MISSING', log, {
+            requestId,
+            details: { invoice_currency: si.currency },
+          })
+        }
+        throw err
       }
-
-      lines.push({
-        account_number: paymentAccount,
-        debit_amount: 0,
-        credit_amount: Math.round(totalAmountSek * 100) / 100,
-        description: 'Utbetalning från bank',
-      })
     } else {
       // Clearing: Dr 2440 / Cr 1930 (or chosen payment account).
-      const isPureSek = transaction.currency === 'SEK' && si.currency === 'SEK'
       if (isPureSek) {
         // Shared builder so the previewed lines (including any 3740
         // öresavrundning row) are byte-identical to what the POST commits.

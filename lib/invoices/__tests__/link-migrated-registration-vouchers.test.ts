@@ -6,6 +6,7 @@ import {
   linkMigratedRegistrationVouchers,
   type MigratedInvoiceLinkInput,
 } from '../link-migrated-registration-vouchers'
+import { supplierPayableEffectSek } from '@/lib/supplier-invoices/credit-note'
 
 /**
  * The linker joins a migrated invoice to the SIE-imported verifikat that
@@ -156,6 +157,25 @@ describe('linkMigratedRegistrationVouchers', () => {
       ['select', ['id']],
     ]))
     expect(updateCalls('invoices')).toHaveLength(0)
+  })
+
+  it('links a supplier credit note on its payable effect, and never on the magnitude the row stores (#2838)', async () => {
+    // A supplier kreditfaktura's verifikat DEBITS 2440: Dr 2440 1000, Cr 5010
+    // 800, Cr 2641 200, a net credit of -1000. The row stores 1000 beside
+    // is_credit_note, so the callers pass supplierPayableEffectSek.
+    const creditLines = [line('je-1', '2440', 1000, 0), line('je-1', '5010', 0, 800), line('je-1', '2641', 0, 200)]
+    const stored = 1000
+    queue({ vouchers: [voucher({ id: 'je-1' })], entries: [{ id: 'je-1', status: 'posted' }], lines: creditLines,
+      supplierRefs: [], customerRefs: [], updates: [{ data: [{ id: 'scn-1' }] }] })
+    const linked = await run([input({ invoiceId: 'scn-1', totalSek: supplierPayableEffectSek(stored, true) })])
+    expect(linked.reports[0]).toMatchObject({ outcome: 'linked', journalEntryId: 'je-1' })
+
+    mock = createQueuedMockSupabase()
+    queue({ vouchers: [voucher({ id: 'je-1' })], entries: [{ id: 'je-1', status: 'posted' }], lines: creditLines,
+      supplierRefs: [], customerRefs: [] })
+    const mismatched = await run([input({ invoiceId: 'scn-1', totalSek: stored })])
+    expect(mismatched.reports[0]).toMatchObject({ outcome: 'amountMismatch' })
+    expect(updateCalls('supplier_invoices')).toHaveLength(0)
   })
 
   it('links a customer invoice to the posted verifikat that debits 1510 with its SEK total', async () => {

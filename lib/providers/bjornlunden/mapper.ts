@@ -162,13 +162,22 @@ export function mapBLToSupplierInvoice(raw: Record<string, unknown>): SupplierIn
     balance: amount(remaining, currency),
   };
 
+  // 381 for a supplier kreditfaktura: the one signal the importer reads
+  // (dto.ts). The field list above carries no credit flag and no reference to
+  // a credited invoice; a credit invoice arrives with a negative amount (3
+  // such rows in production were imported as paid invoices, #2838), so the
+  // amount is the signal and the credit note lands unpaired.
+  const invoiceTypeCode = creditNoteTypeCode(false, totalAmount);
+  const blStatus = deriveBLInvoiceStatus(raw);
+
   return {
     id: String(raw['entityId'] ?? raw['invoiceNumber'] ?? ''),
     invoiceNumber: String(raw['invoiceNumber'] ?? ''),
     issueDate: (raw['invoiceDate'] as string) ?? '',
     dueDate: raw['dueDate'] as string | undefined,
+    invoiceTypeCode,
     currencyCode: currency,
-    status: deriveBLInvoiceStatus(raw),
+    status: invoiceTypeCode && blStatus !== 'cancelled' ? 'credited' : blStatus,
     supplier,
     buyer: { name: '', identifications: [] },
     lines: [], // BL doesn't include line items in list responses

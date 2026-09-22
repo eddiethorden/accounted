@@ -139,15 +139,17 @@ export const POST = withRouteContext(
     const useCashEntry = !siAlreadyBooked && accountingMethod === 'cash'
 
     // Ledger math + overshoot guard in one place (mirrors planInvoicePayment on
-    // the customer side). Öre absorption applies ONLY to the accrual SEK clearing
-    // path: there a whole-krona payment within 1 kr settles the invoice in full
-    // and the residual is booked to 3740 by the line builder. Cash-method entries
-    // book the full invoice total (not the bank amount), so absorbing there would
-    // mark the invoice paid while leaving a hidden 1930 discrepancy: keep strict.
+    // the customer side). Öre absorption applies to every pure-SEK settlement:
+    // a whole-krona payment within 1 kr settles the invoice in full and the
+    // residual is booked to 3740 by the line builder. That holds under
+    // kontantmetoden too since #2852: the cash builder now credits the payment
+    // account with the bank amount and carries the residual on 3740, so there
+    // is no hidden 1930 discrepancy left to guard against (it used to book the
+    // exact öre total, which is why this was once accrual-only).
     // Rejecting here, BEFORE any JE is created, keeps a doomed overshoot from
     // burning a voucher number.
     const paymentPlan = planSupplierPayment(invoice, paymentAmountInvoiceCurrency, {
-      absorbOreRounding: isPureSek && !useCashEntry,
+      absorbOreRounding: isPureSek,
     })
     if (!paymentPlan.ok) {
       return errorResponseFromCode('MATCH_SI_AMOUNT_EXCEEDS_REMAINING', txLog, {
@@ -219,11 +221,11 @@ export const POST = withRouteContext(
 
     // A full settlement pays off the whole remaining balance. Cross-currency
     // matches always do (paymentAmountInvoiceCurrency is clamped to
-    // invoice.remaining_amount above); same-currency does when the bank amount
-    // covers the remaining balance.
+    // invoice.remaining_amount above); same-currency does when the plan says
+    // so: the bank amount covers the remaining balance, or (pure SEK) it is a
+    // whole-krona settlement within the öre band, e.g. 1 234,00 on 1 234,44.
     const fullSettlement =
-      transaction.currency !== invoice.currency ||
-      txAmountAbs >= invoice.remaining_amount - 0.005
+      transaction.currency !== invoice.currency || paymentPlan.plan.isFullyPaid
 
     // Cash method (kontantmetoden) collapses registration + payment into a
     // single entry. Under the cash method the expense is recognised AT PAYMENT
@@ -309,11 +311,14 @@ export const POST = withRouteContext(
           invoice.supplier?.supplier_type || 'swedish_business',
           undefined, // supplierName (unchanged default)
           paymentAccount,
-          // Pin a foreign-currency settlement to the payment-date rate so the
-          // settlement account equals the bank movement (kontantmetoden books
-          // the expense at payment). No-op for SEK invoices and same-rate
-          // settlements.
-          exchangeRateDifference !== 0 && fullSettlement ? actualBankSek : undefined,
+          // The SEK that left the bank. Foreign invoice: pins the settlement
+          // to the payment-date rate so the settlement account equals the bank
+          // movement (kontantmetoden books the expense at payment); a no-op
+          // for same-rate settlements. Pure SEK: a sub-krona difference to the
+          // invoice total is booked on 3740 (öresavrundning).
+          (isPureSek || exchangeRateDifference !== 0) && fullSettlement
+            ? actualBankSek
+            : undefined,
         )
         if (journalEntry) journalEntryId = journalEntry.id
       } else if (isPureSek) {

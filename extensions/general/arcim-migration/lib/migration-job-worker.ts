@@ -10,6 +10,8 @@ import { sealMigrationPayload, openMigrationPayload } from '@/lib/providers/migr
 import type { ProviderName } from '@/lib/providers/types'
 import type { CreditedInvoiceRefDto, CustomerDto, SupplierDto, SalesInvoiceDto, SupplierInvoiceDto, PartyDto } from '@/lib/providers/dto'
 import { linkMigratedRegistrationVouchers, type MigratedInvoiceLinkInput } from '@/lib/invoices/link-migrated-registration-vouchers'
+import { supplierPayableEffectSek } from '@/lib/supplier-invoices/credit-note'
+import { ORE_TOLERANCE } from '@/lib/money'
 import { reconcileSupplierInvoiceVouchers } from '@/lib/invoices/bulk-reconcile-supplier-vouchers'
 import { mapCustomer, mapSupplier, mapSalesInvoice, mapSupplierInvoice, buildFxRateIndex } from './entity-mapper'
 import { invoiceWithinScope } from './invoice-scope'
@@ -126,6 +128,10 @@ async function prepareRecord(supabase: SupabaseClient, job: ProviderMigrationJob
   if (c.resource === 'supplierInvoices' && !invoice.legalMonetaryTotal.payableAmount.value && !invoice.lines.length) {
     return { id: c.id, skip: 'zeroTotal' }
   }
+  if (c.resource === 'supplierInvoices' && mapped.invoice.is_credit_note
+    && await hasPreNormalisationCreditNote(supabase, job, mapped.invoice, deadline)) {
+    return { id: c.id, skip: 'creditNoteInOldShape' }
+  }
   if (!mapped.items.length) return { id: c.id, error: 'MIGRATION_SOURCE_LINES_MISSING' }
   // Use the same tolerance as the existing completion pass. Store no row set
   // that contradicts the header established by that exact detail payload.
@@ -140,7 +146,12 @@ async function prepareRecord(supabase: SupabaseClient, job: ProviderMigrationJob
     id: c.id, row: mapped.invoice, items: mapped.items,
     party_source_id: invoicePartySourceId(job.provider, c.resource, invoice), party: mappedParty(job, c.resource, invoice),
     link: { kind: c.resource === 'salesInvoices' ? 'customer' : 'supplier', sourceVoucher: invoice.sourceVoucher ?? null,
-      invoiceDate: invoice.issueDate, totalSek: mapped.invoice.total_sek, currencyCode: invoice.currencyCode,
+      invoiceDate: invoice.issueDate, currencyCode: invoice.currencyCode,
+      // What the registration voucher must show: a supplier credit note is
+      // stored in magnitudes but DEBITS 2440 (supplierPayableEffectSek).
+      totalSek: c.resource === 'supplierInvoices'
+        ? supplierPayableEffectSek(mapped.invoice.total_sek as number | null, mapped.invoice.is_credit_note as boolean)
+        : mapped.invoice.total_sek,
       invoiceNumber: invoice.invoiceNumber, creditedInvoiceRef: mapped.creditedInvoiceRef },
     // A credit note whose provider named the credited invoice is paired in
     // the link phase (pairMigratedCreditNotes), so only one with no reference
@@ -153,10 +164,45 @@ async function prepareRecord(supabase: SupabaseClient, job: ProviderMigrationJob
 }
 
 /**
+ * Whether the company already holds this supplier credit note in the shape
+ * the importer wrote before #2838: the provider's negative total, on a row
+ * that is usually not flagged as a credit note at all.
+ *
+ * commit_provider_migration_records adopts an earlier import on number,
+ * party, date, currency AND total. A credit note's total is now its
+ * magnitude, so such a row no longer matches, and the credit note would be
+ * inserted a second time: its resting status, 'credited', is outside the
+ * (company, supplier, number) unique index, so nothing in the schema would
+ * refuse the copy. The document IS imported; rewriting the old row into the
+ * new shape is a repair of existing data and a decision of its own, so this
+ * run leaves it alone and says why (the chunk is skipped with this reason).
+ * Once the row is repaired it carries the magnitude and is adopted like any
+ * other earlier import.
+ */
+async function hasPreNormalisationCreditNote(supabase: SupabaseClient, job: ProviderMigrationJob,
+  row: Record<string, unknown>, deadline: number): Promise<boolean> {
+  const total = Number(row.total)
+  if (!row.supplier_invoice_number || !(total > 0)) return false
+  const { data, error } = await withinMigrationDeadline(supabase.from('supplier_invoices').select('id')
+    .eq('company_id', job.company_id).eq('supplier_invoice_number', row.supplier_invoice_number as string)
+    .eq('invoice_date', row.invoice_date as string).eq('currency', row.currency as string).eq('total', -total).limit(1), deadline)
+  if (error) throw new Error(error.message)
+  if (!data?.length) return false
+  log.warn('supplier credit note already imported in the pre-normalisation shape: left as is', { jobId: job.id, targetId: (data[0] as { id: string }).id })
+  return true
+}
+
+/** Where each register keeps a credit note's pointer at the invoice it credits. */
+const CREDIT_PAIRING = {
+  salesInvoices: { table: 'invoices', numberColumn: 'invoice_number' },
+  supplierInvoices: { table: 'supplier_invoices', numberColumn: 'supplier_invoice_number' },
+} as const
+
+/**
  * Pair each imported kreditfaktura with the invoice it credits, by the
  * reference the provider sent (receipt.link.creditedInvoiceRef).
  *
- * Runs in the link phase, once every sales invoice of the job is imported:
+ * Runs in the link phase, once every invoice of the job is imported:
  * chunks import in id order, so the original may well come after its credit
  * note. The provider's id of the original resolves through this job's own
  * chunks (source_id to target_id); its number resolves through the company's
@@ -167,21 +213,42 @@ async function prepareRecord(supabase: SupabaseClient, job: ProviderMigrationJob
  * counted by provider_migration_counts from the row itself
  * (credited_invoice_id still NULL once this phase has run), so this function
  * reports nothing back.
+ *
+ * Supplier credit notes (#2838) pair by the same rule with two differences.
+ * A supplier's invoice number is unique per SUPPLIER, not per company, so the
+ * number resolves only among the credit note's own supplier's invoices. And
+ * supplier_invoices has no credit cap trigger to vet the pair, so the checks
+ * that trigger makes on the sales side are made here before the write: the
+ * original is an ordinary invoice (never another credit note) of the same
+ * supplier, in the same currency, and the credit note does not exceed it.
+ * provider_migration_counts derives its linked and unlinked counts for sales
+ * invoices only, and the wizard shows none for supplier invoices yet: a
+ * supplier credit note left unpaired here is logged, and carries the number
+ * the provider named in its notes.
  */
 export async function pairMigratedCreditNotes(supabase: SupabaseClient, job: ProviderMigrationJob, chunks: MigrationChunk[], deadline: number): Promise<void> {
   for (const c of chunks) {
     const ref = c.receipt.link?.creditedInvoiceRef
-    if (c.resource !== 'salesInvoices' || !ref || !c.target_id) continue
+    if ((c.resource !== 'salesInvoices' && c.resource !== 'supplierInvoices') || !ref || !c.target_id) continue
+    const { table, numberColumn } = CREDIT_PAIRING[c.resource]
+    let own: SupplierPairingFacts | null = null
+    if (c.resource === 'supplierInvoices') {
+      own = await supplierPairingFacts(supabase, job, c.target_id, deadline)
+      // Only a row that IS a credit note is ever pointed at an original.
+      if (!own?.is_credit_note) continue
+    }
     let target: string | null = null
     if (ref.id) {
       const { data, error } = await withinMigrationDeadline(supabase.from('migration_job_chunks').select('target_id')
-        .eq('job_id', job.id).eq('resource', 'salesInvoices').eq('source_id', ref.id).not('target_id', 'is', null).maybeSingle(), deadline)
+        .eq('job_id', job.id).eq('resource', c.resource).eq('source_id', ref.id).not('target_id', 'is', null).maybeSingle(), deadline)
       if (error) throw new Error(error.message)
       target = (data as { target_id?: string | null } | null)?.target_id ?? null
     }
     if (!target && ref.invoiceNumber) {
-      const { data, error } = await withinMigrationDeadline(supabase.from('invoices').select('id')
-        .eq('company_id', job.company_id).eq('invoice_number', ref.invoiceNumber).neq('id', c.target_id).limit(2), deadline)
+      let query = supabase.from(table).select('id')
+        .eq('company_id', job.company_id).eq(numberColumn, ref.invoiceNumber).neq('id', c.target_id)
+      if (own) query = query.eq('supplier_id', own.supplier_id).eq('is_credit_note', false)
+      const { data, error } = await withinMigrationDeadline(query.limit(2), deadline)
       if (error) throw new Error(error.message)
       const rows = (data ?? []) as { id: string }[]
       target = rows.length === 1 ? rows[0].id : null
@@ -190,7 +257,15 @@ export async function pairMigratedCreditNotes(supabase: SupabaseClient, job: Pro
       log.warn('credit note left unpaired: credited invoice not found', { jobId: job.id, chunkId: c.id, creditedInvoice: ref.invoiceNumber ?? ref.id })
       continue
     }
-    const { error } = await withinMigrationDeadline(supabase.from('invoices').update({ credited_invoice_id: target })
+    if (own) {
+      const original = await supplierPairingFacts(supabase, job, target, deadline)
+      if (!original || original.is_credit_note || original.supplier_id !== own.supplier_id
+        || original.currency !== own.currency || Math.abs(own.total) > Math.abs(original.total) + ORE_TOLERANCE) {
+        log.warn('supplier credit note left unpaired: the named invoice is not one this credit note can credit', { jobId: job.id, chunkId: c.id })
+        continue
+      }
+    }
+    const { error } = await withinMigrationDeadline(supabase.from(table).update({ credited_invoice_id: target })
       .eq('id', c.target_id).eq('company_id', job.company_id).is('credited_invoice_id', null), deadline)
     // The schema refuses a pair that would over-credit the original or mix
     // currencies (enforce_credit_note_total_within_original, 23514). That is
@@ -203,6 +278,15 @@ export async function pairMigratedCreditNotes(supabase: SupabaseClient, job: Pro
     }
     if (error) throw new Error(error.message)
   }
+}
+
+interface SupplierPairingFacts { supplier_id: string; currency: string; total: number; is_credit_note: boolean }
+
+async function supplierPairingFacts(supabase: SupabaseClient, job: ProviderMigrationJob, id: string, deadline: number): Promise<SupplierPairingFacts | null> {
+  const { data, error } = await withinMigrationDeadline(supabase.from('supplier_invoices')
+    .select('supplier_id,currency,total,is_credit_note').eq('id', id).eq('company_id', job.company_id).maybeSingle(), deadline)
+  if (error) throw new Error(error.message)
+  return (data as SupplierPairingFacts | null) ?? null
 }
 
 async function importBatch(supabase: SupabaseClient, job: ProviderMigrationJob, chunks: MigrationChunk[],

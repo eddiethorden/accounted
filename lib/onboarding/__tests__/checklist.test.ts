@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canRecordInitialSetup,
   checklistNumbers,
   claudeConnectorLink,
   mcpServerUrl,
@@ -181,5 +182,29 @@ describe('claudeConnectorLink', () => {
     // Authentication "None" (the lazy handshake answers 200) and the sign-in
     // never opens.
     expect(server.searchParams.get('auth')).toBe('required')
+  })
+})
+
+describe('canRecordInitialSetup', () => {
+  // Mirrors the database: company_settings is writable by owner/admin only
+  // (user_is_company_admin). tests/pg/company-settings-admin-gate.pg.test.ts
+  // pins the database half.
+  it('lets owner and admin record the setup state', () => {
+    expect(canRecordInitialSetup('owner')).toBe(true)
+    expect(canRecordInitialSetup('admin')).toBe(true)
+  })
+
+  it('does not offer the write to member or viewer: their steps are navigation only', () => {
+    expect(canRecordInitialSetup('member')).toBe(false)
+    expect(canRecordInitialSetup('viewer')).toBe(false)
+  })
+
+  it('answers true without a role (no CompanyProvider): the route stays the enforcement', () => {
+    expect(canRecordInitialSetup(null)).toBe(true)
+    expect(canRecordInitialSetup(undefined)).toBe(true)
+  })
+
+  it('does not trust an unknown role string', () => {
+    expect(canRecordInitialSetup('superuser')).toBe(false)
   })
 })

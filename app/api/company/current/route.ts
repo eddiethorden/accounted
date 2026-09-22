@@ -119,5 +119,8 @@ export const PATCH = withRouteContext(
 
   return NextResponse.json({ data })
   },
-  { requireWrite: true },
+  // companies is writable by owner/admin only (RLS, user_is_company_admin).
+  // With requireWrite a `member` reached the UPDATE, matched zero rows, and
+  // `.single()` turned that into a 500.
+  { requireAdmin: true },
 )
