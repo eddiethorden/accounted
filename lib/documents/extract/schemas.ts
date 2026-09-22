@@ -209,11 +209,15 @@ export const SCHEMAS: Record<string, ExtractionSchemaDef> = {
   },
   'agreement.shareholder': {
     schemaType: 'agreement.shareholder',
-    version: 1,
+    // v2: an adherence agreement (anslutningsavtal) names the joining party, so it is not filed as a second copy of the main agreement.
+    version: 2,
     subject: 'a shareholders agreement (aktieägaravtal) or an adherence agreement to one',
     keywords: ['aktieägaravtal', 'shareholders', 'hembud', 'förköp', 'drag', 'tag', 'styrelse', 'överlåtelse', 'adherence', 'anslutning'],
     fields: [
       { name: 'company_name', kind: 'text', description: 'The company the agreement concerns.' },
+      { name: 'adherence', kind: 'enum', options: ['yes', 'no'], description: 'yes when this document is an adherence agreement (anslutningsavtal) by which a new party joins an existing shareholders agreement; no when it is the shareholders agreement itself.' },
+      { name: 'adhering_party_name', kind: 'text', description: 'Name of the party joining through the adherence agreement. Null when the document is the shareholders agreement itself.' },
+      { name: 'adhering_party_org_number', kind: 'orgnr', description: 'Swedish organisation number of the joining party, if printed.' },
       { name: 'parties_summary', kind: 'prose', description: 'The shareholders that are parties, with holdings if stated.', required: true },
       { name: 'transfer_restrictions', kind: 'prose', description: 'Restrictions on transferring shares (hembud, förköp, samtycke).' },
       { name: 'drag_along', kind: 'enum', options: ['yes', 'no'], description: 'Whether a drag-along clause exists.' },
@@ -227,11 +231,13 @@ export const SCHEMAS: Record<string, ExtractionSchemaDef> = {
   },
   'agreement.investment': {
     schemaType: 'agreement.investment',
-    version: 1,
+    // v2: says whether the document is the investment agreement or an adherence to one.
+    version: 2,
     subject: 'an investment or share subscription agreement, or an adherence agreement to one',
     keywords: ['investering', 'teckning', 'aktier', 'emission', 'värdering', 'pre-money', 'tillträde', 'closing', 'investment', 'subscription'],
     fields: [
       ...party('investor', 'investor'),
+      { name: 'adherence', kind: 'enum', options: ['yes', 'no'], description: 'yes when this document is an adherence agreement by which an additional investor joins an existing investment agreement; no when it is the investment agreement itself.' },
       { name: 'investment_amount', kind: 'amount', description: 'Amount invested.', required: true },
       { name: 'currency', kind: 'text', description: 'Currency, ISO code.' },
       { name: 'share_count', kind: 'int', description: 'Number of shares subscribed.' },

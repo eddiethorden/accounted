@@ -137,6 +137,18 @@ class SettledRecord {
     return typeof v === 'string' && ISO_DATE_RE.test(v) ? v : null
   }
 
+  /**
+   * A reading the record could not settle (the two readings disagreed, or a
+   * check rejected it), as a hint for a name: shown, never cited, never in a
+   * schedule. A lender whose name is under review is still better shown by
+   * that name than by nothing (prod 2026-09-22: "Lån" with no counterparty).
+   */
+  hint(name: string): string | null {
+    const field = this.payload[name]
+    const v = field?.normalized ?? field?.value
+    return typeof v === 'string' && v.trim() ? v.trim() : null
+  }
+
   /** The fields a schedule needed but could not use, in field order. */
   missing(...names: string[]): string[] {
     return names.filter((n) => this.waitingOn.has(n) || this.payload[n]?.normalized == null)
@@ -488,7 +500,11 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
   shareholder(record, _window, today) {
     const startsOn = record.date('effective_on') ?? record.date('signed_on')
     const endsOn = record.date('ends_on')
-    const title = `Aktieägaravtal ${record.text('company_name') ?? ''}`.trim()
+    const company = record.text('company_name') ?? ''
+    // An adherence agreement is its own signed document, filed under the joining party, never as a second copy of the main agreement.
+    const adherence = record.text('adherence') === 'yes'
+    const joining = adherence ? party(record, 'adhering_party') : { name: null, orgNumber: null }
+    const title = adherence ? `Anslutningsavtal ${joining.name ?? ''} till aktieägaravtal ${company}`.replace(/\s+/g, ' ').trim() : `Aktieägaravtal ${company}`.trim()
     // Read for its source: the parties are what the page shows as the excerpt.
     record.text('parties_summary')
     const deadlines: DeadlineDraft[] = endsOn ? [{ key: 'end', title: `${title} löper ut`, dueOn: endsOn, priority: 'normal', fields: ['ends_on'] }] : []
@@ -496,7 +512,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
       agreement: {
         kind: 'shareholder',
         title,
-        counterparty: { name: null, orgNumber: null },
+        counterparty: joining,
         startsOn,
         endsOn,
         noticeMonths: null,
@@ -520,7 +536,8 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const currency = record.text('currency') ?? 'SEK'
     const closingOn = record.date('closing_on')
     const startsOn = record.date('signed_on')
-    const title = `Investering ${counterparty.name ?? ''}`.trim()
+    const adherence = record.text('adherence') === 'yes'
+    const title = `Investering ${counterparty.name ?? ''}${adherence ? ' (anslutning)' : ''}`.replace(/\s+/g, ' ').trim()
     const obligations: ObligationDraft[] = []
     if (amount != null && closingOn && inWindow(closingOn, window)) {
       obligations.push({ kind: 'payment', dueOn: closingOn, amount, currency, estimate: false, fields: ['investment_amount', 'closing_on'], direction: 'in' })
@@ -641,8 +658,9 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
   },
 }
 
+/** The name may be a hint; the organisation number is identity and must be settled. */
 function party(record: SettledRecord, prefix: string): AgreementDraft['counterparty'] {
-  return { name: record.text(`${prefix}_name`), orgNumber: record.text(`${prefix}_org_number`) }
+  return { name: record.text(`${prefix}_name`) ?? record.hint(`${prefix}_name`), orgNumber: record.text(`${prefix}_org_number`) }
 }
 
 const inWindow = (iso: string, window: Window) => iso >= window.from && iso <= window.to
@@ -654,6 +672,7 @@ function lower(title: string): string {
   const [head, ...rest] = title.split(' ')
   const definite: Record<string, string> = {
     Hyresavtal: 'hyresavtalet',
+    Anslutningsavtal: 'anslutningsavtalet',
     Leasingavtal: 'leasingavtalet',
     Lån: 'lånet',
     Abonnemang: 'abonnemanget',
