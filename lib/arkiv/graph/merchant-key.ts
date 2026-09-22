@@ -26,6 +26,18 @@ export function merchantKey(raw: string | null | undefined): string {
   return words.join(' ')
 }
 
+/**
+ * Bank texts that name how money moved, not whom it moved to: a salary
+ * transfer typed by the owner ("LÖN Juli Emil Överföring VIA Internet"),
+ * the bank's own "Utbetalning", an own deposit or withdrawal. The payee of
+ * those is an employee, the owner or the company itself, never a merchant.
+ */
+const PAYMENT_WORDS = new Set(['lön', 'löner', 'lon', 'salary', 'payroll', 'överföring', 'overforing', 'utbetalning', 'insättning', 'insattning', 'uttag', 'transfer', 'egen', 'eget', 'bankgiro', 'plusgiro'])
+
+export function isPaymentText(key: string): boolean {
+  return key.split(' ').some((w) => PAYMENT_WORDS.has(w))
+}
+
 /** What the node is called: the cleaned key, each word capitalised, except an all-caps acronym kept short. */
 export function merchantLabel(raw: string | null | undefined): string {
   const key = merchantKey(raw)

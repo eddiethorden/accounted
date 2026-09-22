@@ -7,6 +7,7 @@ vi.mock('@/lib/documents/read/on-demand', () => ({ ensureDocumentRead: vi.fn(asy
 import { tools } from '../server'
 import { ensureDocumentRead } from '@/lib/documents/read/on-demand'
 import { parseRecordRef } from '../arkiv-tools'
+import { GRAPH_VERSION } from '@/lib/arkiv/graph/build'
 
 const mock = createQueuedMockSupabase()
 const { enqueue, reset } = mock
@@ -268,7 +269,7 @@ describe('gnubok_resolve_missing', () => {
 
 describe('gnubok_get_neighbourhood', () => {
   const graph = {
-    company: { ref: `company:${CO}`, name: 'X' }, version: 2, computed_at: '2026-10-01T04:00:00Z', period: { from: '', to: '' }, months: [], series: {}, clusters: [], truncated: false,
+    company: { ref: `company:${CO}`, name: 'X' }, version: GRAPH_VERSION, computed_at: '2026-10-01T04:00:00Z', period: { from: '', to: '' }, months: [], series: {}, clusters: [], truncated: false,
     nodes: [
       { ref: `agreement:${AGR}`, cluster: 'agreement', kind: 'agreement', label: 'Låneavtal Almi', weight: 5, meta: {} },
       { ref: 'account:2350', cluster: 'ledger', kind: 'account', label: '2350 Banklån', weight: 4, meta: {} },

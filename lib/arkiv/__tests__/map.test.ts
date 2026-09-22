@@ -78,6 +78,33 @@ describe('buildArkivMap', () => {
     expect(JSON.stringify(map).length).toBeLessThan(8_000)
   })
 
+  it('lists what the ledger and the registers say after the registrations, every value of a many-valued fact by size, capped', async () => {
+    enqueue({ data: { name: 'Arcim Technology AB', org_number: '559538-6219' } })
+    enqueue({ data: [] })
+    enqueue({ data: [] })
+    const baselines = Array.from({ length: 14 }, (_, i) => ({ predicate: 'monthly_cost_baseline', value: { account: `5${String(i).padStart(3, '0')}`, median: (i + 1) * 100 }, value_text: `5${String(i).padStart(3, '0')}: typiskt ${(i + 1) * 100} kr/mån`, valid_from: null }))
+    enqueue({
+      data: [
+        ...baselines,
+        { predicate: 'top_counterparty', value: { name: 'Konsult', flow: 197130 }, value_text: 'Konsult: 197 130 kr (12 mån)', valid_from: null },
+        { predicate: 'top_counterparty', value: { name: 'Almi', flow: 500000 }, value_text: 'Almi: 500 000 kr (12 mån)', valid_from: null },
+        { predicate: 'employee_count', value: 2, value_text: '2 aktiva anställda i lönesystemet', valid_from: null },
+        { predicate: 'org_number', value: '5595386219', value_text: '5595386219', valid_from: null },
+      ],
+    })
+    enqueue({ count: 0 })
+    enqueue({ count: 0 })
+
+    const map = await buildArkivMap(supabase, 'co-1')
+    const predicates = map.company_facts.map((f) => f.predicate)
+    expect(predicates.slice(0, 2)).toEqual(['org_number', 'employee_count'])
+    expect(map.company_facts.filter((f) => f.predicate === 'top_counterparty').map((f) => f.value)).toEqual(['Almi: 500 000 kr (12 mån)', 'Konsult: 197 130 kr (12 mån)'])
+    const shownBaselines = map.company_facts.filter((f) => f.predicate === 'monthly_cost_baseline')
+    expect(shownBaselines).toHaveLength(12)
+    expect(shownBaselines[0].value).toBe('5013: typiskt 1400 kr/mån')
+    expect(map.company_facts.find((f) => f.predicate === 'employee_count')?.label).toBe('Anställda i lönesystemet')
+  })
+
   it('throws with the failing read', async () => {
     enqueue({ error: { message: 'timeout' } })
     await expect(buildArkivMap(supabase, 'co-1')).rejects.toThrow('map read failed: timeout')

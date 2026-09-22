@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest'
-import { companyFactsFrom, periodStart, type CompanyFactInputs, type LedgerLine } from '../derive-company'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createQueuedMockSupabase } from '@/tests/helpers'
+import { companyFactsFrom, deriveCompanyFacts, periodStart, type CompanyFactInputs, type LedgerLine } from '../derive-company'
 import { PREDICATES } from '../predicates'
+import { getCompanyGraph, markCompanyGraphStale } from '@/lib/arkiv/graph/snapshot'
+import { listLiveFacts, recordFact } from '../store'
+
+vi.mock('@/lib/arkiv/graph/snapshot', () => ({ getCompanyGraph: vi.fn(), markCompanyGraphStale: vi.fn() }))
+vi.mock('../store', () => ({ listLiveFacts: vi.fn(), recordFact: vi.fn() }))
 
 const line = (account_number: string, entry_date: string, debit = 0, credit = 0): LedgerLine => ({ account_number, entry_date, debit, credit })
 
@@ -60,7 +67,12 @@ describe('companyFactsFrom', () => {
     )
     expect(by(drafts, 'monthly_salary_cost')[0]).toMatchObject({ value: 64200, valueText: '64 200 kr/mån (2 mån med lön)', sourceKind: 'ledger' })
     expect(by(drafts, 'revenue_12m')[0]).toMatchObject({ value: 80000 })
-    expect(by(drafts, 'loan_balance')[0]).toMatchObject({ value: 489583, valueText: '489 583 kr (2359)' })
+    expect(by(drafts, 'loan_balance')[0]).toMatchObject({ value: 489583, valueText: '489 583 kr (2359)', evidence: { accounts: [{ account: '2359', balance: 489583 }], as_of: '2026-09-22' } })
+  })
+
+  it('counts a convertible on 2320 as a loan and breaks the balance down per account', () => {
+    const drafts = companyFactsFrom(inputs({ lines: [line('2320', '2025-10-16', 0, 400000), line('2359', '2026-02-02', 0, 500000), line('2359', '2026-02-02', 492610), line('2440', '2026-03-31', 0, 15100)] }))
+    expect(by(drafts, 'loan_balance')[0]).toMatchObject({ value: 407390, valueText: '407 390 kr (2320: 400 000 kr; 2359: 7 390 kr)' })
   })
 
   it('writes a baseline only for accounts with three months of cost, with the typical month and its range', () => {
@@ -75,11 +87,12 @@ describe('companyFactsFrom', () => {
     expect(baselines[0].valueText).toBe('5420 Programvaror: typiskt 35 000 kr/mån (20 000 kr till 50 000 kr, 3 mån)')
   })
 
-  it('keeps the five biggest counterparties by flow, in order', () => {
-    const counterparties = ['A', 'B', 'C', 'D', 'E', 'F'].map((name, i) => ({ name, flow: (i + 1) * 1000 }))
+  it('keeps the five biggest counterparties by flow, in order, each pointing at its graph node', () => {
+    const counterparties = ['A', 'B', 'C', 'D', 'E', 'F'].map((name, i) => ({ name, flow: (i + 1) * 1000, ref: `party:${name}` }))
     const top = by(companyFactsFrom(inputs({ counterparties })), 'top_counterparty')
     expect(top.map((d) => (d.value as { name: string }).name)).toEqual(['F', 'E', 'D', 'C', 'B'])
     expect(top[0].valueText).toBe('F: 6 000 kr (12 mån)')
+    expect(top[0].evidence).toMatchObject({ node: 'party:F', from: '2025-09-22', to: '2026-09-22' })
   })
 
   it('leaves fiscal_year and board to a document or a person when they hold it, and says where a registry value comes from', () => {
@@ -100,5 +113,51 @@ describe('companyFactsFrom', () => {
   it('writes nothing from an empty company', () => {
     expect(companyFactsFrom(inputs())).toEqual([])
     expect(periodStart('2026-09-22')).toBe('2025-09-22')
+  })
+})
+
+describe('deriveCompanyFacts', () => {
+  const mock = createQueuedMockSupabase()
+  const supabase = mock.supabase as unknown as SupabaseClient
+  const node = (ref: string, kind: string, label: string, flow: number) => ({ ref, cluster: 'party', kind, label, weight: flow, meta: { flow } })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mock.reset()
+    ;(listLiveFacts as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(recordFact as ReturnType<typeof vi.fn>).mockResolvedValue('fact-id')
+  })
+
+  /** The reads, in the order deriveCompanyFacts awaits them: recent lines, loan lines, employees, settings, company, banks. */
+  const enqueueReads = (over: { recent?: unknown[]; loans?: unknown[] } = {}) => {
+    mock.enqueue({ data: over.recent ?? [] })
+    mock.enqueue({ data: over.loans ?? [] })
+    mock.enqueue({ count: null })
+    mock.enqueue({ data: null })
+    mock.enqueue({ data: { tic_snapshot: null } })
+    mock.enqueue({ data: [] })
+  }
+
+  it('reads every loan account, halves the graph flow into money moved, keeps the node ref, and marks the graph stale', async () => {
+    enqueueReads({ loans: [{ account_number: '2320', debit_amount: 0, credit_amount: 400000, journal_entries: { entry_date: '2025-10-16' } }] })
+    ;(getCompanyGraph as ReturnType<typeof vi.fn>).mockResolvedValue({ nodes: [node('party:p-almi', 'party', 'Almi', 1000000), node('merchant:konsult', 'merchant', 'Konsult', 394260), node('account:1930', 'account', '1930', 5)], links: [] })
+    const out = await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)
+    expect(out).toEqual({ recorded: 3, predicates: ['loan_balance', 'top_counterparty'] })
+    expect(mock.findCalls('journal_entry_lines', 'or').map((c) => c[0])).toContain('and(account_number.gte.2310,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
+    const recorded = (recordFact as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { predicate: string; value: unknown; valueText: string; evidence: Record<string, unknown> })
+    expect(recorded.find((r) => r.predicate === 'loan_balance')).toMatchObject({ value: 400000, valueText: '400 000 kr (2320)' })
+    expect(recorded.filter((r) => r.predicate === 'top_counterparty').map((r) => [r.valueText, r.evidence.node])).toEqual([
+      ['Almi: 500 000 kr (12 mån)', 'party:p-almi'],
+      ['Konsult: 197 130 kr (12 mån)', 'merchant:konsult'],
+    ])
+    expect(markCompanyGraphStale).toHaveBeenCalledWith(supabase, 'co-1')
+  })
+
+  it('leaves the graph alone when there was nothing to record', async () => {
+    enqueueReads()
+    ;(getCompanyGraph as ReturnType<typeof vi.fn>).mockResolvedValue({ nodes: [], links: [] })
+    expect(await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)).toEqual({ recorded: 0, predicates: [] })
+    expect(recordFact).not.toHaveBeenCalled()
+    expect(markCompanyGraphStale).not.toHaveBeenCalled()
   })
 })

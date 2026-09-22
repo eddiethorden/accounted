@@ -152,4 +152,47 @@ describe('buildCompanyGraph', () => {
     expect(g.nodes.find((n) => n.ref === 'party:p-anthropic')?.meta).toMatchObject({ last_seen: '2026-09-03', active: true })
     expect(g.nodes.find((n) => n.ref.startsWith('merchant:anthropic'))).toBeUndefined()
   })
+
+  it('draws no merchant for a salary transfer or an own withdrawal, and ties a ledger fact to the accounts and the counterparty it was read from', async () => {
+    enqueueAll({
+      accounts: [{ account_number: '7210', account_name: 'Löner tjänstemän' }, { account_number: '5420', account_name: 'Programvaror' }, { account_number: '2320', account_name: 'Konvertibla lån' }],
+      lines: [
+        line('7210', '2026-09-25', 'je-s', 70000),
+        line('1930', '2026-09-25', 'je-s', 0, 70000),
+        line('5420', '2026-09-03', 'je-p', 1985),
+        line('1930', '2026-09-03', 'je-p', 0, 1985),
+        line('2320', '2026-09-01', 'je-l', 0, 400000),
+        line('1930', '2026-09-01', 'je-l', 400000),
+        line('8410', '2026-08-31', 'je-a', 2331),
+        line('1930', '2026-08-31', 'je-a', 0, 2331),
+      ],
+      parties: [{ id: 'p-almi', display_name: 'Almi Företag', kind: 'company' }],
+      aliases: [{ alias_key: normalizeCounterpartyName('ALMI FÖRETAG'), party_id: 'p-almi' }],
+      bookedTx: [
+        { id: 't-s', journal_entry_id: 'je-s', original_description: 'LÖN Juli Emil Överföring VIA Internet', description: null, merchant_name: null, date: '2026-09-25' },
+        { id: 't-l', journal_entry_id: 'je-l', original_description: 'Utbetalning', description: null, merchant_name: null, date: '2026-09-01' },
+        { id: 't-p', journal_entry_id: 'je-p', original_description: 'FIGMA', description: null, merchant_name: null, date: '2026-09-03' },
+        { id: 't-a', journal_entry_id: 'je-a', original_description: 'ALMI FÖRETAG', description: null, merchant_name: null, date: '2026-08-31' },
+      ],
+      facts: [
+        { id: 'f-sal', predicate: 'monthly_salary_cost', value_text: '70 000 kr/mån (1 mån med lön)', valid_from: null, source_document_id: null, evidence: { accounts: '7000-7399', months: 1 } },
+        { id: 'f-base', predicate: 'monthly_cost_baseline', value_text: '5420 Programvaror: typiskt 1 985 kr/mån', valid_from: null, source_document_id: null, evidence: { account: '5420', months: 3 } },
+        { id: 'f-loan', predicate: 'loan_balance', value_text: '400 000 kr (2320)', valid_from: null, source_document_id: null, evidence: { accounts: [{ account: '2320', balance: 400000 }], as_of: '2026-10-01' } },
+        { id: 'f-top', predicate: 'top_counterparty', value_text: 'Almi Företag: 2 331 kr (12 mån)', valid_from: null, source_document_id: null, evidence: { node: 'party:p-almi', from: '2025-10-01', to: '2026-10-01' } },
+      ],
+    })
+    const g = await buildCompanyGraph(supabase, CO, TODAY)
+    const merchants = g.nodes.filter((n) => n.kind === 'merchant').map((n) => n.label)
+    expect(merchants).toEqual(['Figma'])
+    expect(g.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'fact:f-sal', target: 'account:7210', kind: 'link', evidence: expect.objectContaining({ kind: 'derived', movement: 70000 }) }),
+        expect.objectContaining({ source: 'fact:f-base', target: 'account:5420', kind: 'link', evidence: expect.objectContaining({ kind: 'derived' }) }),
+        expect.objectContaining({ source: 'fact:f-loan', target: 'account:2320', kind: 'link' }),
+        expect.objectContaining({ source: 'fact:f-top', target: 'party:p-almi', kind: 'link' }),
+      ]),
+    )
+    // No authority claims a ledger fact.
+    expect(g.links.find((l) => l.target === 'fact:f-sal' && l.kind === 'authority')).toBeUndefined()
+  })
 })

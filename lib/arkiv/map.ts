@@ -44,6 +44,7 @@ export interface ArkivMap {
 
 const LATEST = 10
 const AGREEMENTS = 12
+/** The registrations first, then what the registers and the ledger say (lib/arkiv/facts/derive-company.ts). */
 const FACT_PREDICATES = [
   'legal_name',
   'org_number',
@@ -60,7 +61,25 @@ const FACT_PREDICATES = [
   'vat_method',
   'employer_registered',
   'business_description',
+  'sni_codes',
+  'beneficial_owners',
+  'accounting_method',
+  'employee_count',
+  'employee_range_registry',
+  'bank_connection',
+  'revenue_12m',
+  'monthly_salary_cost',
+  'loan_balance',
+  'top_counterparty',
+  'monthly_cost_baseline',
 ]
+/** A predicate with many live values lists its biggest ones, so the map stays a few kilobytes. */
+const MANY_CAP = 12
+const magnitude = (value: unknown): number => {
+  const v = value as { median?: unknown; flow?: unknown } | null
+  const n = Number(v?.median ?? v?.flow ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
 const AUTHORITY = new Set(['registration.bolagsverket', 'filing.bolagsverket', 'decision.skatteverket'])
 const CORPORATE = new Set(['minutes.board', 'minutes.agm', 'share_subscription_list', 'annual_report'])
 const RECEIPTS = new Set(['receipt', 'supplier_invoice', 'credit_note', 'customer_invoice'])
@@ -99,7 +118,7 @@ export async function buildArkivMap(supabase: SupabaseClient, companyId: string)
       .limit(AGREEMENTS),
     supabase
       .from('company_facts')
-      .select('predicate, value_text, valid_from')
+      .select('predicate, value, value_text, valid_from')
       .eq('company_id', companyId)
       .eq('subject_kind', 'company')
       .eq('subject_id', companyId)
@@ -169,6 +188,7 @@ export async function buildArkivMap(supabase: SupabaseClient, companyId: string)
   }
   const factRows = (facts.data ?? []) as Array<{
     predicate: string
+    value: unknown
     value_text: string
     valid_from: string | null
   }>
@@ -206,17 +226,15 @@ export async function buildArkivMap(supabase: SupabaseClient, companyId: string)
       next_payment: nextByAgreement.get(a.id) ?? null,
     })),
     company_facts: FACT_PREDICATES.flatMap((predicate) => {
-      const f = factRows.find((r) => r.predicate === predicate)
-      return f
-        ? [
-            {
-              predicate,
-              label: predicateDef(predicate)?.label ?? predicate,
-              value: f.value_text.length > 200 ? `${f.value_text.slice(0, 199)}…` : f.value_text,
-              valid_from: f.valid_from,
-            },
-          ]
-        : []
+      const def = predicateDef(predicate)
+      const rows = factRows.filter((r) => r.predicate === predicate)
+      const shown = def?.singleValued === false ? rows.sort((a, b) => magnitude(b.value) - magnitude(a.value)).slice(0, MANY_CAP) : rows.slice(0, 1)
+      return shown.map((f) => ({
+        predicate,
+        label: def?.label ?? predicate,
+        value: f.value_text.length > 200 ? `${f.value_text.slice(0, 199)}…` : f.value_text,
+        valid_from: f.valid_from,
+      }))
     }),
     waiting: { questions: questions.count ?? 0, findings: findings.count ?? 0 },
     how_to: [

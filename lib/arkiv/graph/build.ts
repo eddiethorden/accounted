@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { roundOre } from '@/lib/money'
 import { normalizeCounterpartyName } from '@/lib/bookkeeping/counterparty-templates'
-import { merchantKey, merchantLabel } from './merchant-key'
+import { isPaymentText, merchantKey, merchantLabel } from './merchant-key'
 import { CLUSTER_LABELS, type ClusterId, type CompanyGraph, type GraphLink, type GraphNode } from './types'
 import { NOT_STRUCTURED_MIME_FILTER } from '@/lib/documents/read/types'
 
@@ -19,7 +19,7 @@ const MONTHS = 12
 const UPCOMING_DAYS = 90
 const TOP_PARTIES = 20
 /** Bump when the rules that draw the graph change, so stored snapshots are rebuilt instead of served. */
-export const GRAPH_VERSION = 2
+export const GRAPH_VERSION = 3
 const LINE_CAP = 20000
 const TX_CAP = 5000
 /**
@@ -45,6 +45,31 @@ const FACT_RULES: Record<string, { authority: 'skatteverket' | 'bolagsverket'; w
   auditor: { authority: 'bolagsverket', why: 'registered with Bolagsverket' },
   registration_date: { authority: 'bolagsverket', why: 'registered with Bolagsverket' },
   business_description: { authority: 'bolagsverket', why: 'registered with Bolagsverket' },
+}
+/**
+ * What a ledger-derived fact was read from (lib/arkiv/facts/derive-company.ts):
+ * salary cost from the pay accounts, revenue from the 3xxx accounts, a
+ * baseline or a loan balance from the accounts its evidence names, a top
+ * counterparty from the party or merchant node its evidence names.
+ */
+const LEDGER_FACT_RULES: Record<string, { why: string; accounts?: RegExp }> = {
+  monthly_salary_cost: { why: 'averaged from the pay accounts of the last twelve months', accounts: /^7[0-3]\d\d$/ },
+  revenue_12m: { why: 'netted from the revenue accounts of the last twelve months', accounts: /^3[0-7]\d\d$/ },
+  loan_balance: { why: 'the standing balance of the loan accounts' },
+  monthly_cost_baseline: { why: 'the typical month on this account' },
+  top_counterparty: { why: 'the money moved with this counterparty in the last twelve months' },
+}
+/** The account numbers a fact's evidence names, whether stored as strings or as { account } rows. */
+function evidenceAccounts(evidence: Record<string, unknown> | null | undefined): string[] {
+  const out = new Set<string>()
+  if (typeof evidence?.account === 'string') out.add(evidence.account)
+  if (Array.isArray(evidence?.accounts)) {
+    for (const a of evidence.accounts) {
+      if (typeof a === 'string' && /^\d{4}$/.test(a)) out.add(a)
+      else if (a && typeof a === 'object' && typeof (a as { account?: unknown }).account === 'string') out.add((a as { account: string }).account)
+    }
+  }
+  return [...out]
 }
 /** A counterparty paid within this many days is active; older ones are drawn faded and say so. */
 const ACTIVE_DAYS = 90
@@ -153,7 +178,7 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     .limit(TX_CAP)
   const facts = await supabase
     .from('company_facts')
-    .select('id, predicate, value_text, valid_from, source_document_id')
+    .select('id, predicate, value_text, valid_from, source_document_id, evidence')
     .eq('company_id', companyId)
     .eq('subject_kind', 'company')
     .eq('subject_id', companyId)
@@ -293,7 +318,8 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     if (done) continue
     const raw = tx.merchant_name || tx.original_description || tx.description
     const key = merchantKey(raw)
-    if (!key) continue
+    // A salary transfer or an own withdrawal names a payment, not a payee: the employees and the owner are drawn elsewhere.
+    if (!key || isPaymentText(key)) continue
     const m = merchants.get(key) ?? { label: merchantLabel(raw), entries: new Set<string>() }
     m.entries.add(tx.journal_entry_id)
     merchants.set(key, m)
@@ -393,7 +419,7 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     add({ ref: `agreement:${a.id}`, cluster: 'agreement', kind: 'agreement', label: a.title, weight: Math.max(2, Math.min(12, Math.log10(Math.max(1, Number(a.principal ?? a.amount ?? 0))) * 2)), meta: { agreement_kind: a.kind, status: a.status, ends_on: a.ends_on, amount: a.amount, period: a.period, principal: a.principal } })
     if (a.source_document_id) referencedDocs.add(a.source_document_id)
   }
-  const factRows = (facts.data ?? []) as Array<{ id: string; predicate: string; value_text: string; valid_from: string | null; source_document_id: string | null }>
+  const factRows = (facts.data ?? []) as Array<{ id: string; predicate: string; value_text: string; valid_from: string | null; source_document_id: string | null; evidence?: Record<string, unknown> | null }>
   for (const f of factRows) if (f.source_document_id) referencedDocs.add(f.source_document_id)
   const linkRows = (documentLinks.data ?? []) as Array<{ document_id: string; target_kind: string; party_id: string | null; agreement_id: string | null; asset_id: string | null }>
   for (const l of linkRows) referencedDocs.add(l.document_id)
@@ -436,6 +462,14 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
       link(`authority:${rule.authority}`, `fact:${f.id}`, 'authority', { kind: 'rule', via: rule.why })
       for (const account of movement.keys()) if (rule.accounts?.test(account)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'rule', via: rule.why, movement: round2(movement.get(account) ?? 0) })
       factRules.set(f.id, rule)
+    }
+    // A fact read off the ledger points back at the accounts and the counterparty it was read from.
+    const ledger = LEDGER_FACT_RULES[f.predicate]
+    if (ledger) {
+      for (const account of movement.keys()) if (ledger.accounts?.test(account)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'derived', via: ledger.why, movement: round2(movement.get(account) ?? 0) })
+      for (const account of evidenceAccounts(f.evidence)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'derived', via: ledger.why })
+      const node = f.evidence?.node
+      if (typeof node === 'string') link(`fact:${f.id}`, node, 'link', { kind: 'derived', via: ledger.why })
     }
   }
   for (const d of docRows) {
