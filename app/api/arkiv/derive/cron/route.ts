@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { withCronContext } from '@/lib/api/with-cron-context'
 import { createServiceRoleClient } from '@/lib/supabase/service-client'
-import { isArkivEnabled } from '@/lib/arkiv/flag'
+import { arkivRollout, isArkivEnabled } from '@/lib/arkiv/flag'
+import { deriveCompanyFacts } from '@/lib/arkiv/facts/derive-company'
+import { getBASReference } from '@/lib/bookkeeping/bas-reference'
 import { observeObligations } from '@/lib/arkiv/agreements/observe'
 import { needsRederivation } from '@/lib/arkiv/agreements/store'
 import { todayIso } from '@/lib/arkiv/agreements/dates'
@@ -13,7 +15,8 @@ import { getErrorMessage } from '@/lib/errors/get-error-message'
  * Arkiv phase 4, daily: compares every company's expected payments with its
  * bank transactions (matched, missed; observation only), and queues a fresh
  * derivation for agreements older than a week so the schedule keeps rolling
- * a year ahead.
+ * a year ahead. Then recomputes each rollout company's facts from the
+ * ledger, the registers and the Bolagsverket snapshot (phase 10, step 1).
  */
 export const maxDuration = 300
 
@@ -45,8 +48,21 @@ export const GET = withCronContext('arkiv.derive', async (_request, ctx) => {
     for (const agreement of agreements.filter((a) => needsRederivation(a.derived_at)).slice(0, REDERIVE_LIMIT)) {
       if (await enqueueDocumentJob(supabase, agreement.company_id, agreement.source_document_id, 'derive')) totals.rederived++
     }
-    ctx.log.info('arkiv derive', totals)
-    return NextResponse.json({ ok: true, ...totals })
+    // Company facts for every company in the rollout: a listed rollout names them; `*` waits for the brain to open to everyone.
+    const rollout = arkivRollout()
+    const factsFor = rollout === 'all' ? [] : rollout.slice(0, MAX_COMPANIES)
+    const facts = { companies: factsFor.length, recorded: 0, failed: 0 }
+    for (const companyId of factsFor) {
+      try {
+        const out = await deriveCompanyFacts(supabase, companyId, today, (account) => getBASReference(account)?.account_name ?? null)
+        facts.recorded += out.recorded
+      } catch (err) {
+        facts.failed++
+        ctx.log.warn('company facts not derived', { company: companyId, reason: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    ctx.log.info('arkiv derive', { ...totals, facts })
+    return NextResponse.json({ ok: true, ...totals, facts })
   } catch (err) {
     ctx.log.error('arkiv derive failed', { reason: err instanceof Error ? err.message : String(err) })
     return NextResponse.json({ ok: false, error: getErrorMessage(err) }, { status: 500 })

@@ -40,7 +40,8 @@ export interface RecordFactInput {
   subjectKind: FactSubjectKind
   subjectId: string
   predicate: string
-  value: string | number | boolean
+  /** Stored as jsonb: a scalar for most predicates, a small object for a baseline or a counterparty. */
+  value: unknown
   valueText?: string
   singleValued?: boolean
   validFrom?: string | null
