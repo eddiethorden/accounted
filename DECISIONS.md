@@ -654,3 +654,4 @@ Keep the current calendar month here. Archive completed months verbatim under `d
 
 [2026-09-22] Group repository docs and the Claude plugin by purpose, archive completed decision months verbatim, and keep setup.sh, Compose overlays, env examples and compliance config at their published paths: presentation cleanup must preserve setup and review behavior.
 [2026-09-22] Arkiv ledger readers (facts, graph, lint) sum status posted AND reversed like the reports: a reversed original stays in the ledger and only its storno cancels it, so posted-only double-counted every storno (Arcim's 60 made the Almi loan read 7 390 kr instead of 500 000).
+[2026-09-22] A derive retires the many-valued facts (baselines, top counterparties, banks) an earlier run wrote and this one does not (revert_company_fact): record_company_fact supersedes only single-valued facts, so old counterparties stayed live next to new. Document and person facts untouched.

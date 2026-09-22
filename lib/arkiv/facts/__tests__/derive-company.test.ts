@@ -4,10 +4,10 @@ import { createQueuedMockSupabase } from '@/tests/helpers'
 import { companyFactsFrom, deriveCompanyFacts, periodStart, type CompanyFactInputs, type LedgerLine } from '../derive-company'
 import { PREDICATES } from '../predicates'
 import { getCompanyGraph, markCompanyGraphStale } from '@/lib/arkiv/graph/snapshot'
-import { listLiveFacts, recordFact } from '../store'
+import { listLiveFacts, recordFact, revertFact } from '../store'
 
 vi.mock('@/lib/arkiv/graph/snapshot', () => ({ getCompanyGraph: vi.fn(), markCompanyGraphStale: vi.fn() }))
-vi.mock('../store', () => ({ listLiveFacts: vi.fn(), recordFact: vi.fn() }))
+vi.mock('../store', () => ({ listLiveFacts: vi.fn(), recordFact: vi.fn(), revertFact: vi.fn() }))
 
 const line = (account_number: string, entry_date: string, debit = 0, credit = 0): LedgerLine => ({ account_number, entry_date, debit, credit })
 
@@ -138,11 +138,19 @@ describe('deriveCompanyFacts', () => {
     mock.enqueue({ data: [] })
   }
 
-  it('reads every loan account, halves the graph flow into money moved, keeps the node ref, and marks the graph stale', async () => {
+  it('reads every loan account, halves the graph flow into money moved, keeps the node ref, retires what an earlier run derived and this one does not, and marks the graph stale', async () => {
     enqueueReads({ loans: [{ account_number: '2320', debit_amount: 0, credit_amount: 400000, journal_entries: { entry_date: '2025-10-16' } }] })
     ;(getCompanyGraph as ReturnType<typeof vi.fn>).mockResolvedValue({ nodes: [node('party:p-almi', 'party', 'Almi', 1000000), node('merchant:konsult', 'merchant', 'Konsult', 394260), node('account:1930', 'account', '1930', 5)], links: [] })
+    ;(listLiveFacts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'f-old-utb', predicate: 'top_counterparty', value_text: 'Utbetalning: 502 713 kr (12 mån)', source_kind: 'ledger', rank: 'normal' },
+      { id: 'f-same', predicate: 'top_counterparty', value_text: 'Almi: 500 000 kr (12 mån)', source_kind: 'ledger', rank: 'normal' },
+      { id: 'f-loan-old', predicate: 'loan_balance', value_text: '7 390 kr (2359)', source_kind: 'ledger', rank: 'normal' },
+      { id: 'f-person', predicate: 'top_counterparty', value_text: 'Kund AB', source_kind: 'person', rank: 'normal' },
+    ])
     const out = await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)
-    expect(out).toEqual({ recorded: 3, predicates: ['loan_balance', 'top_counterparty'] })
+    expect(out).toEqual({ recorded: 3, retired: 1, predicates: ['loan_balance', 'top_counterparty'] })
+    // The counterparty that fell out is retired; the same value stays; a single-valued fact is superseded by the record itself; a person's fact is theirs.
+    expect((revertFact as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1])).toEqual(['f-old-utb'])
     expect(mock.findCalls('journal_entry_lines', 'or').map((c) => c[0])).toContain('and(account_number.gte.2310,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
     // A storno cancels its original only when both are summed: reversed entries stay in.
     expect(mock.findCalls('journal_entry_lines', 'in')).toEqual(expect.arrayContaining([['journal_entries.status', ['posted', 'reversed']]]))
@@ -158,8 +166,9 @@ describe('deriveCompanyFacts', () => {
   it('leaves the graph alone when there was nothing to record', async () => {
     enqueueReads()
     ;(getCompanyGraph as ReturnType<typeof vi.fn>).mockResolvedValue({ nodes: [], links: [] })
-    expect(await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)).toEqual({ recorded: 0, predicates: [] })
+    expect(await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)).toEqual({ recorded: 0, retired: 0, predicates: [] })
     expect(recordFact).not.toHaveBeenCalled()
+    expect(revertFact).not.toHaveBeenCalled()
     expect(markCompanyGraphStale).not.toHaveBeenCalled()
   })
 })

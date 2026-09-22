@@ -38,6 +38,7 @@ describe('isPaymentText', () => {
     expect(isPaymentText(merchantKey('Utbetalning'))).toBe(true)
     expect(isPaymentText(merchantKey('Eget uttag'))).toBe(true)
     expect(isPaymentText(merchantKey('Överföring 1234 56 789'))).toBe(true)
+    expect(isPaymentText(merchantKey('Inbetalning AV Aktiekapital'))).toBe(true)
   })
 
   it('keeps a real payee, however vague', () => {

@@ -51,11 +51,12 @@ export const GET = withCronContext('arkiv.derive', async (_request, ctx) => {
     // Company facts for every company in the rollout: a listed rollout names them; `*` waits for the brain to open to everyone.
     const rollout = arkivRollout()
     const factsFor = rollout === 'all' ? [] : rollout.slice(0, MAX_COMPANIES)
-    const facts = { companies: factsFor.length, recorded: 0, failed: 0 }
+    const facts = { companies: factsFor.length, recorded: 0, retired: 0, failed: 0 }
     for (const companyId of factsFor) {
       try {
         const out = await deriveCompanyFacts(supabase, companyId, today, (account) => getBASReference(account)?.account_name ?? null)
         facts.recorded += out.recorded
+        facts.retired += out.retired
       } catch (err) {
         facts.failed++
         ctx.log.warn('company facts not derived', { company: companyId, reason: err instanceof Error ? err.message : String(err) })

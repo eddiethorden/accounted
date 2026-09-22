@@ -32,7 +32,7 @@ export function merchantKey(raw: string | null | undefined): string {
  * the bank's own "Utbetalning", an own deposit or withdrawal. The payee of
  * those is an employee, the owner or the company itself, never a merchant.
  */
-const PAYMENT_WORDS = new Set(['lön', 'löner', 'lon', 'salary', 'payroll', 'överföring', 'overforing', 'utbetalning', 'insättning', 'insattning', 'uttag', 'transfer', 'egen', 'eget', 'bankgiro', 'plusgiro'])
+const PAYMENT_WORDS = new Set(['lön', 'löner', 'lon', 'salary', 'payroll', 'överföring', 'overforing', 'utbetalning', 'inbetalning', 'insättning', 'insattning', 'uttag', 'transfer', 'egen', 'eget', 'bankgiro', 'plusgiro'])
 
 export function isPaymentText(key: string): boolean {
   return key.split(' ').some((w) => PAYMENT_WORDS.has(w))

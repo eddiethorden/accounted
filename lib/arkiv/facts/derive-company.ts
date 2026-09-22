@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { roundOre } from '@/lib/money'
 import { getCompanyGraph, markCompanyGraphStale } from '@/lib/arkiv/graph/snapshot'
-import { listLiveFacts, recordFact } from './store'
+import { listLiveFacts, recordFact, revertFact } from './store'
 
 /**
  * Company facts from the sources of record that need no document: the
@@ -187,8 +187,20 @@ export function companyFactsFrom(inputs: CompanyFactInputs): FactDraft[] {
 
 export interface DeriveCompanyFactsOutcome {
   recorded: number
+  /** Many-valued facts of an earlier run that this run no longer derives, deprecated. */
+  retired: number
   predicates: string[]
 }
+
+/**
+ * The many-valued predicates this derivation owns. A single-valued fact is
+ * superseded by record_company_fact when its value changes; a many-valued one
+ * accumulates, so a baseline that moved or a counterparty that dropped out of
+ * the top five would stay live next to its replacement unless retired here.
+ * Only ledger and registry facts are touched: a document's or a person's
+ * fact under the same predicate is theirs.
+ */
+const RETIRABLE = new Set(['monthly_cost_baseline', 'top_counterparty', 'bank_connection'])
 
 /** Loads the inputs for one company, computes the facts and records them. */
 export async function deriveCompanyFacts(supabase: SupabaseClient, companyId: string, today: string, accountName: (account: string) => string | null): Promise<DeriveCompanyFactsOutcome> {
@@ -246,7 +258,10 @@ export async function deriveCompanyFacts(supabase: SupabaseClient, companyId: st
       confidence: 1,
     })
   }
+  const stillDerived = new Set(drafts.map((d) => `${d.predicate}\u0000${d.valueText}`))
+  const stale = held.filter((f) => RETIRABLE.has(f.predicate) && (f.source_kind === 'ledger' || f.source_kind === 'registry') && f.rank !== 'deprecated' && !stillDerived.has(`${f.predicate}\u0000${f.value_text}`))
+  for (const f of stale) await revertFact(supabase, f.id, 'not derived by the latest run')
   // The facts are nodes of the graph: the next read draws them.
-  if (drafts.length > 0) await markCompanyGraphStale(supabase, companyId)
-  return { recorded: drafts.length, predicates: [...new Set(drafts.map((d) => d.predicate))] }
+  if (drafts.length > 0 || stale.length > 0) await markCompanyGraphStale(supabase, companyId)
+  return { recorded: drafts.length, retired: stale.length, predicates: [...new Set(drafts.map((d) => d.predicate))] }
 }
