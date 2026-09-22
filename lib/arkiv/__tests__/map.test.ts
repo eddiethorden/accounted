@@ -4,6 +4,7 @@ import { createQueuedMockSupabase } from '@/tests/helpers'
 import { buildArkivMap } from '../map'
 
 const mock = createQueuedMockSupabase()
+const { findCalls } = mock
 const { enqueue, reset } = mock
 const supabase = mock.supabase as unknown as SupabaseClient
 
@@ -50,6 +51,8 @@ describe('buildArkivMap', () => {
     })
 
     const map = await buildArkivMap(supabase, 'co-1')
+    // Bank responses and XML payloads are archives, never documents: kept out at the query.
+    expect(findCalls('document_attachments', 'or').map((c) => c[0])).toContain('mime_type.is.null,mime_type.not.in.(application/xml,text/xml,application/json)')
 
     expect(map.company).toEqual({ name: 'Arcim Technology AB', org_number: '559538-6219', record_ref: 'company:co-1' })
     expect(map.documents.total).toBe(4)
