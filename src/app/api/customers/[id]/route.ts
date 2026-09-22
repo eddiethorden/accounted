@@ -228,7 +228,10 @@ export const PATCH = withRouteContext(
           if (columns) {
             await supabase
               .from('customers')
-              .update(columns)
+              .update({
+                vat_number_validated: columns.vat_number_validated,
+                vat_number_validated_at: columns.vat_number_validated_at,
+              })
               .eq('id', id)
               .eq('company_id', companyId)
             data.vat_number_validated = columns.vat_number_validated

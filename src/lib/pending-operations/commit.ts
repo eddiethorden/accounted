@@ -740,7 +740,10 @@ async function commitUpdateCustomer(
         try {
           const vatResult = await validateVatNumber(changes.vat_number)
           const columns = vatValidationColumns(vatResult, current.vat_number, changes.vat_number)
-          if (columns) Object.assign(updateData, columns)
+          if (columns) {
+            updateData.vat_number_validated = columns.vat_number_validated
+            updateData.vat_number_validated_at = columns.vat_number_validated_at
+          }
         } catch (err) {
           log.warn('Auto-VIES validation failed on staged customer update:', err)
           updateData.vat_number_validated = false

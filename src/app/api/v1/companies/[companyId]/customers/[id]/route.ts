@@ -523,7 +523,10 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string; id: string
                 ).data?.vat_number
               : null
             const columns = vatValidationColumns(vatResult, previousVatNumber, body.vat_number)
-            if (columns) Object.assign(updateData, columns)
+            if (columns) {
+              updateData.vat_number_validated = columns.vat_number_validated
+              updateData.vat_number_validated_at = columns.vat_number_validated_at
+            }
           } catch (err) {
             ctx.log.warn('auto-VIES re-validation failed on customer update', err as Error)
             updateData.vat_number_validated = false
