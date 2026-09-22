@@ -39,6 +39,8 @@ describe('GET /api/arkiv/documents', () => {
     enqueue({ data: [{ source_document_id: 'doc-a' }, { source_document_id: 'doc-a' }] })
     const { status, body } = await parseJsonResponse(await call('?type=agreement'))
     expect(status).toBe(200)
+    // Bank responses and XML payloads are archives, never documents to type: kept out at the query.
+    expect(findCalls('document_attachments', 'or').map((c) => c[0])).toContain('mime_type.is.null,mime_type.not.in.(application/xml,text/xml,application/json)')
     const rows = (body as { data: Array<Record<string, unknown>> }).data
     expect(rows[0]).toMatchObject({ document_id: 'doc-a', counterparty: 'Almi Stockholm AB', amount: 10417, currency: 'SEK', linked: { agreement_id: 'agr-1', facts: 2, held: false, journal_entry_id: null }, href: '/arkiv/avtal/agr-1' })
     expect(rows[1]).toMatchObject({ counterparty: 'APO AB', amount: 673, linked: { journal_entry_id: 'je-1' }, href: '/arkiv/dokument/doc-b' })

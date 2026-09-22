@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { documentDate, documentTitle } from '@/lib/arkiv/documents/title'
 import { predicateDef } from '@/lib/arkiv/facts/predicates'
 import type { Payload } from '@/lib/documents/extract/fields'
+import { NOT_STRUCTURED_MIME_FILTER } from '@/lib/documents/read/types'
 
 /**
  * The map (phase 8): a few kilobytes an agent reads before it searches,
@@ -86,6 +87,7 @@ export async function buildArkivMap(supabase: SupabaseClient, companyId: string)
       .select('id, file_name, doc_type, created_at')
       .eq('company_id', companyId)
       .eq('admission_state', 'admitted')
+      .or(NOT_STRUCTURED_MIME_FILTER)
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase

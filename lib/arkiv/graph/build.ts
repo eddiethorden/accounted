@@ -3,6 +3,7 @@ import { roundOre } from '@/lib/money'
 import { normalizeCounterpartyName } from '@/lib/bookkeeping/counterparty-templates'
 import { merchantKey, merchantLabel } from './merchant-key'
 import { CLUSTER_LABELS, type ClusterId, type CompanyGraph, type GraphLink, type GraphNode } from './types'
+import { NOT_STRUCTURED_MIME_FILTER } from '@/lib/documents/read/types'
 
 /**
  * Builds the company graph from the tables that exist. Every query is listed
@@ -165,6 +166,7 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     .select('id, file_name, doc_type, created_at, journal_entry_id')
     .eq('company_id', companyId)
     .eq('admission_state', 'admitted')
+    .or(NOT_STRUCTURED_MIME_FILTER)
     .order('created_at', { ascending: false })
     .limit(DOC_CAP)
   const documentLinks = await supabase

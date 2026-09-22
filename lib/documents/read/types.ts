@@ -71,6 +71,13 @@ export const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image
 export const TEXT_MIME_TYPES = ['text/plain', 'text/html', 'application/xhtml+xml'] as const
 /** Archived as-is, never read into pages: the file IS the structured record. */
 export const STRUCTURED_MIME_TYPES = ['application/xml', 'text/xml', 'application/json'] as const
+/**
+ * PostgREST filter that keeps the structured archives (bank responses, XML
+ * payloads) out of what Arkiv shows as documents: the first rollout company
+ * had 468 bank JSON files listed as "unknown type" with a button to say what
+ * they are. A null mime type stays in.
+ */
+export const NOT_STRUCTURED_MIME_FILTER = `mime_type.is.null,mime_type.not.in.(${STRUCTURED_MIME_TYPES.join(',')})`
 
 export function readerForMime(mimeType: string | null | undefined): PageReader | 'structured' | null {
   if (!mimeType) return null
