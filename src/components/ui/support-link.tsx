@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { submitFeedback } from '@/lib/support/submit-feedback'
+import { clearSupportDraft, readSupportDraft, writeSupportDraft } from '@/lib/support/draft'
 import { useCompanyOptional } from '@/contexts/CompanyContext'
 import {
   SUPPORT_ATTACHMENT_ACCEPT,
@@ -159,10 +160,15 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
   }, [variant])
 
   // Deferred a tick so the effect itself sets no state (react-hooks rule);
-  // bootstrap does its work after awaits anyway.
+  // bootstrap does its work after awaits anyway. The stored draft is picked
+  // up here: this instance may be freshly mounted, or the text may have been
+  // typed through another trigger.
   useEffect(() => {
     if (!open) return
-    const id = setTimeout(() => void bootstrap(), 0)
+    const id = setTimeout(() => {
+      setMessage((current) => current || readSupportDraft())
+      void bootstrap()
+    }, 0)
     return () => clearTimeout(id)
   }, [open, bootstrap])
 
@@ -246,13 +252,32 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  // Typed text is never dropped on close: it stays in the draft until it is
+  // delivered (support ticket 102: an outside click used to discard it).
+  function updateMessage(text: string) {
+    setMessage(text)
+    writeSupportDraft(text)
+  }
+
+  function clearMessage() {
+    setMessage('')
+    clearSupportDraft()
+  }
+
   function handleOpenChange(next: boolean) {
     setOpen(next)
     if (!next) {
-      setMessage('')
       resetAttachments()
       setView('loading')
     }
+  }
+
+  // With something typed or attached, an outside click or Escape must not
+  // dismiss the dialog: those are easy to do by accident. The explicit
+  // Avbryt / X still close it, and the text is kept as a draft either way.
+  const hasUnsentInput = message.trim().length > 0 || attachments.length > 0
+  function guardDismiss(event: Event) {
+    if (hasUnsentInput) event.preventDefault()
   }
 
   async function handleCompose(e: React.FormEvent) {
@@ -276,7 +301,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
       return
     }
 
-    setMessage('')
+    clearMessage()
     resetAttachments()
     if (result.channels.includes('ticket')) {
       await bootstrap()
@@ -297,7 +322,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
       toast({ title: t('send_failed_title'), description: t('reply_failed'), variant: 'destructive' })
       return
     }
-    setMessage('')
+    clearMessage()
     if (res.ticketId !== viewingId) await bootstrap()
     else await showTicket(viewingId, true)
   }
@@ -350,7 +375,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
     <form onSubmit={handleCompose}>
       <Textarea
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={(e) => updateMessage(e.target.value)}
         placeholder={t('placeholder')}
         className="min-h-[120px] resize-none"
         maxLength={5000}
@@ -456,7 +481,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
     <form onSubmit={handleReply} className="mt-3">
       <Textarea
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={(e) => updateMessage(e.target.value)}
         placeholder={t('reply_placeholder')}
         className="min-h-[80px] resize-none"
         maxLength={5000}
@@ -477,7 +502,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onInteractOutside={guardDismiss} onEscapeKeyDown={guardDismiss}>
         <DialogHeader>
           <DialogTitle>{t('dialog_title')}</DialogTitle>
           <DialogDescription>{view === 'thread' ? t('thread_description') : t('dialog_description')}</DialogDescription>
@@ -566,10 +591,7 @@ export function SupportLink({ variant = 'inline', subject, children, className, 
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setMessage('')
-                    setView('compose')
-                  }}
+                  onClick={() => setView('compose')}
                 >
                   {t('new_ticket')}
                 </Button>

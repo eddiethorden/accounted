@@ -55,6 +55,7 @@ import { ENABLED_EXTENSION_IDS as _ENABLED_EXTENSION_IDS } from '@/lib/extension
 import { resolveIcon } from '@/lib/extensions/icon-resolver'
 import { resetAnalyticsIdentity } from '@/lib/analytics/reset'
 import { SupportLink } from '@/components/ui/support-link'
+import { clearSupportDraft } from '@/lib/support/draft'
 import CompanySwitcher from '@/components/dashboard/CompanySwitcher'
 import UserMenu from '@/components/dashboard/UserMenu'
 import SubscriptionTouchpoint from '@/components/billing/SubscriptionTouchpoint'
@@ -406,6 +407,8 @@ export default function DashboardNav({ companyName: _companyName, entityType, pa
 
   const handleLogout = async () => {
     resetAnalyticsIdentity()
+    // An unsent support draft belongs to this user; never leave it in the tab.
+    clearSupportDraft()
     await supabase.auth.signOut()
     router.push(isSandbox ? '/sandbox' : '/login')
   }
