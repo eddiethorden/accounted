@@ -3,11 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../pdf', () => ({ readPdfTextLayer: vi.fn(), extractSinglePagePdf: vi.fn() }))
 vi.mock('../office', () => ({ readOfficeDocument: vi.fn() }))
 vi.mock('../vision', () => ({ readImageWithModel: vi.fn(), transcribeWithModel: vi.fn() }))
+vi.mock('../image', () => ({ fitImageForModel: vi.fn(async (bytes: Buffer, mimeType: string) => ({ bytes, mediaType: mimeType })) }))
 
 import { readDocumentBytes } from '../router'
 import { readPdfTextLayer, extractSinglePagePdf } from '../pdf'
 import { readOfficeDocument } from '../office'
 import { readImageWithModel, transcribeWithModel } from '../vision'
+import { fitImageForModel } from '../image'
 
 const mock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -87,6 +89,17 @@ describe('readDocumentBytes', () => {
     expect(await readDocumentBytes(Buffer.from('jpg'), 'image/jpeg')).toMatchObject({ ok: true, reader: 'claude_vision' })
     mock(readOfficeDocument).mockResolvedValue([{ pageNo: 1, text: '# Avtal', reader: 'office', hasTextLayer: true }])
     expect(await readDocumentBytes(Buffer.from('PK'), DOCX)).toMatchObject({ ok: true, reader: 'office' })
+    expect(readImageWithModel).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands the model the fitted photo, and skips a HEIC the build cannot decode', async () => {
+    const fitted = Buffer.from('small-jpeg')
+    mock(fitImageForModel).mockResolvedValueOnce({ bytes: fitted, mediaType: 'image/jpeg' })
+    mock(readImageWithModel).mockResolvedValue({ ok: true, pages: [{ pageNo: 1, text: 'Beslut', reader: 'claude_vision', hasTextLayer: false }] })
+    expect(await readDocumentBytes(Buffer.from('big-heic'), 'image/heic')).toMatchObject({ ok: true, reader: 'claude_vision' })
+    expect(readImageWithModel).toHaveBeenCalledWith(fitted, 'image/jpeg')
+    mock(fitImageForModel).mockResolvedValueOnce(null)
+    expect(await readDocumentBytes(Buffer.from('big-heic'), 'image/heic')).toEqual({ ok: false, skipped: 'unsupported_mime' })
     expect(readImageWithModel).toHaveBeenCalledTimes(1)
   })
 

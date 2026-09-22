@@ -1,8 +1,8 @@
-import type { AiImageMediaType } from '@/lib/ai'
 import { extractSinglePagePdf, readPdfTextLayer } from './pdf'
 import { readOfficeDocument } from './office'
 import { readTextDocument } from './text'
 import { readImageWithModel, transcribeWithModel } from './vision'
+import { fitImageForModel } from './image'
 import { readerForMime, type ModelSkipReason, type ReadOptions, type ReadOutcome, type ReadPage } from './types'
 
 /**
@@ -35,7 +35,9 @@ export async function readDocumentBytes(bytes: Buffer, mimeType: string | null |
 
   if (reader === 'claude_vision') {
     if (!opts.allowModel) return { ok: false, skipped: 'ai_gated' }
-    const out = await readImageWithModel(bytes, mimeType as AiImageMediaType)
+    const fitted = await fitImageForModel(bytes, mimeType!)
+    if (!fitted) return { ok: false, skipped: 'unsupported_mime' }
+    const out = await readImageWithModel(fitted.bytes, fitted.mediaType)
     if (!out.ok) return { ok: false, skipped: 'ai_unconfigured' }
     if (out.pages.length === 0) return { ok: false, skipped: 'empty' }
     return { ok: true, pages: out.pages, reader: 'claude_vision', pageCount: 1 }
