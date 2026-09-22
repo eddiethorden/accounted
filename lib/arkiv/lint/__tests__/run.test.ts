@@ -130,5 +130,7 @@ describe('ledger evidence', () => {
     expect(balanceSent.sort()).toEqual(EXPECTATION_RULES.flatMap((r) => (r.balance ?? []).map(range)).sort())
     // The cost query has a date floor, the balance query has none: a standing balance is evidence whether or not it moved this year.
     expect(findCalls('journal_entry_lines', 'gte')).toHaveLength(1)
+    // A storno cancels its original only when both are summed: reversed entries stay in, as in the reports.
+    expect(findCalls('journal_entry_lines', 'in')).toEqual([['journal_entries.status', ['posted', 'reversed']], ['journal_entries.status', ['posted', 'reversed']]])
   })
 })

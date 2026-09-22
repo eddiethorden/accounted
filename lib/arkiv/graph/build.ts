@@ -135,7 +135,8 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     .from('journal_entry_lines')
     .select('account_number, debit_amount, credit_amount, journal_entry_id, journal_entries!inner(entry_date, status, source_type, source_id, company_id)')
     .eq('journal_entries.company_id', companyId)
-    .eq('journal_entries.status', 'posted')
+    // A reversed original stays in the ledger and its storno cancels it; the reports sum both, so must the graph.
+    .in('journal_entries.status', ['posted', 'reversed'])
     .gte('journal_entries.entry_date', from)
     .limit(LINE_CAP)
   const parties = await supabase.from('parties').select('id, display_name, kind').eq('company_id', companyId).limit(2000)

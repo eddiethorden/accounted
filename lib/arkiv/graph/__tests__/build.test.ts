@@ -45,6 +45,8 @@ describe('buildCompanyGraph', () => {
     expect(g.series['account:3010'][g.months.indexOf('2026-09')]).toBe(60000)
     expect(g.clusters.find((c) => c.id === 'ledger')?.count).toBe(3)
     expect(g.truncated).toBe(false)
+    // A storno cancels its original only when both are summed: reversed entries stay in, as in the reports.
+    expect(mock.findCalls('journal_entry_lines', 'in')).toEqual(expect.arrayContaining([['journal_entries.status', ['posted', 'reversed']]]))
   })
 
   it('ties an agreement to its counterparty, its source, the accounts that paid it, and what it produces next', async () => {

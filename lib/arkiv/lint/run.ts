@@ -187,7 +187,8 @@ async function loadLedgerLines(supabase: SupabaseClient, companyId: string, toda
       .from('journal_entry_lines')
       .select('account_number, debit_amount, credit_amount, journal_entries!inner(entry_date, status, company_id)')
       .eq('journal_entries.company_id', companyId)
-      .eq('journal_entries.status', 'posted')
+      // A reversed original stays in the ledger and its storno cancels it; the reports sum both, so must this.
+      .in('journal_entries.status', ['posted', 'reversed'])
   // Literal on purpose: the phantom-column guard can only check what it can read. run.test.ts pins both to EXPECTATION_RULES.
   const [cost, balance] = await Promise.all([
     base()

@@ -144,6 +144,8 @@ describe('deriveCompanyFacts', () => {
     const out = await deriveCompanyFacts(supabase, 'co-1', '2026-09-22', () => null)
     expect(out).toEqual({ recorded: 3, predicates: ['loan_balance', 'top_counterparty'] })
     expect(mock.findCalls('journal_entry_lines', 'or').map((c) => c[0])).toContain('and(account_number.gte.2310,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
+    // A storno cancels its original only when both are summed: reversed entries stay in.
+    expect(mock.findCalls('journal_entry_lines', 'in')).toEqual(expect.arrayContaining([['journal_entries.status', ['posted', 'reversed']]]))
     const recorded = (recordFact as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { predicate: string; value: unknown; valueText: string; evidence: Record<string, unknown> })
     expect(recorded.find((r) => r.predicate === 'loan_balance')).toMatchObject({ value: 400000, valueText: '400 000 kr (2320)' })
     expect(recorded.filter((r) => r.predicate === 'top_counterparty').map((r) => [r.valueText, r.evidence.node])).toEqual([

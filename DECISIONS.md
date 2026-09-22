@@ -653,3 +653,4 @@ Keep the current calendar month here. Archive completed months verbatim under `d
 [2026-09-22] Company facts after the first prod run: loan_balance reads 2310-2399 (a convertible on 2320 was missed); a payment text (LÖN, Överföring, Utbetalning) is no merchant node (GRAPH_VERSION 3); top_counterparty = half the graph flow; the map lists ledger facts; a derive marks the graph stale.
 
 [2026-09-22] Group repository docs and the Claude plugin by purpose, archive completed decision months verbatim, and keep setup.sh, Compose overlays, env examples and compliance config at their published paths: presentation cleanup must preserve setup and review behavior.
+[2026-09-22] Arkiv ledger readers (facts, graph, lint) sum status posted AND reversed like the reports: a reversed original stays in the ledger and only its storno cancels it, so posted-only double-counted every storno (Arcim's 60 made the Almi loan read 7 390 kr instead of 500 000).
