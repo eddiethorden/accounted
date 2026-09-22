@@ -138,7 +138,7 @@ describe('PATCH /api/company/current', () => {
   it('accepts the same change when the request also moves the company to K2', async () => {
     enqueue({ data: { entity_type: 'aktiebolag', accounting_framework: 'k3' } }) // current row
     enqueue({ data: { ok: true, changed: true, entity_type: 'ekonomisk_forening', previous_entity_type: 'aktiebolag' } }) // rpc
-    enqueue({ data: { id: 'company-1', accounting_framework: 'k2', entity_type: 'ekonomisk_forening' } }) // update
+    enqueue({ data: { id: 'company-1', accounting_framework: 'k2', entity_type: 'ekonomisk_forening' } }) // re-read, no separate update
     const req = createMockRequest('/api/company/current', {
       method: 'PATCH',
       body: { entity_type: 'ekonomisk_forening', accounting_framework: 'k2' },
@@ -151,6 +151,8 @@ describe('PATCH /api/company/current', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('correct_company_entity_type', {
       p_company_id: 'company-1',
       p_entity_type: 'ekonomisk_forening',
+      // The framework rides in the same transaction as the legal form.
+      p_accounting_framework: 'k2',
     })
   })
 
@@ -185,6 +187,7 @@ describe('PATCH /api/company/current', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('correct_company_entity_type', {
       p_company_id: 'company-1',
       p_entity_type: 'ekonomisk_forening',
+      p_accounting_framework: null,
     })
   })
 

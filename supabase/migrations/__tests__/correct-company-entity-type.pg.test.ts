@@ -69,6 +69,25 @@ async function correct(userId: string, companyId: string, target: string) {
 }
 
 describe('correct_company_entity_type: empty books', () => {
+  it('writes the framework in the same transaction as the legal form', async () => {
+    const { ownerId, companyId } = await seededCompany('aktiebolag')
+    await getPool().query(`UPDATE public.companies SET accounting_framework = 'k3' WHERE id = $1`, [companyId])
+
+    const row = await withUserContext(ownerId, async (client) => {
+      const res = await client.query<{ result: Record<string, unknown> }>(
+        `SELECT public.correct_company_entity_type($1::uuid, $2::text, $3::text) AS result`,
+        [companyId, 'ekonomisk_forening', 'k2'],
+      )
+      expect(res.rows[0].result).toMatchObject({ ok: true, changed: true })
+      const after = await client.query<{ entity_type: string; accounting_framework: string }>(
+        `SELECT entity_type, accounting_framework FROM public.companies WHERE id = $1`,
+        [companyId],
+      )
+      return after.rows[0]
+    })
+    expect(row).toEqual({ entity_type: 'ekonomisk_forening', accounting_framework: 'k2' })
+  })
+
   it('lets the owner turn a misclassified aktiebolag into an ekonomisk förening and re-seeds the chart', async () => {
     const { ownerId, companyId } = await seededCompany('aktiebolag')
     expect(await accountNumbers(companyId)).toEqual(expect.arrayContaining(['2081', '2893']))

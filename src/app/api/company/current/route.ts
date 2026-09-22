@@ -136,7 +136,9 @@ export const PATCH = withRouteContext(
         { status: 400 },
       )
     }
-    if (wantsFramework) updates.accounting_framework = validation.data.accounting_framework
+    // With a legal-form change the RPC writes the framework in the same
+    // transaction; only a framework-only request uses the direct update.
+    if (wantsFramework && !wantsEntityType) updates.accounting_framework = validation.data.accounting_framework
   }
 
   if (validation.data.entity_type !== undefined) {
@@ -151,6 +153,7 @@ export const PATCH = withRouteContext(
     const { data, error } = await supabase.rpc('correct_company_entity_type', {
       p_company_id: companyId,
       p_entity_type: validation.data.entity_type,
+      p_accounting_framework: validation.data.accounting_framework ?? null,
     })
     if (error) {
       return NextResponse.json({ error: 'Företagsformen kunde inte ändras' }, { status: 500 })

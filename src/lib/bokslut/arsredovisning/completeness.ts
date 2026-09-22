@@ -453,7 +453,7 @@ export function validateAnnualReportCompleteness(
     }
     // ÅRL 6 kap. 3 § p. 3: when the förening has förlagsinsatser, the
     // förvaltningsberättelse states the right to dividend they carry. The
-    // PDF prints "inga förlagsinsatser" for an empty text, which would be a
+    // PDF prints "uppgift saknas" for an empty text, which would be a
     // false statement next to a nonzero balance-sheet post.
     const forlagsinsatserBalance =
       report.balansrakning.equity_liabilities.find(

@@ -39,7 +39,11 @@
 
 CREATE OR REPLACE FUNCTION public.correct_company_entity_type(
   p_company_id uuid,
-  p_entity_type text
+  p_entity_type text,
+  -- Optional framework the company holds after the correction, written in
+  -- the same transaction so no reader sees a form paired with a framework it
+  -- cannot carry (the route validates the resulting pair). NULL keeps it.
+  p_accounting_framework text DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -89,6 +93,11 @@ BEGIN
   END IF;
 
   IF v_company.entity_type = p_entity_type THEN
+    IF p_accounting_framework IS NOT NULL THEN
+      UPDATE public.companies
+      SET accounting_framework = p_accounting_framework
+      WHERE id = p_company_id;
+    END IF;
     RETURN jsonb_build_object('ok', true, 'changed', false, 'entity_type', p_entity_type);
   END IF;
 
@@ -146,7 +155,8 @@ BEGIN
   END IF;
 
   UPDATE public.companies
-  SET entity_type = p_entity_type
+  SET entity_type = p_entity_type,
+      accounting_framework = COALESCE(p_accounting_framework, accounting_framework)
   WHERE id = p_company_id;
 
   UPDATE public.company_settings
@@ -190,7 +200,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.correct_company_entity_type(uuid, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.correct_company_entity_type(uuid, text) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.correct_company_entity_type(uuid, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.correct_company_entity_type(uuid, text, text) TO authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';

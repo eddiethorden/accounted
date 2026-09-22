@@ -259,7 +259,7 @@ export function ArsredovisningPDF({ data }: { data: ArsredovisningData }) {
               {member.insatser_repayable_next_year ? `${fmt(member.insatser_repayable_next_year)} kr` : 'inga'}
             </Text>
             <Text style={styles.paragraph}>
-              Rätt till utdelning som gjorda förlagsinsatser medför: {member.forlagsinsatser_dividend_right?.trim() || 'inga förlagsinsatser'}
+              Rätt till utdelning som gjorda förlagsinsatser medför: {member.forlagsinsatser_dividend_right?.trim() || 'uppgift saknas'}
             </Text>
             <Text style={styles.paragraph}>
               Förlagsinsatser som har sagts upp och ska lösas in under de nästkommande två räkenskapsåren:{' '}
