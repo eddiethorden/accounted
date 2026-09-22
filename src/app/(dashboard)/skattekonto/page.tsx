@@ -925,10 +925,6 @@ export default function SkattekontoPage() {
         </p>
       )}
 
-      <p className="px-1 text-xs leading-5 text-muted-foreground">
-        {t('pgnote', { amount: formatCurrency(data?.saldoKronofogden ?? 0) })}
-      </p>
-
       <DestructiveConfirmDialog {...ignoreConfirmProps} />
 
       {bookTarget && (
@@ -1370,8 +1366,9 @@ function MatchDialog({
                       {c.description}
                     </TableCell>
                     <TableCell>
+                      {/* Chips mark exceptions: posted is the normal case. */}
                       {c.status === 'posted' ? (
-                        <Badge variant="secondary">Bokförd</Badge>
+                        <span className="text-muted-foreground">Bokförd</span>
                       ) : c.status === 'draft' ? (
                         <Badge variant="outline">Utkast</Badge>
                       ) : (

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DataListEmpty } from '@/components/ui/data-list'
 import { SegmentedControl } from '@/components/ui/segmented-control'
-import { TH_CLASS, TD_CLASS, QUIET_LINK_CLASS } from '@/components/ui/dry-table'
+import { TH_CLASS, TD_CLASS, QUIET_LINK_CLASS, HOVER_REVEAL_CLASS } from '@/components/ui/dry-table'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -425,7 +425,7 @@ function BankHistoryRow({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="mr-2 h-7 w-7 text-muted-foreground hover:text-foreground"
+                  className={cn('mr-2 h-7 w-7 text-muted-foreground hover:text-foreground data-[state=open]:opacity-100', HOVER_REVEAL_CLASS)}
                   aria-label="Fler alternativ"
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -514,10 +514,12 @@ function SkattekontoHistoryRow({
       <td className={cn(TD_CLASS, 'max-w-0 w-full overflow-hidden')}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">{row.transaktionstext}</span>
-          <Badge variant="outline" className="h-4 shrink-0 gap-1 px-1.5 py-0 text-[10px] font-normal">
+          {/* Source marker, not an exception: muted text instead of a chip
+              that would repeat on every Skatteverket row. */}
+          <span className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground md:inline-flex">
             <Landmark className="h-3 w-3" />
             {t('skv_badge')}
-          </Badge>
+          </span>
           {!isBooked && row.match_suggestion && (
             <Badge variant="warning" className="h-4 shrink-0 px-1.5 py-0 text-[10px]">
               {t('possible_duplicate')}
