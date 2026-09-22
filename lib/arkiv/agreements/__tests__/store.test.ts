@@ -180,6 +180,22 @@ describe('withdrawDerivedAgreement', () => {
     expect(mock.supabase.rpc).not.toHaveBeenCalled()
   })
 
+  it('finishes on a retry after a failure part-way: every step is idempotent', async () => {
+    // First call: facts reverted, deadlines gone, agreement delete fails.
+    enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'loan' } })
+    enqueue({ data: [{ id: 'fact-1' }] })
+    enqueue({ data: null })
+    enqueue({ data: [{ id: 'dl-1' }] })
+    enqueue({ error: { message: 'deadlock' } })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'other', 'x')).resolves.toEqual({ status: 'error', reason: 'agreement delete failed: deadlock' })
+    // Retry: nothing live to revert, no deadlines left, the delete goes through.
+    enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'loan' } })
+    enqueue({ data: [] })
+    enqueue({ data: [] })
+    enqueue({ error: null })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'other', 'x')).resolves.toEqual({ status: 'withdrawn', agreementId: 'agr-1', facts: 0, deadlines: 0 })
+  })
+
   it('reports a failed write as an error', async () => {
     enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'loan' } })
     enqueue({ data: [] })

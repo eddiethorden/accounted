@@ -59,6 +59,8 @@ describe('POST /api/documents/[id]/classification', () => {
     const { status, body } = await parseJsonResponse(await call({ doc_type: 'supplier_invoice' }))
     expect(status).toBe(500)
     expect(body).toEqual({ error: 'agreement delete failed: boom' })
+    // The old type stays: nothing was saved before the withdrawal succeeded.
+    expect(recordHumanClassification).toHaveBeenCalledTimes(1)
     expect(enqueueDocumentJob).toHaveBeenCalledTimes(1)
   })
 

@@ -41,10 +41,12 @@ export const POST = withRouteContext('document.classification', async (request, 
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const service = createServiceClient()
-  const out = await recordHumanClassification(service, id, ctx.user.id, { docType: parsed.data.doc_type, relevance: 'relevant' })
-  if (out.status !== 'classified') return NextResponse.json({ error: 'reason' in out ? out.reason : 'Kunde inte spara.' }, { status: 500 })
+  // Withdraw first, save the type after: a failed withdrawal leaves the old type in place with nothing
+  // half-corrected, and the withdrawal is idempotent, so the person's retry finishes the job.
   const withdrawn = await withdrawDerivedAgreement(service, id, parsed.data.doc_type, `Dokumentet är ${parsed.data.doc_type}, inte ett avtal (rättat av en person)`)
   if (withdrawn.status === 'error') return NextResponse.json({ error: withdrawn.reason }, { status: 500 })
+  const out = await recordHumanClassification(service, id, ctx.user.id, { docType: parsed.data.doc_type, relevance: 'relevant' })
+  if (out.status !== 'classified') return NextResponse.json({ error: 'reason' in out ? out.reason : 'Kunde inte spara.' }, { status: 500 })
   await enqueueDocumentJob(service, ctx.companyId, id, 'extract')
   ctx.log.info('document type set by person', { doc: id, type: parsed.data.doc_type, withdrawn: withdrawn.status === 'withdrawn' ? withdrawn.agreementId : null })
   return NextResponse.json({ data: { document_id: id, doc_type: parsed.data.doc_type } })
