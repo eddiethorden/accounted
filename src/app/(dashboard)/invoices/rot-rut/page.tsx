@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
-import { TH_CLASS, TD_CLASS, QUIET_LINK_CLASS } from '@/components/ui/dry-table'
+import { TH_CLASS, TD_CLASS, QUIET_LINK_CLASS, HOVER_REVEAL_CLASS } from '@/components/ui/dry-table'
+import { HelpPopover } from '@/components/ui/help-popover'
 import {
   DestructiveConfirmDialog,
   useDestructiveConfirm,
@@ -71,13 +72,13 @@ interface BeslutImportResult {
   results: Array<{ namn: string; status: string; error?: string }>
 }
 
-const STATUS_VARIANT: Record<RequestStatus, 'secondary' | 'outline' | 'success' | 'warning' | 'destructive'> = {
+// Chips mark exceptions (design.md convention 5): a file not yet uploaded, a
+// partial grant and a rejection deviate; uploaded, granted and cancelled are
+// normal states and render as muted text.
+const EXCEPTION_VARIANT: Partial<Record<RequestStatus, 'warning' | 'destructive'>> = {
   generated: 'warning',
-  submitted: 'outline',
-  paid: 'success',
   partially_paid: 'warning',
   rejected: 'destructive',
-  cancelled: 'secondary',
 }
 
 /** Days between an ISO timestamp and now, floored at 0. */
@@ -379,7 +380,19 @@ export default function RotRutOverviewPage() {
     <div className="space-y-8">
       <PageHeader
         title={t('title')}
-        description={t('description')}
+        help={
+          <HelpPopover>
+            <div className="space-y-2">
+              <p>{t('description')}</p>
+              <p>
+                <span className="font-medium">{t('tile_at_skv')}:</span> {t('tile_at_skv_help')}
+              </p>
+              <p>
+                <span className="font-medium">{t('tile_awaiting')}:</span> {t('tile_awaiting_help')}
+              </p>
+            </div>
+          </HelpPopover>
+        }
         action={
           <div className="flex flex-wrap gap-2">
             <input
@@ -410,17 +423,17 @@ export default function RotRutOverviewPage() {
         }
       />
 
-      {/* Summary tiles: what sits at Skatteverket, what waits, what came back refused. */}
+      {/* Summary tiles: what sits at Skatteverket, what waits, what came back
+          refused. The static definitions live behind the "?" (convention 7);
+          only lines that carry figures stay on the tiles. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground">{t('tile_at_skv')}</p>
           <p className="mt-1 font-display text-2xl tabular-nums">{formatCurrency(summary.atSkv)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('tile_at_skv_help')}</p>
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground">{t('tile_awaiting')}</p>
           <p className="mt-1 font-display text-2xl tabular-nums">{summary.awaitingDecision}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('tile_awaiting_help')}</p>
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground">{t('tile_refused')}</p>
@@ -453,8 +466,8 @@ export default function RotRutOverviewPage() {
           onAction={canWrite ? openNewRequest : undefined}
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr>
                 <th className={TH_CLASS}>{t('col_name')}</th>
@@ -482,7 +495,7 @@ export default function RotRutOverviewPage() {
                     ? request.submitted_at ?? request.created_at
                     : null
                 return (
-                  <tr key={request.id}>
+                  <tr key={request.id} className="group transition-colors duration-150 hover:bg-secondary/35">
                     <td className={TD_CLASS}>
                       <details>
                         <summary className="cursor-pointer list-none">
@@ -509,9 +522,13 @@ export default function RotRutOverviewPage() {
                     </td>
                     <td className={TD_CLASS}>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={STATUS_VARIANT[request.status]} className="font-normal">
-                          {t(`status_${request.status}`)}
-                        </Badge>
+                        {EXCEPTION_VARIANT[request.status] ? (
+                          <Badge variant={EXCEPTION_VARIANT[request.status]} className="font-normal">
+                            {t(`status_${request.status}`)}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{t(`status_${request.status}`)}</span>
+                        )}
                         {request.settlement_journal_entry_id && (
                           <Link href={`/bookkeeping/${request.settlement_journal_entry_id}`} className={`${QUIET_LINK_CLASS} text-xs`}>
                             {t('settled_link')}
@@ -554,15 +571,19 @@ export default function RotRutOverviewPage() {
                     </td>
                     <td className={`${TD_CLASS} text-right`}>
                       <div className="flex flex-wrap justify-end gap-1.5">
+                        {/* The next step (Markera uppladdad, Bokför nekat
+                            belopp) stays visible; download and cancel wait
+                            for hover so a long list is not a wall of
+                            buttons (touch keeps them visible). */}
                         {request.file_document_id && (
-                          <Button type="button" size="sm" variant="ghost" disabled={isBusy} onClick={() => void downloadArchivedFile(request)}>
+                          <Button type="button" size="sm" variant="ghost" className={HOVER_REVEAL_CLASS} disabled={isBusy} onClick={() => void downloadArchivedFile(request)}>
                             <Download className="mr-1.5 h-3.5 w-3.5" />
                             {t('download')}
                           </Button>
                         )}
                         {request.status === 'generated' && canWrite && (
                           <>
-                            <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => void patchRequest(request, 'cancelled')}>
+                            <Button type="button" size="sm" variant="outline" className={HOVER_REVEAL_CLASS} disabled={isBusy} onClick={() => void patchRequest(request, 'cancelled')}>
                               {t('cancel_request')}
                             </Button>
                             <Button type="button" size="sm" disabled={isBusy} onClick={() => void patchRequest(request, 'submitted')}>

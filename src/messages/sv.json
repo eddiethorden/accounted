@@ -5398,14 +5398,6 @@
     "invoices_section_title": "Fakturor",
     "new_invoice": "Ny faktura",
     "no_invoices": "Inga fakturor registrerade för denna leverantör",
-    "col_arrival": "Ankomst",
-    "col_invoice_number": "Fakturanr",
-    "col_date": "Datum",
-    "col_due": "Förfaller",
-    "col_amount": "Belopp",
-    "col_remaining": "Kvar",
-    "col_status": "Status",
-    "remaining_inline": "Kvar: {amount}",
     "status_registered": "Registrerad",
     "status_approved": "Godkänd",
     "status_paid": "Betald",
@@ -6871,7 +6863,6 @@
     "count_footer": "{count, plural, one {1 artikel} other {# artiklar}}"
   },
   "article_detail": {
-    "back": "Tillbaka till artiklar",
     "edit": "Redigera",
     "deactivate": "Inaktivera",
     "activate": "Aktivera",
@@ -6978,7 +6969,6 @@
     "type_swedish_business": "Svenskt företag eller organisation",
     "type_eu_business": "EU-företag",
     "type_non_eu_business": "Utanför EU",
-    "verified": "Verifierad",
     "col_customer_number": "Kundnr",
     "col_name": "Namn",
     "col_type": "Typ",
@@ -7017,6 +7007,8 @@
     "empty_title": "Inga ordrar ännu",
     "empty_description": "Anslut din webshop så hämtas ordrarna hit varje natt, med kunduppgifter, betalsätt och moms.",
     "empty_action": "Anslut webshop",
+    "empty_filtered_title": "Inga ordrar i den här vyn",
+    "empty_filtered_description": "Byt vy eller butik för att se fler.",
     "load_failed": "Ordrarna kunde inte hämtas. Kontrollera din anslutning och försök igen.",
     "retry": "Försök igen",
     "invalid_account": "Ange ett fyrsiffrigt kontonummer, t.ex. 1930.",
@@ -9410,7 +9402,6 @@
     "invoiced_hint": "{qty} fakturerat"
   },
   "sales_order_detail": {
-    "back": "Tillbaka till kundorder",
     "title": "Kundorder {number}",
     "title_unnumbered": "Kundorder",
     "section_details": "Uppgifter",

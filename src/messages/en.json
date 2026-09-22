@@ -5398,14 +5398,6 @@
     "invoices_section_title": "Invoices",
     "new_invoice": "New invoice",
     "no_invoices": "No invoices registered for this supplier",
-    "col_arrival": "Arrival",
-    "col_invoice_number": "Invoice no.",
-    "col_date": "Date",
-    "col_due": "Due",
-    "col_amount": "Amount",
-    "col_remaining": "Remaining",
-    "col_status": "Status",
-    "remaining_inline": "Remaining: {amount}",
     "status_registered": "Registered",
     "status_approved": "Approved",
     "status_paid": "Paid",
@@ -6871,7 +6863,6 @@
     "count_footer": "{count, plural, one {1 article} other {# articles}}"
   },
   "article_detail": {
-    "back": "Back to articles",
     "edit": "Edit",
     "deactivate": "Deactivate",
     "activate": "Activate",
@@ -6978,7 +6969,6 @@
     "type_swedish_business": "Swedish company or organization",
     "type_eu_business": "EU business",
     "type_non_eu_business": "Outside EU",
-    "verified": "Verified",
     "col_customer_number": "Customer no.",
     "col_name": "Name",
     "col_type": "Type",
@@ -7017,6 +7007,8 @@
     "empty_title": "No orders yet",
     "empty_description": "Connect your webshop and orders arrive here nightly, with customer details, payment method and VAT.",
     "empty_action": "Connect webshop",
+    "empty_filtered_title": "No orders in this view",
+    "empty_filtered_description": "Switch view or store to see more.",
     "load_failed": "The orders could not be fetched. Check your connection and try again.",
     "retry": "Try again",
     "invalid_account": "Enter a four-digit account number, e.g. 1930.",
@@ -9410,7 +9402,6 @@
     "invoiced_hint": "{qty} invoiced"
   },
   "sales_order_detail": {
-    "back": "Back to sales orders",
     "title": "Sales order {number}",
     "title_unnumbered": "Sales order",
     "section_details": "Details",
