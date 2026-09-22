@@ -7,6 +7,8 @@
  *   paused     the company has no bank_sync entitlement: the cron skips it,
  *              so nothing below applies until the subscription is back
  *   attention  a connection is expired or errored: only BankID fixes it
+ *   selection  a connection is authorized at the bank but the account choice
+ *              was never saved: nothing syncs until the person picks accounts
  *   expiring   a live consent ends within CONSENT_WARNING_DAYS: renew in time
  *   stale      nothing synced for STALE_THRESHOLD_MS: check the connection
  *   healthy    synced recently
@@ -31,6 +33,7 @@ export type ChipState =
   | { kind: 'none' }
   | { kind: 'paused' }
   | { kind: 'attention'; count: number }
+  | { kind: 'selection'; connectionId: string; count: number }
   | { kind: 'expiring'; daysLeft: number; count: number }
   | { kind: 'stale'; mostRecent: string }
   | { kind: 'healthy'; mostRecent: string | null }
@@ -69,6 +72,24 @@ export function getChipState(
   )
   if (needsAttention.length > 0) {
     return { kind: 'attention', count: needsAttention.length }
+  }
+
+  // Authorized at the bank, account picker never saved. The cron and the
+  // manual sync route both skip the status, so without this the row read as
+  // 'healthy' (no chip, no sync button) while fetching nothing at all. A row
+  // whose consent has already lapsed has nothing to resume, so it stays quiet
+  // here; the health probe moves it to 'expired', which speaks above.
+  const awaitingSelection = rows.filter((r) => {
+    if (r.status !== 'pending_selection') return false
+    const daysLeft = daysUntilConsentExpiry(r.consent_expires, now)
+    return daysLeft === null || daysLeft > 0
+  })
+  if (awaitingSelection.length > 0) {
+    return {
+      kind: 'selection',
+      connectionId: awaitingSelection[0].id,
+      count: awaitingSelection.length,
+    }
   }
 
   // Only live connections can be "about to expire": a pending row has no

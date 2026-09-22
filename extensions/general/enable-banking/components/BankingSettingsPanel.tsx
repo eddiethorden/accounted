@@ -177,6 +177,14 @@ export default function BankingSettingsPanel() {
           .maybeSingle()
         const ownerId = (data as { company_id?: string } | null)?.company_id
         if (!ownerId) return
+        if (ownerId === company?.id) {
+          // The row IS this company's: the list above was just stale or came
+          // back without it. Naming the active company as "another company"
+          // would be wrong; bring the row in and open its picker instead.
+          await fetchConnectionsRef.current()
+          setPickerConnectionId(targetId)
+          return
+        }
         const owner = companies.find((c) => c.company.id === ownerId)
         setPickerCompanyMismatch(owner?.company.name ?? 'ett annat bolag')
       })()
@@ -186,7 +194,7 @@ export default function BankingSettingsPanel() {
     const newQuery = params.toString()
     const newUrl = `${window.location.pathname}${newQuery ? `?${newQuery}` : ''}`
     window.history.replaceState({}, '', newUrl)
-  }, [isLoading, bankConnections, companies, supabase])
+  }, [isLoading, bankConnections, companies, supabase, company?.id])
 
   function releaseConnectingLock() {
     connectingRef.current = false
@@ -360,6 +368,12 @@ export default function BankingSettingsPanel() {
     const existing = bankConnections.find(
       (c) => c.status !== 'revoked' && c.status !== 'pending' && c.bank_name === bank.name,
     )
+    if (existing?.status === 'pending_selection') {
+      // Already authorized, accounts never chosen: neither "renew" nor
+      // "connect as new" is the answer. Finish it in the picker.
+      setPickerConnectionId(existing.id)
+      return
+    }
     if (existing) {
       setSameBankIntercept({ bank, psuTypeOverride, existing })
       return
@@ -406,6 +420,20 @@ export default function BankingSettingsPanel() {
       })
 
       const data = await response.json()
+
+      // The bank is already authorized for this company and only the account
+      // choice is missing (the picker was skipped or closed, here or in the
+      // onboarding). Not a failure: open account selection for that row
+      // instead of a second BankID. The server names the row, so this works
+      // even when this panel's own list was stale or did not show it; the
+      // refetch brings the row in so the picker has its accounts.
+      if (response.status === 409 && data?.code === 'PENDING_SELECTION' && data.existing_connection_id) {
+        releaseConnectingLock()
+        await fetchConnections()
+        setPickerConnectionId(data.existing_connection_id)
+        toast({ title: 'Banken är redan ansluten', description: data.error })
+        return
+      }
 
       if (!response.ok) {
         console.error('[enable-banking] Connect request failed', {

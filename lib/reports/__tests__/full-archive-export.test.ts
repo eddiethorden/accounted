@@ -265,6 +265,8 @@ describe('generateFullArchive', () => {
       expect(documentation.leverantorsfakturor_avrundning_regler.registrering).toContain('3740 utan moms')
       expect(documentation.leverantorsfakturor_avrundning_regler.moms).toContain('inte i beskattningsunderlaget')
       expect(documentation.leverantorsfakturor_avrundning_regler.historik).toContain('app_releases')
+      expect(documentation.leverantorsfakturor_avrundning_regler.betalning_kontantmetoden).toContain('mindre än 1 krona')
+      expect(documentation.leverantorsfakturor_avrundning_regler.betalning_kontantmetoden).toContain('3740 utan moms')
       // Human-readable layer: CSV twins + the Swedish README.
       expect(zip.file('rapporter/saldobalans.csv')).not.toBeNull()
       expect(zip.file('rapporter/resultatrakning.csv')).not.toBeNull()

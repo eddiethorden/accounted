@@ -140,6 +140,32 @@ describe('POST /api/salary/runs — one-click creation', () => {
     )
   })
 
+  it('starts with the current month when the company has no run yet', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 8, 21, 12, 0))
+    try {
+      const { supabase, enqueueMany } = createQueuedMockSupabase()
+      authed(supabase)
+
+      enqueueMany([
+        { data: null }, // no settings row
+        { data: null }, // no latest run
+        { data: null }, // conflict pre-check: none
+      ])
+
+      const response = await POST(post({}), { params: Promise.resolve({}) } as never)
+      expect(response.status).toBe(201)
+      expect(createSalaryRunWithEmployees).toHaveBeenCalledWith(
+        expect.anything(),
+        'company-1',
+        'user-1',
+        expect.objectContaining({ periodYear: 2026, periodMonth: 9, paymentDate: '2026-09-25' }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('explicit body fields win over defaults', async () => {
     const { supabase, enqueueMany } = createQueuedMockSupabase()
     authed(supabase)

@@ -179,6 +179,18 @@ export function BankStep({ ctx }: { ctx: BooksCtx }) {
     try {
       let res = await fetch(`${EB}/connect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (res.status === 409) {
+        const conflict = (await res.clone().json().catch(() => ({}))) as { code?: string; existing_connection_id?: string }
+        if (conflict.code === 'PENDING_SELECTION' && conflict.existing_connection_id) {
+          // The bank is already authorized and only waits for the account
+          // choice (the person went back from the accounts, or skipped them):
+          // show those accounts again instead of a second BankID. Forcing a
+          // new row here used to leave one connection superseded and the
+          // other stuck waiting, with nothing syncing.
+          popup?.close()
+          stopPopupWatch()
+          dispatch({ type: 'BANK_AUTHED', name: b.name, connectionId: conflict.existing_connection_id })
+          return
+        }
         // A dead earlier row for the same bank: start fresh rather than stop here.
         res = await fetch(`${EB}/connect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, force_new: true }) })
       }

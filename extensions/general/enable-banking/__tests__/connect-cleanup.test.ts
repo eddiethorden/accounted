@@ -467,6 +467,81 @@ describe('POST /connect existing-connection guard', () => {
     expect(inCall?.args).toEqual(['status', ['expired', 'error', 'pending_selection']])
   })
 
+  it('answers PENDING_SELECTION (resume, not renew) when the blocking row only waits for account selection', async () => {
+    const chains: RecordedChain[] = []
+    let call = 0
+    const ctx = makeContext(() => {
+      call++
+      let chain: RecordedChain
+      if (call === 1) {
+        chain = makeChain({ data: null })
+      } else if (call === 2) {
+        chain = makeChain({ data: [] })
+      } else {
+        // Guard: the bank is already authorized; the user never saved the
+        // account picker. The consent is still valid.
+        chain = makeChain({
+          data: {
+            id: 'waiting-1',
+            status: 'pending_selection',
+            consent_expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        })
+      }
+      chains.push(chain)
+      return chain
+    })
+
+    const response = await connectRoute().handler(makeConnectRequest(), ctx)
+
+    // Still a 409 so a stale client never navigates to an undefined
+    // authorization_url; the code is what new clients branch on.
+    expect(response.status).toBe(409)
+    const body = (await response.json()) as {
+      code: string
+      existing_connection_id: string
+      error: string
+    }
+    expect(body.code).toBe('PENDING_SELECTION')
+    expect(body.existing_connection_id).toBe('waiting-1')
+    // The message tells the truth about the row: choose accounts. It must not
+    // send the user looking for a "Förnya samtycke" action that a
+    // pending_selection row does not have.
+    expect(body.error).toContain('Nordea')
+    expect(body.error).toContain('Välj')
+    expect(body.error).not.toContain('Förnya samtycke')
+    // No second BankID round trip and no duplicate row.
+    expect(mockStartAuthorization).not.toHaveBeenCalled()
+    for (const chain of chains) {
+      expect(chain._calls.some((c) => c.method === 'insert')).toBe(false)
+    }
+  })
+
+  it('falls back to EXISTING_CONNECTION when the waiting row has outlived its consent', async () => {
+    let call = 0
+    const ctx = makeContext(() => {
+      call++
+      if (call === 1) return makeChain({ data: null })
+      if (call === 2) return makeChain({ data: [] })
+      return makeChain({
+        data: {
+          id: 'waiting-old',
+          status: 'pending_selection',
+          consent_expires: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        },
+      })
+    })
+
+    const response = await connectRoute().handler(makeConnectRequest(), ctx)
+
+    expect(response.status).toBe(409)
+    const body = (await response.json()) as { code: string; existing_connection_id: string }
+    // Nothing to resume: selecting accounts on a dead consent cannot sync.
+    expect(body.code).toBe('EXISTING_CONNECTION')
+    expect(body.existing_connection_id).toBe('waiting-old')
+    expect(mockStartAuthorization).not.toHaveBeenCalled()
+  })
+
   it('never 409s over an ACTIVE same-bank connection: the guard status filter excludes it', async () => {
     const chains: RecordedChain[] = []
     let call = 0

@@ -15,6 +15,7 @@ import {
   lineVatFromPercent,
   multiplyIfBothPresent,
 } from '../amounts';
+import { creditNoteTypeCode } from '../dto';
 
 /**
  * Bokio's live payloads have repeatedly differed from its published spec (the
@@ -431,6 +432,12 @@ export function mapBokioToSupplier(raw: Record<string, unknown>): SupplierDto {
  * whole total still outstanding, because an absent field read as 0.
  * `remainingAmount` is the one payment field Bokio publishes, so it is the
  * one the payment state comes from.
+ *
+ * The schema carries no credit flag and no reference to a credited invoice
+ * either. A supplier kreditfaktura arrives as a supplier invoice with a
+ * negative `totalAmount` (10 such rows in production on 2026-09-21, imported
+ * as open payables with a negative total, #2838), so the amount is the
+ * signal and the credit note lands unpaired.
  */
 export function mapBokioToSupplierInvoice(raw: Record<string, unknown>): SupplierInvoiceDto {
   const currency = (raw['currency'] as string) ?? 'SEK';
@@ -493,15 +500,20 @@ export function mapBokioToSupplierInvoice(raw: Record<string, unknown>): Supplie
   // entry), or merely registered. 'sent' and 'booked' both land as
   // 'registered' in the migration; the distinction is kept because the DTO
   // has it and the next consumer may not collapse them.
-  const status: InvoiceStatusCode = paid
-    ? 'paid'
-    : (journalEntryRef?.['id'] ? 'booked' : 'sent');
+  // 381 for a supplier kreditfaktura: the one signal the importer reads (dto.ts).
+  const invoiceTypeCode = creditNoteTypeCode(false, totalAmount);
+  const status: InvoiceStatusCode = invoiceTypeCode
+    ? 'credited'
+    : paid
+      ? 'paid'
+      : (journalEntryRef?.['id'] ? 'booked' : 'sent');
 
   return {
     id: String(raw['id'] ?? ''),
     invoiceNumber: String(raw['invoiceNumber'] ?? raw['id'] ?? ''),
     issueDate: (raw['invoiceDate'] as string) ?? '',
     dueDate: raw['dueDate'] as string | undefined,
+    invoiceTypeCode,
     currencyCode: currency,
     status,
     supplier: buildParty(

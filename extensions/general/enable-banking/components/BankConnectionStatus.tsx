@@ -256,8 +256,14 @@ export function BankConnectionStatus({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {uiState === 'pending_selection' ? (
-                <DropdownMenuItem onSelect={() => onDisconnect(connection.id)}>
-                  Avbryt
+                // Named for what it does. "Avbryt" read as "close this menu"
+                // to a person looking for a way to remove a connection they
+                // could not finish, so the way out went unfound.
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onSelect={() => onDisconnect(connection.id)}
+                >
+                  Ta bort anslutningen
                 </DropdownMenuItem>
               ) : (
                 <>

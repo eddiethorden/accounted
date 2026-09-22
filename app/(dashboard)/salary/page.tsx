@@ -15,6 +15,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import { nextRunPeriod, type RunPeriod } from '@/lib/salary/next-run-period'
 import type { EmployeeMasked, SalaryRun } from '@/types'
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
@@ -50,6 +51,10 @@ export default function SalaryPage() {
   const [employees, setEmployees] = useState<EmployeeMasked[]>([])
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
+  // The pay month a click on "Starta lönekörning" creates. Known only once
+  // the run list has loaded; null means "let the server decide" and the
+  // button keeps its plain label rather than naming a month it cannot know.
+  const [nextPeriod, setNextPeriod] = useState<RunPeriod | null>(null)
   const { canWrite } = useCanWrite()
   const { toast } = useToast()
   const router = useRouter()
@@ -64,6 +69,9 @@ export default function SalaryPage() {
     if (runsRes?.ok) {
       const { data } = await runsRes.json()
       setRuns(data || [])
+      setNextPeriod(nextRunPeriod(data || [], new Date()))
+    } else {
+      setNextPeriod(null)
     }
     if (empRes?.ok) {
       const { data } = await empRes.json()
@@ -77,14 +85,16 @@ export default function SalaryPage() {
   }, [load])
 
   // One-click run creation: the API seeds all active employees, calculates,
-  // and resolves period/pay-date/series defaults from settings.
+  // and resolves pay-date/series defaults from settings. The period is the one
+  // the button names, sent explicitly so the click creates exactly that month
+  // (a run someone else started meanwhile answers 409 and is opened instead).
   async function startRun() {
     setStarting(true)
     try {
       const res = await fetch('/api/salary/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(nextPeriod ?? {}),
       })
       const json = await res.json().catch(() => null)
       if (res.status === 201 && json?.data?.id) {
@@ -107,7 +117,9 @@ export default function SalaryPage() {
     }
   }
 
-  const periodOf = (r: SalaryRun) => `${r.period_year}-${String(r.period_month).padStart(2, '0')}`
+  const periodOf = (r: RunPeriod) => `${r.period_year}-${String(r.period_month).padStart(2, '0')}`
+  // Same YYYY-MM the new run gets in the table below and in its own title.
+  const startRunLabel = nextPeriod ? t('start_run_for_period', { period: periodOf(nextPeriod) }) : t('start_run')
 
   const header = (
     <div className="page-header flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -123,7 +135,7 @@ export default function SalaryPage() {
             ) : (
               <Plus className="mr-2 h-4 w-4" />
             )}
-            {t('start_run')}
+            {startRunLabel}
           </Button>
         )}
       </div>

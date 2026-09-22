@@ -71,8 +71,12 @@ export function useBankSync() {
       .from('bank_connections')
       .select('id, bank_name, status, provider, last_synced_at')
       // Include expired/error so the reconnect entry point survives a reload:
-      // not just active connections that can sync.
-      .in('status', ['active', 'expired', 'error'])
+      // not just active connections that can sync. Include pending_selection
+      // too: a bank that is authorized but whose accounts were never chosen
+      // used to be invisible here, so the page offered no way to sync and no
+      // hint why nothing arrived. Its action is "choose accounts", never a
+      // sync or a new BankID round trip (see chooseAccounts below).
+      .in('status', ['active', 'expired', 'error', 'pending_selection'])
       .eq('company_id', companyId)
       .then(({ data, error }) => {
         if (error) {
@@ -179,13 +183,24 @@ export function useBankSync() {
     }
   }
 
-  // Active connections sync; expired/error connections reconnect. Reads the
-  // live snapshot, not the render closure, so a click racing a sync started
-  // from the other surface is a no-op instead of a concurrent PSD2 call.
+  // A connection waiting for account selection already holds a live consent:
+  // finish it in the account picker instead of re-authorizing. The settings
+  // panel opens the picker from ?select_accounts=, the same parameter the
+  // bank callback lands on. Reconnecting here would cost a BankID round trip
+  // and park the row in 'expired' for its duration.
+  function chooseAccounts(conn: BankConn) {
+    router.push(`/settings/banking?select_accounts=${encodeURIComponent(conn.id)}`)
+  }
+
+  // Active connections sync; a connection waiting for account selection opens
+  // the picker; expired/error connections reconnect. Reads the live snapshot,
+  // not the render closure, so a click racing a sync started from the other
+  // surface is a no-op instead of a concurrent PSD2 call.
   function runFor(conn: BankConn) {
     const { busyId, syncingAll } = getBankSyncSnapshot()
     if (busyId !== null || syncingAll) return
     if (conn.status === 'active') return syncConnection(conn)
+    if (conn.status === 'pending_selection') return chooseAccounts(conn)
     return reconnect(conn)
   }
 
@@ -200,6 +215,13 @@ export function useBankSync() {
       const conns = connections ?? []
       const active = conns.filter((c) => c.status === 'active')
       if (active.length === 0) {
+        // Nothing can sync. Finishing a connection that only lacks its
+        // account choice beats re-authorizing a dead one: it needs no BankID.
+        const waiting = conns.find((c) => c.status === 'pending_selection')
+        if (waiting) {
+          chooseAccounts(waiting)
+          return
+        }
         if (conns[0]) await reconnect(conns[0])
         return
       }
@@ -269,7 +291,12 @@ export default function BankSyncNowButton() {
 
   if (connections.length === 1) {
     const conn = connections[0]
-    const needsReconnect = conn.status !== 'active'
+    const singleLabel =
+      conn.status === 'active'
+        ? syncLabel
+        : conn.status === 'pending_selection'
+          ? t('bank_choose_accounts')
+          : t('bank_reconnect')
     return (
       <div className="flex items-center gap-2">
         <Button
@@ -285,7 +312,7 @@ export default function BankSyncNowButton() {
           ) : (
             <RefreshCw className="h-3.5 w-3.5" />
           )}
-          <span>{needsReconnect ? t('bank_reconnect') : syncLabel}</span>
+          <span>{singleLabel}</span>
         </Button>
         {upsellNote}
       </div>
@@ -320,7 +347,9 @@ export default function BankSyncNowButton() {
           >
             {conn.status === 'active'
               ? conn.bank_name
-              : `${conn.bank_name} · ${t('bank_reconnect')}`}
+              : conn.status === 'pending_selection'
+                ? `${conn.bank_name} · ${t('bank_choose_accounts')}`
+                : `${conn.bank_name} · ${t('bank_reconnect')}`}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
