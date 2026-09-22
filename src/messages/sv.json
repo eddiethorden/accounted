@@ -4030,7 +4030,7 @@
     "title": "Matcha mot befintligt verifikat",
     "searching": "Söker kandidater…",
     "no_candidates_title": "Hittade inga verifikat med en matchande rad på konto 1630.",
-    "no_candidates_help": "Kandidaten måste ha samma belopp och sida på 1630 inom ±14 dagar från transaktionsdatumet, och får inte redan vara kopplad till en annan skattekonto-transaktion. Använd <strong>Bokför</strong> för att skapa ett nytt verifikat istället.",
+    "no_candidates_help": "Kandidaten måste ha samma belopp och sida på 1630 inom ±14 dagar från transaktionsdatumet, eller en rad på 1630 som motsvarar den här händelsen tillsammans med andra händelser samma period. Ett verifikat som återförts av ett annat verifikat visas inte. Använd <strong>Bokför</strong> för att skapa ett nytt verifikat istället.",
     "th_date": "Datum",
     "th_voucher": "Verifikat",
     "th_description": "Beskrivning",
@@ -4040,7 +4040,10 @@
     "status_reversed": "Makulerad",
     "linking": "Kopplar…",
     "link": "Koppla",
-    "cancel": "Avbryt"
+    "cancel": "Avbryt",
+    "match_group_success_title": "{count} händelser kopplade till verifikatet",
+    "group_together_with": "Kopplas tillsammans med:",
+    "group_completes": "Kompletterar redan kopplade:"
   },
   "invoice_editor": {
     "amount_label": "Belopp",
@@ -9115,6 +9118,12 @@
     "chip_possible_duplicate": "Möjlig dublett av {voucher}",
     "chip_draft": "utkast",
     "action_show_voucher": "Visa verifikat",
+    "action_unlink": "Koppla bort",
+    "unlink_confirm_title": "Koppla bort verifikatet?",
+    "unlink_confirm_body": "{text}, {amount} ({date}) blir ej bokförd igen. Verifikatet ändras inte. Du kan koppla händelsen till rätt verifikat efteråt.",
+    "unlink_confirm_cta": "Koppla bort",
+    "unlink_failed": "Kunde inte koppla bort",
+    "unlinked_toast_title": "Kopplingen är borttagen",
     "action_match": "Matcha",
     "action_book": "Bokför",
     "ignore_action": "Ignorera",

@@ -89,9 +89,13 @@ import {
 import {
   findMatchCandidates,
   findMatchSuggestionsBulk,
-  matchSkattekontoToEntry,
   SkattekontoMatchError,
 } from './lib/skattekonto-match'
+import {
+  linkSkattekontoRows,
+  unlinkSkattekontoRow,
+  SkattekontoLinkError,
+} from '@/lib/skatteverket/skattekonto-link'
 import { splitTransactions } from './lib/skattekonto-buckets'
 import type { SkattekontoBalanceSnapshot } from './types'
 import type { VatPeriodType } from '@/types'
@@ -2716,9 +2720,11 @@ export const skatteverketExtension: Extension = {
     },
 
     // Link the SKV row to a chosen candidate. No new verifikat is created:
-    // we just write journal_entry_id onto skattekonto_transactions. The
-    // candidate is re-validated server-side (matching 1630 line, not already
-    // linked) to catch races and a malicious client.
+    // we just write journal_entry_id onto skattekonto_transactions. The core
+    // link (lib/skatteverket/skattekonto-link.ts) re-validates everything
+    // server-side. `transaction_ids` carries the open sibling rows of a
+    // combined verifikat (candidate.group.link_transaction_ids); the row in
+    // the path is always part of the group.
     {
       method: 'POST',
       path: '/skattekonto/transaktioner/:id/match',
@@ -2731,9 +2737,9 @@ export const skatteverketExtension: Extension = {
         if (!id) {
           return NextResponse.json({ error: 'Saknar transaktions-id' }, { status: 400 })
         }
-        let body: { journal_entry_id?: string }
+        let body: { journal_entry_id?: unknown; transaction_ids?: unknown }
         try {
-          body = (await request.json()) as { journal_entry_id?: string }
+          body = (await request.json()) as { journal_entry_id?: unknown; transaction_ids?: unknown }
         } catch {
           return NextResponse.json({ error: 'Ogiltig request body' }, { status: 400 })
         }
@@ -2743,22 +2749,95 @@ export const skatteverketExtension: Extension = {
             { status: 400 },
           )
         }
+        if (
+          body.transaction_ids !== undefined &&
+          (!Array.isArray(body.transaction_ids) ||
+            body.transaction_ids.length > 50 ||
+            !body.transaction_ids.every((t) => typeof t === 'string'))
+        ) {
+          return NextResponse.json(
+            { error: 'transaction_ids måste vara en lista med högst 50 id:n' },
+            { status: 400 },
+          )
+        }
+        const ids = [id, ...((body.transaction_ids as string[] | undefined) ?? [])]
         try {
-          await matchSkattekontoToEntry(
+          const result = await linkSkattekontoRows(
             ctx.supabase,
             ctx.companyId,
-            id,
+            ids,
             body.journal_entry_id,
           )
-          return NextResponse.json({ data: { ok: true } })
+          return NextResponse.json({
+            data: { ok: true, skattekonto_transaction_ids: result.skattekonto_transaction_ids },
+          })
         } catch (err) {
-          if (err instanceof SkattekontoMatchError) {
+          if (err instanceof SkattekontoLinkError) {
             const status =
               err.code === 'TRANSACTION_NOT_FOUND' ? 404
               : err.code === 'ENTRY_NOT_FOUND' ? 404
               : err.code === 'ALREADY_BOOKED' ? 409
               : err.code === 'ROW_IGNORED' ? 409
               : err.code === 'ENTRY_ALREADY_LINKED' ? 409
+              : err.code === 'LINK_RACE' ? 409
+              : 422
+            return NextResponse.json({ error: err.message, code: err.code }, { status })
+          }
+          return handleSkvError(err)
+        }
+      },
+    },
+
+    // Undo a link (Koppla bort). Only the row's pointer is cleared; the
+    // verifikat is never edited (BFL), so this is allowed in locked periods.
+    // A verifikat that Bokför created FROM this row is refused: unlinking it
+    // would leave a live booking the row no longer knows about, and a second
+    // Bokför would then be blocked by the one-live-verifikat index. That one
+    // is undone by makulering on the verifikat instead.
+    {
+      method: 'DELETE',
+      path: '/skattekonto/transaktioner/:id/match',
+      handler: async (request: Request, ctx?: ExtensionContext) => {
+        if (!ctx) {
+          return NextResponse.json({ error: 'Extension context required' }, { status: 500 })
+        }
+        const url = new URL(request.url)
+        const id = url.searchParams.get('_id')
+        if (!id) {
+          return NextResponse.json({ error: 'Saknar transaktions-id' }, { status: 400 })
+        }
+        const { data: row } = await ctx.supabase
+          .from('skattekonto_transactions')
+          .select('id, journal_entry_id')
+          .eq('id', id)
+          .eq('company_id', ctx.companyId)
+          .maybeSingle<{ id: string; journal_entry_id: string | null }>()
+        if (row?.journal_entry_id) {
+          const { data: entry } = await ctx.supabase
+            .from('journal_entries')
+            .select('id, source_type, source_id')
+            .eq('id', row.journal_entry_id)
+            .eq('company_id', ctx.companyId)
+            .maybeSingle<{ id: string; source_type: string | null; source_id: string | null }>()
+          if (entry?.source_type === 'system' && entry.source_id === id) {
+            return NextResponse.json(
+              {
+                error:
+                  'Verifikatet skapades från den här händelsen. Makulera verifikatet i stället för att koppla bort det.',
+                code: 'CREATED_FROM_ROW',
+              },
+              { status: 409 },
+            )
+          }
+        }
+        try {
+          const result = await unlinkSkattekontoRow(ctx.supabase, ctx.companyId, id)
+          return NextResponse.json({ data: result })
+        } catch (err) {
+          if (err instanceof SkattekontoLinkError) {
+            const status =
+              err.code === 'TRANSACTION_NOT_FOUND' ? 404
+              : err.code === 'NOT_LINKED' ? 409
               : 422
             return NextResponse.json({ error: err.message, code: err.code }, { status })
           }

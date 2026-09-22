@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { roundOre } from '@/lib/money'
 import { SKATTEKONTO_ACCOUNT } from './manual-verifikat-prefill'
+import { findCancelledEntryIds } from './skattekonto-cancelled'
 
 /**
  * Link semantics for a skattekonto row (core).
@@ -13,7 +14,7 @@ import { SKATTEKONTO_ACCOUNT } from './manual-verifikat-prefill'
  *
  * Lives in core so the reconciliation engine (lib/reconciliation), the
  * dashboard routes, the v1 API and the MCP executors share one implementation;
- * the skatteverket extension's matchSkattekontoToEntry delegates here.
+ * the skatteverket extension's match route calls linkSkattekontoRows here.
  */
 
 export type SkattekontoLinkErrorCode =
@@ -82,6 +83,34 @@ export function entrySettlesAmount(
   return { ok: false, via: null }
 }
 
+/**
+ * A storno'd verifikat, or one cancelled by an imported correction pair
+ * (skattekonto-cancelled.ts), never moved 1630 for real, so it settles no
+ * Skatteverket event even when its 1630 line has the right amount.
+ */
+async function assertNotCancelled(
+  supabase: SupabaseClient,
+  companyId: string,
+  journalEntryId: string,
+): Promise<void> {
+  const cancelled = await findCancelledEntryIds(supabase, companyId, [journalEntryId])
+  if (cancelled.has(journalEntryId)) {
+    throw new SkattekontoLinkError(
+      'Verifikatet är återfört av ett annat verifikat och kan inte kopplas.',
+      'INVALID_CANDIDATE',
+    )
+  }
+}
+
+/** The entry's signed 1630 movement (debit positive), öre-exact. */
+export function entryNet1630(lines: EntryForLink['lines']): number {
+  return roundOre(
+    (lines ?? [])
+      .filter((l) => l.account_number === SKATTEKONTO_ACCOUNT)
+      .reduce((s, l) => s + Number(l.debit_amount || 0) - Number(l.credit_amount || 0), 0),
+  )
+}
+
 export interface LinkSkattekontoRowResult {
   skattekonto_transaction_id: string
   journal_entry_id: string
@@ -147,6 +176,7 @@ export async function linkSkattekontoRow(
       'ENTRY_ALREADY_LINKED',
     )
   }
+  await assertNotCancelled(supabase, companyId, journalEntryId)
 
   const { data: updated, error: updateError } = await supabase
     .from('skattekonto_transactions')
@@ -253,6 +283,12 @@ export interface LinkSkattekontoRowsResult {
  * the single link. The write is ONE guarded UPDATE over the whole group: a
  * concurrent link shrinks the hit set, and a partial hit is rolled back and
  * reported as LINK_RACE, so a group is never left half-linked.
+ *
+ * Rows already linked to the verifikat join the group: the invariant is that
+ * everything linked to a verifikat together settles it, so a row may be added
+ * to a partly linked verifikat (one 1630 line already paired with the
+ * inbetalning, the other still open) exactly when the union settles it. A
+ * verifikat whose existing links already settle it takes no more rows.
  */
 export async function linkSkattekontoRows(
   supabase: SupabaseClient,
@@ -284,8 +320,8 @@ export async function linkSkattekontoRows(
     throw new SkattekontoLinkError('En kommande händelse kan inte kopplas ännu.', 'INVALID_CANDIDATE')
   }
 
-  const sum = roundOre(typed.reduce((s, r) => s + Number(r.belopp_skatteverket), 0))
-  if (sum === 0) {
+  const newSum = roundOre(typed.reduce((s, r) => s + Number(r.belopp_skatteverket), 0))
+  if (newSum === 0) {
     throw new SkattekontoLinkError(
       'De valda händelserna nettar till 0 och kan inte kopplas mot ett verifikat.',
       'INVALID_CANDIDATE',
@@ -304,26 +340,31 @@ export async function linkSkattekontoRows(
   if (entry.status === 'reversed') {
     throw new SkattekontoLinkError('Verifikatet är makulerat och kan inte kopplas.', 'INVALID_CANDIDATE')
   }
-  const settles = entrySettlesAmount(entry.lines, sum)
-  if (!settles.ok || !settles.via) {
-    throw new SkattekontoLinkError(
-      'Verifikatets rader på 1630 motsvarar inte summan av de valda händelserna.',
-      'INVALID_CANDIDATE',
-    )
-  }
-
-  const groupSet = new Set(ids)
   const { data: linkedRows } = await supabase
     .from('skattekonto_transactions')
-    .select('id')
+    .select('id, belopp_skatteverket')
     .eq('company_id', companyId)
     .eq('journal_entry_id', journalEntryId)
-  if ((linkedRows ?? []).some((r) => !groupSet.has((r as { id: string }).id))) {
+  const existing = (linkedRows ?? []) as Array<{ id: string; belopp_skatteverket: number | string }>
+  const existingSum = roundOre(existing.reduce((s, r) => s + Number(r.belopp_skatteverket), 0))
+  if (existing.length > 0 && entryNet1630(entry.lines) === existingSum) {
     throw new SkattekontoLinkError(
       'Verifikatet är redan kopplat till en annan skattekonto-transaktion.',
       'ENTRY_ALREADY_LINKED',
     )
   }
+
+  const sum = roundOre(existingSum + newSum)
+  const settles = entrySettlesAmount(entry.lines, sum)
+  if (!settles.ok || !settles.via) {
+    throw new SkattekontoLinkError(
+      existing.length > 0
+        ? 'Verifikatet är redan delvis kopplat, och de valda händelserna fyller inte ut resten av raderna på 1630.'
+        : 'Verifikatets rader på 1630 motsvarar inte summan av de valda händelserna.',
+      existing.length > 0 ? 'ENTRY_ALREADY_LINKED' : 'INVALID_CANDIDATE',
+    )
+  }
+  await assertNotCancelled(supabase, companyId, journalEntryId)
 
   const { data: updated, error: updateError } = await supabase
     .from('skattekonto_transactions')

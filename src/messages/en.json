@@ -4030,7 +4030,7 @@
     "title": "Match against existing voucher",
     "searching": "Searching candidates…",
     "no_candidates_title": "No vouchers with a matching line on account 1630.",
-    "no_candidates_help": "The candidate must have the same amount and side on 1630 within ±14 days of the transaction date, and must not already be linked to another skattekonto transaction. Use <strong>Post</strong> to create a new voucher instead.",
+    "no_candidates_help": "The candidate must have the same amount and side on 1630 within ±14 days of the transaction date, or a 1630 line that equals this event together with other events of the same period. A voucher cancelled by another voucher is not shown. Use <strong>Post</strong> to create a new voucher instead.",
     "th_date": "Date",
     "th_voucher": "Voucher",
     "th_description": "Description",
@@ -4040,7 +4040,10 @@
     "status_reversed": "Reversed",
     "linking": "Linking…",
     "link": "Link",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "match_group_success_title": "{count} events linked to the voucher",
+    "group_together_with": "Linked together with:",
+    "group_completes": "Completes already linked:"
   },
   "invoice_editor": {
     "amount_label": "Amount",
@@ -9115,6 +9118,12 @@
     "chip_possible_duplicate": "Possible duplicate of {voucher}",
     "chip_draft": "draft",
     "action_show_voucher": "Show voucher",
+    "action_unlink": "Unlink",
+    "unlink_confirm_title": "Unlink the voucher?",
+    "unlink_confirm_body": "{text}, {amount} ({date}) becomes unbooked again. The voucher is not changed. You can link the event to the right voucher afterwards.",
+    "unlink_confirm_cta": "Unlink",
+    "unlink_failed": "Could not unlink",
+    "unlinked_toast_title": "The link is removed",
     "action_match": "Match",
     "action_book": "Book",
     "ignore_action": "Ignore",

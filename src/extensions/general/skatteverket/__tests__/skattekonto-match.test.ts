@@ -3,7 +3,6 @@ import { createQueuedMockSupabase } from '@/tests/helpers'
 import {
   findMatchCandidates,
   findMatchSuggestionsBulk,
-  matchSkattekontoToEntry,
   SkattekontoMatchError,
 } from '../lib/skattekonto-match'
 
@@ -175,129 +174,6 @@ describe('findMatchCandidates', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────
-// matchSkattekontoToEntry
-// ──────────────────────────────────────────────────────────────────────
-
-describe('matchSkattekontoToEntry', () => {
-  it('writes the journal_entry_id when the candidate has a valid 1630 line', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow() })
-    enqueue({
-      data: {
-        id: 'je-1',
-        status: 'posted',
-        lines: [
-          { account_number: '1630', debit_amount: 5000, credit_amount: 0 },
-          { account_number: '1930', debit_amount: 0, credit_amount: 5000 },
-        ],
-      },
-    })
-    enqueue({ data: null }) // not already linked
-    enqueue({ data: null }) // update result
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).resolves.toBeUndefined()
-  })
-
-  it('throws TRANSACTION_NOT_FOUND when the SKV row is missing', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: null, error: { message: 'not found' } })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({ code: 'TRANSACTION_NOT_FOUND' })
-  })
-
-  it('throws ALREADY_BOOKED when the SKV row already has a journal_entry_id', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow({ journal_entry_id: 'je-other' }) })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({ code: 'ALREADY_BOOKED' })
-  })
-
-  it('throws ROW_IGNORED for an ignored row before touching the candidate entry', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow({ is_ignored: true }) })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({
-      code: 'ROW_IGNORED',
-      message: 'Transaktionen är ignorerad. Återställ den innan du bokför.',
-    })
-    // Only the tx fetch ran: the guard fires before the journal_entries read
-    // and before any update.
-    expect(supabase.from).toHaveBeenCalledTimes(1)
-    expect(supabase.from).toHaveBeenCalledWith('skattekonto_transactions')
-  })
-
-  it('throws ENTRY_NOT_FOUND when the candidate verifikat does not exist', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow() })
-    enqueue({ data: null, error: { message: 'not found' } })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-missing'),
-    ).rejects.toMatchObject({ code: 'ENTRY_NOT_FOUND' })
-  })
-
-  it('throws INVALID_CANDIDATE when the verifikat has no 1630 line matching amount + side', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow() }) // expects debit 5000 on 1630
-    enqueue({
-      data: {
-        id: 'je-1',
-        status: 'posted',
-        lines: [
-          // Wrong side: credit 5000 on 1630 (doesn't match a positive SKV)
-          { account_number: '1630', debit_amount: 0, credit_amount: 5000 },
-        ],
-      },
-    })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({ code: 'INVALID_CANDIDATE' })
-  })
-
-  it('throws INVALID_CANDIDATE when the verifikat is reversed (makulerat)', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow() })
-    enqueue({
-      data: {
-        id: 'je-1',
-        status: 'reversed',
-        lines: [{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }],
-      },
-    })
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({ code: 'INVALID_CANDIDATE' })
-  })
-
-  it('throws ENTRY_ALREADY_LINKED when another SKV row is already linked to this verifikat', async () => {
-    const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: txRow() })
-    enqueue({
-      data: {
-        id: 'je-1',
-        status: 'posted',
-        lines: [{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }],
-      },
-    })
-    enqueue({ data: { id: 'skv-other' } }) // already linked
-
-    await expect(
-      matchSkattekontoToEntry(supabase as never, COMPANY, TX_ID, 'je-1'),
-    ).rejects.toMatchObject({ code: 'ENTRY_ALREADY_LINKED' })
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────
 // findMatchSuggestionsBulk
 // ──────────────────────────────────────────────────────────────────────
 
@@ -438,5 +314,121 @@ describe('findMatchSuggestionsBulk', () => {
 
     expect(suggestions.size).toBe(0)
     expect(fromSpy).not.toHaveBeenCalled()
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────
+// Combined verifikat and cancelled pairs (support case: a Spiris import
+// booked avdragen skatt + arbetsgivaravgift as ONE 1630 line, and the
+// proposal pointed at a verifikat its correction cancels line for line)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('findMatchCandidates: combined verifikat', () => {
+  const TAX = txRow({
+    belopp_skatteverket: -16223,
+    transaktionsdatum: '2026-06-12',
+    transaktionstext: 'Avdragen skatt maj 2026',
+  })
+
+  it('offers a verifikat whose single 1630 line equals this row plus one open sibling, reaching back to the AGI period start', async () => {
+    const { supabase, enqueue, findCalls } = createQueuedMockSupabase()
+    enqueue({ data: TAX })
+    enqueueLines(enqueue, []) // no exact twin
+    enqueue({ data: [] }) // AGI declarations for maj 2026
+    // group search: 1630 lines from 2026-05-01, the old system booked it in May
+    enqueueLines(enqueue, [
+      lineRow({ entryId: 'a121', credit: 39637, entryDate: '2026-05-12', voucherNumber: 121, description: 'AGI 2026-05-12' }),
+    ])
+    enqueue({ data: [] }) // nothing linked to a121
+    enqueue({
+      data: [
+        { id: 'avg', transaktionsdatum: '2026-06-12', transaktionstext: 'Arbetsgivaravgift maj 2026', belopp_skatteverket: '-23414.00', journal_entry_id: null },
+        { id: 'moms', transaktionsdatum: '2026-06-12', transaktionstext: 'Moms april 2026', belopp_skatteverket: '-5991.00', journal_entry_id: null },
+      ],
+    })
+    enqueue({ data: [] }) // cancellation check
+
+    const { candidates } = await findMatchCandidates(supabase as never, COMPANY, TX_ID)
+
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({
+      journal_entry_id: 'a121',
+      matched_amount: 39637,
+      matched_side: 'credit',
+      group: { mode: 'new', link_transaction_ids: [TX_ID, 'avg'] },
+    })
+    expect(candidates[0].group?.group_rows.map((r) => r.id)).toEqual(['avg'])
+    expect(findCalls('journal_entries', 'gte')).toContainEqual(['entry_date', '2026-05-01'])
+  })
+
+  it('offers a partly linked verifikat that this row completes', async () => {
+    const { supabase, enqueue } = createQueuedMockSupabase()
+    enqueue({ data: txRow({ belopp_skatteverket: -8000, transaktionsdatum: '2026-03-12', transaktionstext: 'Debiterad preliminärskatt' }) })
+    enqueueLines(enqueue, [])
+    enqueueLines(enqueue, [
+      lineRow({ entryId: 'pay', debit: 10000, entryDate: '2026-03-10' }),
+      lineRow({ entryId: 'pay', credit: 8000, entryDate: '2026-03-10' }),
+    ])
+    enqueue({ data: [{ id: 'in', transaktionsdatum: '2026-03-11', transaktionstext: 'Inbetalning bokförd', belopp_skatteverket: 10000, journal_entry_id: 'pay' }] })
+    enqueue({ data: [] }) // no open siblings
+    enqueue({ data: [] }) // cancellation check
+
+    const { candidates } = await findMatchCandidates(supabase as never, COMPANY, TX_ID)
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].group).toMatchObject({ mode: 'join', link_transaction_ids: [TX_ID] })
+  })
+
+  it('offers nothing when two different sibling sets fit the same verifikat', async () => {
+    const { supabase, enqueue } = createQueuedMockSupabase()
+    enqueue({ data: TAX })
+    enqueueLines(enqueue, [])
+    enqueue({ data: [] })
+    enqueueLines(enqueue, [lineRow({ entryId: 'a121', credit: 39637, entryDate: '2026-06-12' })])
+    enqueue({ data: [] })
+    enqueue({
+      data: [
+        { id: 's1', transaktionsdatum: '2026-06-12', transaktionstext: 'x', belopp_skatteverket: -23414, journal_entry_id: null },
+        { id: 's2', transaktionsdatum: '2026-06-13', transaktionstext: 'y', belopp_skatteverket: -23414, journal_entry_id: null },
+      ],
+    })
+    enqueue({ data: [] })
+
+    const { candidates } = await findMatchCandidates(supabase as never, COMPANY, TX_ID)
+    expect(candidates).toHaveLength(0)
+  })
+
+  it('drops an exact twin that a correction cancels and offers the combined verifikat instead', async () => {
+    const { supabase, enqueue } = createQueuedMockSupabase()
+    enqueue({ data: txRow({ belopp_skatteverket: -7704, transaktionsdatum: '2026-07-13', transaktionstext: 'Arbetsgivaravgift juni 2026' }) })
+    enqueueLines(enqueue, [lineRow({ entryId: 'a177', credit: 7704, entryDate: '2026-07-13' })])
+    enqueue({ data: [] }) // none linked
+    enqueue({ data: [] }) // AGI declarations
+    // cancellation check: storno fields tell it straight away
+    enqueue({ data: [{ id: 'a177', entry_date: '2026-07-13', status: 'posted', reverses_id: null, reversed_by_id: 'a178' }] })
+    // then the combined verifikat that really settles it
+    enqueueLines(enqueue, [lineRow({ entryId: 'a157', credit: 12225, entryDate: '2026-07-13' })])
+    enqueue({ data: [] }) // nothing linked to a157
+    enqueue({
+      data: [{ id: 'tax', transaktionsdatum: '2026-07-13', transaktionstext: 'Avdragen skatt juni 2026', belopp_skatteverket: -4521, journal_entry_id: null }],
+    })
+    enqueue({ data: [] }) // a157 is live
+
+    const { candidates } = await findMatchCandidates(supabase as never, COMPANY, TX_ID)
+    expect(candidates.map((c) => c.journal_entry_id)).toEqual(['a157'])
+    expect(candidates[0].group?.link_transaction_ids).toEqual([TX_ID, 'tax'])
+  })
+})
+
+describe('findMatchSuggestionsBulk: cancelled verifikat', () => {
+  it('never proposes a verifikat that a storno cancelled', async () => {
+    const { supabase, enqueue } = createQueuedMockSupabase()
+    enqueueLines(enqueue, [lineRow({ entryId: 'je-cancelled', debit: 5000, entryDate: '2026-03-16' })])
+    enqueue({ data: [] }) // none linked
+    enqueue({ data: [{ id: 'je-cancelled', entry_date: '2026-03-16', status: 'posted', reverses_id: 'orig', reversed_by_id: null }] })
+
+    const suggestions = await findMatchSuggestionsBulk(supabase as never, COMPANY, [
+      { id: 'skv-1', transaktionsdatum: '2026-03-17', belopp_skatteverket: 5000, journal_entry_id: null },
+    ])
+    expect(suggestions.size).toBe(0)
   })
 })

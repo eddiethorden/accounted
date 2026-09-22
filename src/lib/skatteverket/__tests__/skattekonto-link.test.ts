@@ -52,6 +52,7 @@ describe('linkSkattekontoRow', () => {
     enqueue({ data: row() })
     enqueue({ data: entry([{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }]) })
     enqueue({ data: null }) // already-linked check
+    enqueue({ data: [] }) // cancellation check: no storno, no mirror
     enqueue({ data: [{ id: ROW }] }) // update … select
 
     const result = await linkSkattekontoRow(supabase as never, COMPANY, ROW, ENTRY)
@@ -93,6 +94,7 @@ describe('linkSkattekontoRow', () => {
     enqueue({ data: row() })
     enqueue({ data: entry([{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }]) })
     enqueue({ data: null })
+    enqueue({ data: [] }) // cancellation check
     enqueue({ data: [] })
     await expect(linkSkattekontoRow(supabase as never, COMPANY, ROW, ENTRY)).rejects.toMatchObject({ code: 'LINK_RACE' })
   })
@@ -149,6 +151,7 @@ describe('linkSkattekontoRows (N:1)', () => {
     enqueue({ data: [row({ belopp_skatteverket: 3000 }), row({ id: ROW2, belopp_skatteverket: 2000 })] })
     enqueue({ data: entry([{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }]) })
     enqueue({ data: [] }) // nothing outside the group linked to the entry
+    enqueue({ data: [] }) // cancellation check
     enqueue({ data: [{ id: ROW }, { id: ROW2 }] })
     const result = await linkSkattekontoRows(supabase as never, COMPANY, [ROW, ROW2, ROW], ENTRY)
     expect(result).toEqual({ journal_entry_id: ENTRY, via: 'line', skattekonto_transaction_ids: [ROW, ROW2] })
@@ -180,7 +183,7 @@ describe('linkSkattekontoRows (N:1)', () => {
   it('refuses a verifikat already linked to a row outside the group', async () => {
     enqueue({ data: [row({ belopp_skatteverket: 3000 }), row({ id: ROW2, belopp_skatteverket: 2000 })] })
     enqueue({ data: entry([{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }]) })
-    enqueue({ data: [{ id: 'row-elsewhere' }] })
+    enqueue({ data: [{ id: 'row-elsewhere', belopp_skatteverket: 5000 }] })
     await expect(linkSkattekontoRows(supabase as never, COMPANY, [ROW, ROW2], ENTRY)).rejects.toMatchObject({ code: 'ENTRY_ALREADY_LINKED' })
   })
 
@@ -188,12 +191,51 @@ describe('linkSkattekontoRows (N:1)', () => {
     enqueue({ data: [row({ belopp_skatteverket: 3000 }), row({ id: ROW2, belopp_skatteverket: 2000 })] })
     enqueue({ data: entry([{ account_number: '1630', debit_amount: 5000, credit_amount: 0 }]) })
     enqueue({ data: [] })
+    enqueue({ data: [] }) // cancellation check
     enqueue({ data: [{ id: ROW }] }) // only one of two rows was still free
     enqueue({ data: null }) // the revert
     await expect(linkSkattekontoRows(supabase as never, COMPANY, [ROW, ROW2], ENTRY)).rejects.toMatchObject({ code: 'LINK_RACE' })
     const updates = findCalls('skattekonto_transactions', 'update')
     expect(updates).toHaveLength(2)
     expect(updates[1][0]).toEqual({ journal_entry_id: null })
+  })
+
+  it('lets a row complete a verifikat whose other 1630 line is already linked (payment in and F-skatt drawn in one verifikat)', async () => {
+    enqueue({ data: [row({ id: ROW2, belopp_skatteverket: -8000 })] })
+    enqueue({
+      data: entry([
+        { account_number: '1630', debit_amount: 10000, credit_amount: 0 },
+        { account_number: '1630', debit_amount: 0, credit_amount: 8000 },
+        { account_number: '1930', debit_amount: 0, credit_amount: 10000 },
+        { account_number: '2518', debit_amount: 8000, credit_amount: 0 },
+      ]),
+    })
+    enqueue({ data: [{ id: ROW, belopp_skatteverket: 10000 }] }) // the inbetalning, linked earlier
+    enqueue({ data: [] }) // cancellation check
+    enqueue({ data: [{ id: ROW2 }] })
+    const result = await linkSkattekontoRows(supabase as never, COMPANY, [ROW2], ENTRY)
+    expect(result).toEqual({ journal_entry_id: ENTRY, via: 'entry_total', skattekonto_transaction_ids: [ROW2] })
+  })
+
+  it('refuses to add a row the partly linked verifikat does not have room for', async () => {
+    enqueue({ data: [row({ id: ROW2, belopp_skatteverket: -7000 })] })
+    enqueue({
+      data: entry([
+        { account_number: '1630', debit_amount: 10000, credit_amount: 0 },
+        { account_number: '1630', debit_amount: 0, credit_amount: 8000 },
+      ]),
+    })
+    enqueue({ data: [{ id: ROW, belopp_skatteverket: 10000 }] })
+    await expect(linkSkattekontoRows(supabase as never, COMPANY, [ROW2], ENTRY)).rejects.toMatchObject({ code: 'ENTRY_ALREADY_LINKED' })
+  })
+
+  it('refuses a verifikat that a storno cancelled even though its 1630 line matches', async () => {
+    enqueue({ data: [row({ belopp_skatteverket: -7704 })] })
+    enqueue({ data: entry([{ account_number: '1630', debit_amount: 0, credit_amount: 7704 }]) })
+    enqueue({ data: [] })
+    enqueue({ data: [{ id: ENTRY, entry_date: '2026-07-13', status: 'posted', reverses_id: null, reversed_by_id: 'storno-1' }] })
+    await expect(linkSkattekontoRows(supabase as never, COMPANY, [ROW], ENTRY)).rejects.toMatchObject({ code: 'INVALID_CANDIDATE' })
+    expect(findCalls('skattekonto_transactions', 'update')).toHaveLength(0)
   })
 
   it('refuses a missing row and an empty selection', async () => {

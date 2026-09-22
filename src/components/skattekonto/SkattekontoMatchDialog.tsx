@@ -35,6 +35,17 @@ interface MatchCandidate {
   status: 'draft' | 'posted' | 'reversed'
   matched_amount: number
   matched_side: 'debit' | 'credit'
+  /** Settles this row only together with other rows (one combined 1630 line). */
+  group?: {
+    mode: 'new' | 'join'
+    link_transaction_ids: string[]
+    group_rows: Array<{
+      id: string
+      transaktionsdatum: string
+      transaktionstext: string | null
+      belopp_skatteverket: number
+    }>
+  }
 }
 
 /**
@@ -107,8 +118,9 @@ export function SkattekontoMatchDialog({
     }
   }, [open, row, toast, onClose, t])
 
-  async function confirmMatch(journalEntryId: string) {
+  async function confirmMatch(candidate: MatchCandidate) {
     if (!row) return
+    const journalEntryId = candidate.journal_entry_id
     setSubmittingId(journalEntryId)
     try {
       const res = await fetch(
@@ -116,7 +128,10 @@ export function SkattekontoMatchDialog({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ journal_entry_id: journalEntryId }),
+          body: JSON.stringify({
+            journal_entry_id: journalEntryId,
+            ...(candidate.group ? { transaction_ids: candidate.group.link_transaction_ids } : {}),
+          }),
         },
       )
       const json = await res.json()
@@ -128,7 +143,10 @@ export function SkattekontoMatchDialog({
         })
         return
       }
-      toast({ title: t('match_success_title') })
+      const linkedCount = candidate.group?.mode === 'new' ? candidate.group.link_transaction_ids.length : 1
+      toast({
+        title: linkedCount > 1 ? t('match_group_success_title', { count: linkedCount }) : t('match_success_title'),
+      })
       onMatched()
       onClose()
     } catch (err) {
@@ -196,8 +214,21 @@ export function SkattekontoMatchDialog({
                     <TableCell className="tabular-nums">
                       {formatVoucher(c)}
                     </TableCell>
-                    <TableCell className="max-w-[260px] truncate">
-                      {c.description}
+                    <TableCell className="max-w-[260px]">
+                      <div className="truncate">{c.description}</div>
+                      {c.group && (
+                        /* data-ph-mask: sibling texts and amounts are user data */
+                        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground" data-ph-mask="">
+                          <div>
+                            {c.group.mode === 'new' ? t('group_together_with') : t('group_completes')}
+                          </div>
+                          {c.group.group_rows.map(g => (
+                            <div key={g.id} className="truncate tabular-nums">
+                              {g.transaktionstext} {formatCurrency(g.belopp_skatteverket)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       {c.status === 'posted' ? (
@@ -211,7 +242,7 @@ export function SkattekontoMatchDialog({
                     <TableCell className="text-right">
                       <Button
                         size="sm"
-                        onClick={() => confirmMatch(c.journal_entry_id)}
+                        onClick={() => confirmMatch(c)}
                         disabled={submittingId === c.journal_entry_id}
                       >
                         {submittingId === c.journal_entry_id ? t('linking') : t('link')}

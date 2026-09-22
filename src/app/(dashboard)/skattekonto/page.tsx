@@ -21,12 +21,10 @@ import {
   CHECKBOX_REVEAL_CLASS,
 } from '@/components/ui/dry-table'
 import { OpenInNewTab } from '@/components/ui/open-in-new-tab'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -71,6 +69,13 @@ const SkattekontoBookDialog = dynamic(
   () => import('@/components/skattekonto/SkattekontoBookDialog'),
   { loading: DialogLoadingSkeleton },
 )
+const SkattekontoMatchDialog = dynamic(
+  () =>
+    import('@/components/skattekonto/SkattekontoMatchDialog').then(
+      (m) => m.SkattekontoMatchDialog,
+    ),
+  { loading: DialogLoadingSkeleton },
+)
 
 interface SaldoEnvelope {
   data: SkatteverketSaldoResponse | null
@@ -86,17 +91,6 @@ interface TransaktionerEnvelope {
     ignored_count: number
     ignored?: StoredSkattekontoTransaction[]
   }
-}
-
-interface MatchCandidate {
-  journal_entry_id: string
-  voucher_number: number | null
-  voucher_series: string | null
-  entry_date: string
-  description: string
-  status: 'draft' | 'posted' | 'reversed'
-  matched_amount: number
-  matched_side: 'debit' | 'credit'
 }
 
 export default function SkattekontoPage() {
@@ -123,9 +117,6 @@ export default function SkattekontoPage() {
   const [matchOpenFor, setMatchOpenFor] = useState<StoredSkattekontoTransaction | null>(
     null,
   )
-  const [matchCandidates, setMatchCandidates] = useState<MatchCandidate[] | null>(null)
-  const [matchLoading, setMatchLoading] = useState(false)
-  const [matchSubmitting, setMatchSubmitting] = useState<string | null>(null)
   // Ignored rows are always fetched (include_ignored=1) but rendered only on
   // demand: the count line below the table toggles the "Ignorerade" band.
   const [showIgnored, setShowIgnored] = useState(false)
@@ -341,71 +332,46 @@ export default function SkattekontoPage() {
     void reload()
   }
 
-  async function openMatch(row: StoredSkattekontoTransaction) {
+  function openMatch(row: StoredSkattekontoTransaction) {
     setMatchOpenFor(row)
-    setMatchCandidates(null)
-    setMatchLoading(true)
-    try {
-      const res = await fetch(
-        `/api/extensions/ext/skatteverket/skattekonto/transaktioner/${row.id}/match-candidates`,
-      )
-      const json = await res.json()
-      if (!res.ok) {
-        toast({
-          title: 'Kunde inte hämta kandidater',
-          description: getUserErrorMessage(json, { statusCode: res.status }),
-          variant: 'destructive',
-        })
-        setMatchOpenFor(null)
-        return
-      }
-      setMatchCandidates(json.data.candidates as MatchCandidate[])
-    } catch (err) {
-      toast({
-        title: 'Kunde inte hämta kandidater',
-        description: err instanceof Error ? getUserErrorMessage(err) : undefined,
-        variant: 'destructive',
-      })
-      setMatchOpenFor(null)
-    } finally {
-      setMatchLoading(false)
-    }
   }
+  // Stable: the shared dialog's fetch effect lists onClose as a dependency.
+  const closeMatch = useCallback(() => setMatchOpenFor(null), [])
 
-  async function confirmMatch(journalEntryId: string) {
-    if (!matchOpenFor) return
-    setMatchSubmitting(journalEntryId)
-    try {
-      const res = await fetch(
-        `/api/extensions/ext/skatteverket/skattekonto/transaktioner/${matchOpenFor.id}/match`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ journal_entry_id: journalEntryId }),
-        },
-      )
-      const json = await res.json()
-      if (!res.ok) {
-        toast({
-          title: 'Kunde inte koppla transaktionen',
-          description: getUserErrorMessage(json, { statusCode: res.status }),
-          variant: 'destructive',
-        })
-        return
-      }
-      toast({ title: 'Transaktion kopplad till verifikat' })
-      setMatchOpenFor(null)
-      setMatchCandidates(null)
-      await reload()
-    } catch (err) {
-      toast({
-        title: 'Kunde inte koppla transaktionen',
-        description: err instanceof Error ? getUserErrorMessage(err) : undefined,
-        variant: 'destructive',
-      })
-    } finally {
-      setMatchSubmitting(null)
-    }
+  async function unlinkRow(row: StoredSkattekontoTransaction) {
+    // The verifikat is never touched: only the row's pointer is cleared, so
+    // the row returns to "ej bokförd" and can be linked again.
+    const ok = await confirmIgnore(
+      {
+        title: t('unlink_confirm_title'),
+        description: t('unlink_confirm_body', {
+          text: row.transaktionstext,
+          amount: formatCurrency(Number(row.belopp_skatteverket)),
+          date: formatDate(row.transaktionsdatum),
+        }),
+        confirmLabel: t('unlink_confirm_cta'),
+        cancelLabel: t('ignore_confirm_cancel'),
+        variant: 'warning',
+      },
+      async () => {
+        const res = await fetch(
+          `/api/extensions/ext/skatteverket/skattekonto/transaktioner/${row.id}/match`,
+          { method: 'DELETE' },
+        )
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}))
+          toast({
+            title: t('unlink_failed'),
+            description: getUserErrorMessage(json, { statusCode: res.status }),
+            variant: 'destructive',
+          })
+          throw new Error('unlink failed')
+        }
+      },
+    )
+    if (!ok) return
+    toast({ title: t('unlinked_toast_title') })
+    await reload()
   }
 
   function copyOcr(ocr: string) {
@@ -906,6 +872,7 @@ export default function SkattekontoPage() {
         onToggleSelect={toggleSelect}
         onBokfor={bokfor}
         onMatch={openMatch}
+        onUnlink={(row) => void unlinkRow(row)}
         onIgnore={ignoreRow}
         onUnignore={(row) => void unignoreRow(row.id)}
       />
@@ -942,22 +909,19 @@ export default function SkattekontoPage() {
           onMatch={() => {
             const target = bookTarget
             setBookTarget(null)
-            void openMatch(target)
+            openMatch(target)
           }}
         />
       )}
 
-      <MatchDialog
-        row={matchOpenFor}
-        candidates={matchCandidates}
-        loading={matchLoading}
-        submittingId={matchSubmitting}
-        onClose={() => {
-          setMatchOpenFor(null)
-          setMatchCandidates(null)
-        }}
-        onConfirm={confirmMatch}
-      />
+      {matchOpenFor && (
+        <SkattekontoMatchDialog
+          row={matchOpenFor}
+          open
+          onClose={closeMatch}
+          onMatched={() => void reload()}
+        />
+      )}
 
       <Dialog open={showPayment} onOpenChange={setShowPayment}>
         <DialogContent className="sm:max-w-md">
@@ -1034,6 +998,7 @@ function SkattekontoTable({
   onToggleSelect,
   onBokfor,
   onMatch,
+  onUnlink,
   onIgnore,
   onUnignore,
 }: {
@@ -1043,6 +1008,7 @@ function SkattekontoTable({
   onToggleSelect: (id: string, extend?: boolean) => void
   onBokfor: (id: string) => void
   onMatch: (row: StoredSkattekontoTransaction) => void
+  onUnlink: (row: StoredSkattekontoTransaction) => void
   onIgnore: (row: StoredSkattekontoTransaction) => void
   onUnignore: (row: StoredSkattekontoTransaction) => void
 }) {
@@ -1126,6 +1092,7 @@ function SkattekontoTable({
                   onToggleSelect={onToggleSelect}
                   onBokfor={onBokfor}
                   onMatch={onMatch}
+                  onUnlink={onUnlink}
                   onIgnore={onIgnore}
                   onUnignore={onUnignore}
                   showInterestDate={section.interestDateRowIds.has(row.id)}
@@ -1146,6 +1113,7 @@ function SkattekontoRow({
   onToggleSelect,
   onBokfor,
   onMatch,
+  onUnlink,
   onIgnore,
   onUnignore,
   showInterestDate,
@@ -1156,6 +1124,7 @@ function SkattekontoRow({
   onToggleSelect: (id: string, extend?: boolean) => void
   onBokfor: (id: string) => void
   onMatch: (row: StoredSkattekontoTransaction) => void
+  onUnlink: (row: StoredSkattekontoTransaction) => void
   onIgnore: (row: StoredSkattekontoTransaction) => void
   onUnignore: (row: StoredSkattekontoTransaction) => void
   showInterestDate: boolean
@@ -1256,6 +1225,13 @@ function SkattekontoRow({
           </span>
         ) : isBooked ? (
           <span className="inline-flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => onUnlink(row)}
+              className={cn(QUIET_LINK_CLASS, HOVER_REVEAL_CLASS, 'mr-2')}
+            >
+              {t('action_unlink')}
+            </button>
             <Link
               href={`/bookkeeping/${row.journal_entry_id}`}
               className={cn(QUIET_LINK_CLASS, HOVER_REVEAL_CLASS)}
@@ -1292,114 +1268,5 @@ function SkattekontoRow({
         )}
       </td>
     </tr>
-  )
-}
-
-function MatchDialog({
-  row,
-  candidates,
-  loading,
-  submittingId,
-  onClose,
-  onConfirm,
-}: {
-  row: StoredSkattekontoTransaction | null
-  candidates: MatchCandidate[] | null
-  loading: boolean
-  submittingId: string | null
-  onClose: () => void
-  onConfirm: (journalEntryId: string) => void
-}) {
-  const open = !!row
-  return (
-    <Dialog open={open} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Matcha mot befintligt verifikat</DialogTitle>
-          {/* data-ph-mask: transaction text and amount are user data */}
-          <DialogDescription data-ph-mask="">
-            {row && (
-              <>
-                {formatDate(row.transaktionsdatum)} • {row.transaktionstext} •{' '}
-                <span className="tabular-nums">
-                  {formatCurrency(Number(row.belopp_skatteverket))}
-                </span>
-              </>
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
-        {loading && (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Söker kandidater…
-          </p>
-        )}
-
-        {!loading && candidates && candidates.length === 0 && (
-          <div className="space-y-2 py-4 text-sm">
-            <p>Hittade inga verifikat med en matchande rad på konto 1630.</p>
-            <p className="text-muted-foreground">
-              Kandidaten måste ha samma belopp och sida på 1630 inom ±14 dagar
-              från transaktionsdatumet, och får inte redan vara kopplad till en
-              annan skattekonto-transaktion. Använd <strong>Bokför</strong> för
-              att skapa ett nytt verifikat istället.
-            </p>
-          </div>
-        )}
-
-        {!loading && candidates && candidates.length > 0 && (
-          <div className="max-h-[420px] overflow-y-auto rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Datum</TableHead>
-                  <TableHead>Verifikat</TableHead>
-                  <TableHead>Beskrivning</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {candidates.map(c => (
-                  <TableRow key={c.journal_entry_id}>
-                    <TableCell className="tabular-nums">{formatDate(c.entry_date)}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {formatVoucher(c)}
-                    </TableCell>
-                    <TableCell className="max-w-[260px] truncate">
-                      {c.description}
-                    </TableCell>
-                    <TableCell>
-                      {c.status === 'posted' ? (
-                        <Badge variant="secondary">Bokförd</Badge>
-                      ) : c.status === 'draft' ? (
-                        <Badge variant="outline">Utkast</Badge>
-                      ) : (
-                        <Badge variant="destructive">Makulerad</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        onClick={() => onConfirm(c.journal_entry_id)}
-                        disabled={submittingId === c.journal_entry_id}
-                      >
-                        {submittingId === c.journal_entry_id ? 'Kopplar…' : 'Koppla'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
-            Avbryt
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }
