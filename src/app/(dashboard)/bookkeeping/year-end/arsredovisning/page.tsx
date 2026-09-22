@@ -34,12 +34,28 @@ import { getErrorMessage as getUserErrorMessage } from '@/lib/errors/get-error-m
 const SIGNATURE_EVIDENCE_REFERENCE_PATTERN =
   /^(archive|document|receipt):[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/
 
+/** Note overrides as the server rendered them: overridden notes carry the
+ *  generated text in generated_body and the user's text in body. */
+function noteOverridesFromData(d: ArsredovisningData): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const note of d.noter) {
+    if (note.key && note.generated_body !== undefined) result[note.key] = note.body
+  }
+  return result
+}
+
+function sameNoteOverrides(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
+}
+
 export default function ArsredovisningPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const periodId = searchParams.get('period')
   const { toast } = useToast()
   const tStudio = useTranslations('annualReportStudio')
+  const tNotes = useTranslations('annualReportNotes')
 
   const [data, setData] = useState<ArsredovisningData | null>(null)
   const [signatures, setSignatures] = useState<SignatureRequest[]>([])
@@ -90,6 +106,16 @@ export default function ArsredovisningPage() {
   const [savedContingentLiabilitiesConfirmed, setSavedContingentLiabilitiesConfirmed] = useState(false)
   const [parentCompanyConfirmed, setParentCompanyConfirmed] = useState(false)
   const [savedParentCompanyConfirmed, setSavedParentCompanyConfirmed] = useState(false)
+  // K3 note texts the user replaced (key -> text). A key absent from the
+  // map keeps the generated text, which stays the default.
+  const [noteOverrides, setNoteOverrides] = useState<Record<string, string>>({})
+  const [savedNoteOverrides, setSavedNoteOverrides] = useState<Record<string, string>>({})
+  // K3 kassaflödesanalys omission (ÅRL 2 kap. 1 §, 1 kap. 3 §). The server
+  // decides whether the choice is honoured; the UI mirrors its verdict.
+  const [omitCashFlow, setOmitCashFlow] = useState(false)
+  const [savedOmitCashFlow, setSavedOmitCashFlow] = useState(false)
+  const [cashFlowOmissionConfirmed, setCashFlowOmissionConfirmed] = useState(false)
+  const [savedCashFlowOmissionConfirmed, setSavedCashFlowOmissionConfirmed] = useState(false)
   const [savingNarrative, setSavingNarrative] = useState(false)
   const [narrativeRevision, setNarrativeRevision] = useState<string | null>(null)
 
@@ -182,6 +208,15 @@ export default function ArsredovisningPage() {
         setSavedContingentLiabilitiesConfirmed(d.disclosures.confirmations.contingent_liabilities)
         setParentCompanyConfirmed(d.disclosures.confirmations.parent_company)
         setSavedParentCompanyConfirmed(d.disclosures.confirmations.parent_company)
+        const overrides = noteOverridesFromData(d)
+        setNoteOverrides(overrides)
+        setSavedNoteOverrides(overrides)
+        setOmitCashFlow(d.disclosures.omit_kassaflodesanalys ?? false)
+        setSavedOmitCashFlow(d.disclosures.omit_kassaflodesanalys ?? false)
+        setCashFlowOmissionConfirmed(d.disclosures.kassaflodesanalys_omission_confirmed ?? false)
+        setSavedCashFlowOmissionConfirmed(
+          d.disclosures.kassaflodesanalys_omission_confirmed ?? false,
+        )
         setSignatures((sigBody.data ?? []) as SignatureRequest[])
       })
       .catch(() => {
@@ -213,7 +248,10 @@ export default function ArsredovisningPage() {
     longTermDebtConfirmed !== savedLongTermDebtConfirmed ||
     securitiesPledgedConfirmed !== savedSecuritiesPledgedConfirmed ||
     contingentLiabilitiesConfirmed !== savedContingentLiabilitiesConfirmed ||
-    parentCompanyConfirmed !== savedParentCompanyConfirmed
+    parentCompanyConfirmed !== savedParentCompanyConfirmed ||
+    !sameNoteOverrides(noteOverrides, savedNoteOverrides) ||
+    omitCashFlow !== savedOmitCashFlow ||
+    cashFlowOmissionConfirmed !== savedCashFlowOmissionConfirmed
 
   const handleSaveNarrative = useCallback(async () => {
     if (!periodId) return
@@ -291,6 +329,9 @@ export default function ArsredovisningPage() {
             securities_pledged_confirmed: securitiesPledgedConfirmed,
             contingent_liabilities_confirmed: contingentLiabilitiesConfirmed,
             parent_company_confirmed: parentCompanyConfirmed,
+            note_overrides: noteOverrides,
+            omit_kassaflodesanalys: omitCashFlow,
+            kassaflodesanalys_omission_confirmed: cashFlowOmissionConfirmed,
           }),
         },
       )
@@ -321,6 +362,18 @@ export default function ArsredovisningPage() {
       setSavedSecuritiesPledgedConfirmed(securitiesPledgedConfirmed)
       setSavedContingentLiabilitiesConfirmed(contingentLiabilitiesConfirmed)
       setSavedParentCompanyConfirmed(parentCompanyConfirmed)
+      setSavedNoteOverrides(noteOverrides)
+      setSavedOmitCashFlow(omitCashFlow)
+      setSavedCashFlowOmissionConfirmed(cashFlowOmissionConfirmed)
+      // Whether the cash-flow choice is honoured, and the generated note
+      // texts, are decided server-side: refresh the document data quietly
+      // so the verdict and the K3 summary reflect what was just saved.
+      fetch(`/api/bookkeeping/fiscal-periods/${periodId}/arsredovisning`)
+        .then((r) => r.json())
+        .then((refreshed) => {
+          if (refreshed?.data) setData(refreshed.data as ArsredovisningData)
+        })
+        .catch(() => undefined)
       setNarrativeRevision(
         typeof body.data?.updated_at === 'string' ? body.data.updated_at : null,
       )
@@ -353,6 +406,9 @@ export default function ArsredovisningPage() {
     securitiesPledgedConfirmed,
     contingentLiabilitiesConfirmed,
     parentCompanyConfirmed,
+    noteOverrides,
+    omitCashFlow,
+    cashFlowOmissionConfirmed,
     toast,
   ])
 
@@ -620,7 +676,9 @@ export default function ArsredovisningPage() {
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             {data.kassaflodesanalys
               ? 'Dokumentet följer K3-mallen: kassaflödesanalys, förändring av eget kapital som egen räkning och noter enligt K3.'
-              : 'Dokumentet följer K3-mallen: förändring av eget kapital som egen räkning och noter enligt K3. Kassaflödesanalysen kunde inte beräknas för perioden: se varningarna längre ner.'}{' '}
+              : data.kassaflodesanalys_omission?.omitted
+                ? tNotes('cashflow_omitted_notice')
+                : 'Dokumentet följer K3-mallen: förändring av eget kapital som egen räkning och noter enligt K3. Kassaflödesanalysen kunde inte beräknas för perioden: se varningarna längre ner.'}{' '}
             Vilka noter som kommer med styrs av bokföringen: noten Uppskjutna skatter tas
             med först när konto 2240 eller 8940 har ett saldo, och anläggningsnoterna när
             det finns tillgångar i anläggningsregistret.
@@ -873,6 +931,123 @@ export default function ArsredovisningPage() {
               Jag har kontrollerat koncernförhållandet, även om bolaget saknar moderföretag.
             </label>
           </div>
+
+          {data.accounting_framework === 'k3' && (
+            <div className="pt-4 border-t border-border space-y-4">
+              <div>
+                <h3 className="font-sans text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {tNotes('notes_title')}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">{tNotes('notes_description')}</p>
+              </div>
+              {data.noter
+                .filter((note) => note.key)
+                .map((note) => {
+                  const key = note.key as string
+                  const generated = note.generated_body ?? note.body
+                  const edited = key in noteOverrides
+                  return (
+                    <div key={key} className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label htmlFor={`ar-note-${key}`}>
+                          {tNotes('note_label', { number: note.number, title: note.title })}
+                        </Label>
+                        {edited && (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary">{tNotes('note_edited')}</Badge>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setNoteOverrides((prev) => {
+                                  const next = { ...prev }
+                                  delete next[key]
+                                  return next
+                                })
+                              }
+                            >
+                              {tNotes('reset_note')}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      <Textarea
+                        id={`ar-note-${key}`}
+                        value={noteOverrides[key] ?? generated}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setNoteOverrides((prev) => {
+                            const next = { ...prev }
+                            if (value === generated || value.trim() === '') delete next[key]
+                            else next[key] = value
+                            return next
+                          })
+                        }}
+                        rows={key === 'redovisningsprinciper' ? 10 : 3}
+                        maxLength={8000}
+                      />
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+
+          {data.accounting_framework === 'k3' && data.kassaflodesanalys_omission && (
+            <div className="pt-4 border-t border-border space-y-3">
+              <div>
+                <h3 className="font-sans text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {tNotes('cashflow_title')}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">{tNotes('cashflow_rule')}</p>
+              </div>
+              {data.kassaflodesanalys_omission.rule === 'forbidden' ? (
+                <>
+                  <p className="text-sm">{tNotes('cashflow_forbidden')}</p>
+                  {/* A choice saved before the company became a större
+                      företag is not honoured; let the user clear it. */}
+                  {savedOmitCashFlow && (
+                    <label className="flex cursor-pointer items-center gap-3 text-sm">
+                      <Checkbox
+                        id="ar-omit-cashflow"
+                        checked={omitCashFlow}
+                        onCheckedChange={(checked) => setOmitCashFlow(Boolean(checked))}
+                      />
+                      {tNotes('cashflow_omit')}
+                    </label>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    {data.kassaflodesanalys_omission.rule === 'allowed'
+                      ? tNotes('cashflow_allowed')
+                      : tNotes('cashflow_needs_confirmation')}
+                  </p>
+                  <label className="flex cursor-pointer items-center gap-3 text-sm">
+                    <Checkbox
+                      id="ar-omit-cashflow"
+                      checked={omitCashFlow}
+                      onCheckedChange={(checked) => setOmitCashFlow(Boolean(checked))}
+                    />
+                    {tNotes('cashflow_omit')}
+                  </label>
+                  {data.kassaflodesanalys_omission.rule === 'requires_confirmation' && omitCashFlow && (
+                    <label className="flex cursor-pointer items-center gap-3 text-sm">
+                      <Checkbox
+                        id="ar-omit-cashflow-confirmed"
+                        checked={cashFlowOmissionConfirmed}
+                        onCheckedChange={(checked) =>
+                          setCashFlowOmissionConfirmed(Boolean(checked))
+                        }
+                      />
+                      {tNotes('cashflow_confirm')}
+                    </label>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2">
             <div className="text-xs text-muted-foreground">

@@ -80,14 +80,74 @@ export function validateVatFormat(viesPrefix: string, vatNumber: string): boolea
 }
 
 /**
+ * VIES `userError` values that carry a definitive verdict. `VALID` and
+ * `INVALID` mirror `isValid`; `INVALID_INPUT` means the number itself is
+ * malformed for that member state. Every other code (MS_UNAVAILABLE,
+ * MS_MAX_CONCURRENT_REQ, TIMEOUT, SERVICE_UNAVAILABLE, ...) means the member
+ * state could not be asked, and VIES still answers HTTP 200 with
+ * `isValid: false`. Reading that as "invalid" told users that correct
+ * numbers were wrong, so anything outside this set is "unavailable".
+ */
+const DEFINITIVE_USER_ERRORS = new Set(['VALID', 'INVALID', 'INVALID_INPUT'])
+
+/** Concurrency throttles clear quickly: worth exactly one retry. */
+const RETRYABLE_USER_ERRORS = new Set([
+  'MS_MAX_CONCURRENT_REQ',
+  'MS_MAX_CONCURRENT_REQ_TIME',
+  'GLOBAL_MAX_CONCURRENT_REQ',
+  'GLOBAL_MAX_CONCURRENT_REQ_TIME',
+])
+
+const VIES_RETRY_DELAY_MS = 1_500
+
+const UNAVAILABLE_MESSAGE = 'VAT validation service unavailable. Please try again later.'
+
+interface ViesResponse {
+  isValid?: boolean
+  userError?: string
+  name?: string
+  address?: string
+}
+
+async function fetchVies(viesPrefix: string, vatNumber: string): Promise<ViesResponse | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), VIES_TIMEOUT_MS)
+  try {
+    const response = await fetch(
+      `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${viesPrefix}/vat/${vatNumber}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      }
+    )
+    if (!response.ok) return null
+    return (await response.json()) as ViesResponse
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function isDefinitive(data: ViesResponse): boolean {
+  if (data.isValid === true) return true
+  return data.userError === undefined || DEFINITIVE_USER_ERRORS.has(data.userError)
+}
+
+/**
  * Validate a VAT number against the EU VIES REST API.
  *
  * 1. Parses the prefix and number
  * 2. Checks format locally
- * 3. Calls the VIES REST API with a 10s timeout
- * 4. Returns a VatValidationResult
+ * 3. Calls the VIES REST API with a 10s timeout, retrying once after a short
+ *    delay when VIES reports a concurrency throttle
+ * 4. Returns a VatValidationResult. `unavailable: true` means VIES gave no
+ *    verdict (member state down, throttled, timeout, network): `valid` is
+ *    then false but must not be read or stored as "invalid".
  */
-export async function validateVatNumber(rawVatNumber: string): Promise<VatValidationResult> {
+export async function validateVatNumber(
+  rawVatNumber: string,
+  options: { retryDelayMs?: number } = {}
+): Promise<VatValidationResult> {
   const parsed = parseVatNumber(rawVatNumber)
 
   if (!parsed) {
@@ -105,29 +165,28 @@ export async function validateVatNumber(rawVatNumber: string): Promise<VatValida
     }
   }
 
+  const unavailable: VatValidationResult = {
+    valid: false,
+    unavailable: true,
+    country_code: viesPrefix,
+    vat_number: `${viesPrefix}${vatNumber}`,
+    error: UNAVAILABLE_MESSAGE,
+  }
+
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), VIES_TIMEOUT_MS)
-
-    const response = await fetch(
-      `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${viesPrefix}/vat/${vatNumber}`,
-      {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: controller.signal,
-      }
-    )
-
-    clearTimeout(timeout)
-
-    if (!response.ok) {
-      return {
-        valid: false,
-        error: 'VAT validation service unavailable. Please try again later.',
-      }
+    let data = await fetchVies(viesPrefix, vatNumber)
+    if (data && !isDefinitive(data) && RETRYABLE_USER_ERRORS.has(data.userError ?? '')) {
+      await new Promise(resolve => setTimeout(resolve, options.retryDelayMs ?? VIES_RETRY_DELAY_MS))
+      data = await fetchVies(viesPrefix, vatNumber)
     }
 
-    const data = await response.json()
+    if (!data) return unavailable
+
+    if (!isDefinitive(data)) {
+      log.warn('VIES gave no verdict', { country: viesPrefix, userError: data.userError })
+      return unavailable
+    }
+
     const isValid = data.isValid === true
 
     return {
@@ -136,12 +195,32 @@ export async function validateVatNumber(rawVatNumber: string): Promise<VatValida
       address: data.address || undefined,
       country_code: viesPrefix,
       vat_number: `${viesPrefix}${vatNumber}`,
+      ...(data.userError === 'INVALID_INPUT' ? { error: 'Invalid VAT number format' } : {}),
     }
   } catch (error) {
     log.error('VIES API error:', error)
-    return {
-      valid: false,
-      error: 'Could not verify VAT number. Service temporarily unavailable.',
-    }
+    return { ...unavailable, error: 'Could not verify VAT number. Service temporarily unavailable.' }
+  }
+}
+
+/**
+ * The `vat_number_validated` columns to write after re-validating a
+ * customer's VAT number on update, or `null` to leave them untouched.
+ * A VIES outage must not wipe an earlier successful check of the same
+ * number; a changed number is unverified until VIES answers.
+ */
+export function vatValidationColumns(
+  result: VatValidationResult,
+  previousVatNumber: string | null | undefined,
+  nextVatNumber: string
+): { vat_number_validated: boolean; vat_number_validated_at: string | null } | null {
+  if (result.unavailable) {
+    const normalize = (v: string) => v.replace(/\s/g, '').toUpperCase()
+    if (previousVatNumber && normalize(previousVatNumber) === normalize(nextVatNumber)) return null
+    return { vat_number_validated: false, vat_number_validated_at: null }
+  }
+  return {
+    vat_number_validated: result.valid,
+    vat_number_validated_at: result.valid ? new Date().toISOString() : null,
   }
 }
