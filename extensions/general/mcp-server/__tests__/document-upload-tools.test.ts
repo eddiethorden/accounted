@@ -165,7 +165,8 @@ describe('MCP model-free document upload tools', () => {
       undefined,
       // The inbox item created right after owns extraction; the
       // document-extraction extension must yield on the uploaded event.
-      { extractionOwner: 'invoice-inbox' },
+      // Same bytes again land on the existing document (dedupeByContent).
+      { extractionOwner: 'invoice-inbox', dedupeByContent: true },
     )
     expect(inboxInsert.insert).toHaveBeenCalledWith(
       expect.objectContaining({ id: uploadId, document_id: uploadId }),
@@ -176,6 +177,31 @@ describe('MCP model-free document upload tools', () => {
       status: 'received',
     })
     expect(mocks.extractInvoiceFields).toHaveBeenCalledOnce()
+  })
+
+  it('answers with the existing document when the same bytes are already archived, creating nothing', async () => {
+    const existingDocumentId = '44444444-4444-4444-8444-444444444444'
+    mocks.completePendingDocumentUpload.mockResolvedValueOnce({
+      document: makeDocumentAttachment({ id: existingDocumentId, user_id: userId, company_id: companyId, file_name: 'anmalan.pdf', mime_type: 'application/pdf', deduplicated: true } as never),
+      buffer: new TextEncoder().encode('%PDF-1.4\n%%EOF\n').buffer,
+    })
+    const inboxLookups = [
+      makeQueryBuilder({ data: null, error: null }),
+      makeQueryBuilder({ data: { id: 'inbox-old', status: 'booked', extracted_data: { invoice: { number: 'A-1' } }, matched_supplier_id: null }, error: null }),
+    ]
+    const from = vi.fn((table: string) => {
+      if (table === 'invoice_inbox_items') return inboxLookups.shift()
+      throw new Error(`Unexpected table: ${table}`)
+    })
+    const result = await findTool('gnubok_complete_document_upload').execute(
+      { upload_id: uploadId, file_name: 'anmalan.pdf', mime_type: 'application/pdf' },
+      companyId,
+      userId,
+      { from } as never,
+    )
+    expect(result).toEqual({ document_id: existingDocumentId, inbox_item_id: 'inbox-old', status: 'booked', extracted_data: { invoice: { number: 'A-1' } }, matched_supplier_id: null, deduplicated: true })
+    expect(mocks.extractInvoiceFields).not.toHaveBeenCalled()
+    expect(inboxLookups).toHaveLength(0)
   })
 
   it('returns an already completed inbox item without downloading or extracting again', async () => {
