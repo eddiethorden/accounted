@@ -20,21 +20,42 @@ export const IMAGE_MAX_DIMENSION = 2000
 
 export const HEIC_MIME_TYPES = ['image/heic', 'image/heif'] as const
 
+/**
+ * HEIC/HEIF (the iPhone default) decoded to JPEG with heic-convert (libheif
+ * as WebAssembly, so it runs wherever Node runs), since the prebuilt sharp
+ * has no HEVC decoder. Lazy: the decoder is a few megabytes of WebAssembly
+ * that only a phone photo needs.
+ */
+export async function decodeHeicToJpeg(bytes: Buffer): Promise<Buffer> {
+  const convert = (await import('heic-convert')).default
+  const out = await convert({ buffer: bytes as unknown as ArrayBufferLike, format: 'JPEG', quality: 0.9 })
+  return Buffer.from(out)
+}
+
 export async function fitImageForModel(bytes: Buffer, mimeType: string): Promise<{ bytes: Buffer; mediaType: AiImageMediaType } | null> {
   const isHeic = (HEIC_MIME_TYPES as readonly string[]).includes(mimeType)
   if (!isHeic && bytes.length <= IMAGE_DOWNSCALE_THRESHOLD_BYTES) return { bytes, mediaType: mimeType as AiImageMediaType }
   try {
     // Lazy: sharp is a native module and only oversized photos need it.
     const sharp = (await import('sharp')).default
-    const converted = await sharp(bytes)
-      .rotate()
-      .resize({ width: IMAGE_MAX_DIMENSION, height: IMAGE_MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toBuffer()
+    const fit = (input: Buffer) =>
+      sharp(input)
+        .rotate()
+        .resize({ width: IMAGE_MAX_DIMENSION, height: IMAGE_MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer()
+    let converted: Buffer
+    try {
+      converted = await fit(bytes)
+    } catch (err) {
+      // sharp reads HEIC only when its libvips was built with a decoder; the prebuilt one was not.
+      if (!isHeic) throw err
+      converted = await fit(await decodeHeicToJpeg(bytes))
+    }
     return { bytes: converted, mediaType: 'image/jpeg' }
   } catch (err) {
     log.warn('image not fitted for the model', { mime: mimeType, bytes: bytes.length, reason: err instanceof Error ? err.message : String(err) })
-    // A HEIC the build cannot decode has no readable form; an oversized JPEG is still worth the attempt.
+    // A HEIC nothing could decode has no readable form; an oversized JPEG is still worth the attempt.
     return isHeic ? null : { bytes, mediaType: mimeType as AiImageMediaType }
   }
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import sharp from 'sharp'
-import { fitImageForModel, IMAGE_DOWNSCALE_THRESHOLD_BYTES, IMAGE_MAX_DIMENSION } from '../image'
+import { receiptImage } from '@/tests/fixtures/receipt-images'
+import { decodeHeicToJpeg, fitImageForModel, IMAGE_DOWNSCALE_THRESHOLD_BYTES, IMAGE_MAX_DIMENSION } from '../image'
 
 // Real sharp: the point is that a phone photo comes out under the model's limit.
 describe('fitImageForModel', () => {
@@ -21,6 +22,15 @@ describe('fitImageForModel', () => {
     const meta = await sharp(out!.bytes).metadata()
     expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBe(IMAGE_MAX_DIMENSION)
     expect(out!.bytes.length).toBeLessThan(5 * 1024 * 1024 * 0.75)
+  }, 30_000)
+
+  it('decodes a HEIC phone photo to JPEG when sharp cannot', async () => {
+    const heic = Buffer.from(receiptImage('heic'))
+    const jpeg = await decodeHeicToJpeg(heic)
+    expect(await sharp(jpeg).metadata()).toMatchObject({ format: 'jpeg', width: 64, height: 64 })
+    const out = await fitImageForModel(heic, 'image/heic')
+    expect(out?.mediaType).toBe('image/jpeg')
+    expect((await sharp(out!.bytes).metadata()).format).toBe('jpeg')
   }, 30_000)
 
   it('gives up on bytes that are not an image the build can decode', async () => {
