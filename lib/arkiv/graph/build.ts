@@ -59,7 +59,7 @@ const LEDGER_FACT_RULES: Record<string, { why: string; accounts?: RegExp }> = {
   monthly_cost_baseline: { why: 'the typical month on this account' },
   top_counterparty: { why: 'the money moved with this counterparty in the last twelve months' },
 }
-/** The account numbers a fact's evidence names, whether stored as strings or as { account } rows. */
+/** The account numbers a fact's evidence (one row of sources) names, whether stored as strings or as { account } rows. */
 function evidenceAccounts(evidence: Record<string, unknown> | null | undefined): string[] {
   const out = new Set<string>()
   if (typeof evidence?.account === 'string') out.add(evidence.account)
@@ -178,7 +178,7 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     .limit(TX_CAP)
   const facts = await supabase
     .from('company_facts')
-    .select('id, predicate, value_text, valid_from, source_document_id, evidence')
+    .select('id, predicate, value_text, valid_from, source_document_id, sources')
     .eq('company_id', companyId)
     .eq('subject_kind', 'company')
     .eq('subject_id', companyId)
@@ -419,7 +419,7 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
     add({ ref: `agreement:${a.id}`, cluster: 'agreement', kind: 'agreement', label: a.title, weight: Math.max(2, Math.min(12, Math.log10(Math.max(1, Number(a.principal ?? a.amount ?? 0))) * 2)), meta: { agreement_kind: a.kind, status: a.status, ends_on: a.ends_on, amount: a.amount, period: a.period, principal: a.principal } })
     if (a.source_document_id) referencedDocs.add(a.source_document_id)
   }
-  const factRows = (facts.data ?? []) as Array<{ id: string; predicate: string; value_text: string; valid_from: string | null; source_document_id: string | null; evidence?: Record<string, unknown> | null }>
+  const factRows = (facts.data ?? []) as Array<{ id: string; predicate: string; value_text: string; valid_from: string | null; source_document_id: string | null; sources?: Array<Record<string, unknown>> | null }>
   for (const f of factRows) if (f.source_document_id) referencedDocs.add(f.source_document_id)
   const linkRows = (documentLinks.data ?? []) as Array<{ document_id: string; target_kind: string; party_id: string | null; agreement_id: string | null; asset_id: string | null }>
   for (const l of linkRows) referencedDocs.add(l.document_id)
@@ -463,13 +463,15 @@ export async function buildCompanyGraph(supabase: SupabaseClient, companyId: str
       for (const account of movement.keys()) if (rule.accounts?.test(account)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'rule', via: rule.why, movement: round2(movement.get(account) ?? 0) })
       factRules.set(f.id, rule)
     }
-    // A fact read off the ledger points back at the accounts and the counterparty it was read from.
+    // A fact read off the ledger points back at the accounts and the counterparty it was read from:
+    // the evidence a derive records is the fact's source row (record_company_fact stores it in sources).
     const ledger = LEDGER_FACT_RULES[f.predicate]
     if (ledger) {
       for (const account of movement.keys()) if (ledger.accounts?.test(account)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'derived', via: ledger.why, movement: round2(movement.get(account) ?? 0) })
-      for (const account of evidenceAccounts(f.evidence)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'derived', via: ledger.why })
-      const node = f.evidence?.node
-      if (typeof node === 'string') link(`fact:${f.id}`, node, 'link', { kind: 'derived', via: ledger.why })
+      for (const source of f.sources ?? []) {
+        for (const account of evidenceAccounts(source)) link(`fact:${f.id}`, `account:${account}`, 'link', { kind: 'derived', via: ledger.why })
+        if (typeof source?.node === 'string') link(`fact:${f.id}`, source.node, 'link', { kind: 'derived', via: ledger.why })
+      }
     }
   }
   for (const d of docRows) {

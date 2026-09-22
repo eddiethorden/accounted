@@ -175,10 +175,10 @@ describe('buildCompanyGraph', () => {
         { id: 't-a', journal_entry_id: 'je-a', original_description: 'ALMI FÖRETAG', description: null, merchant_name: null, date: '2026-08-31' },
       ],
       facts: [
-        { id: 'f-sal', predicate: 'monthly_salary_cost', value_text: '70 000 kr/mån (1 mån med lön)', valid_from: null, source_document_id: null, evidence: { accounts: '7000-7399', months: 1 } },
-        { id: 'f-base', predicate: 'monthly_cost_baseline', value_text: '5420 Programvaror: typiskt 1 985 kr/mån', valid_from: null, source_document_id: null, evidence: { account: '5420', months: 3 } },
-        { id: 'f-loan', predicate: 'loan_balance', value_text: '400 000 kr (2320)', valid_from: null, source_document_id: null, evidence: { accounts: [{ account: '2320', balance: 400000 }], as_of: '2026-10-01' } },
-        { id: 'f-top', predicate: 'top_counterparty', value_text: 'Almi Företag: 2 331 kr (12 mån)', valid_from: null, source_document_id: null, evidence: { node: 'party:p-almi', from: '2025-10-01', to: '2026-10-01' } },
+        { id: 'f-sal', predicate: 'monthly_salary_cost', value_text: '70 000 kr/mån (1 mån med lön)', valid_from: null, source_document_id: null, sources: [{ accounts: '7000-7399', months: 1, derived: 'company' }] },
+        { id: 'f-base', predicate: 'monthly_cost_baseline', value_text: '5420 Programvaror: typiskt 1 985 kr/mån', valid_from: null, source_document_id: null, sources: [{ account: '5420', months: 3, derived: 'company' }] },
+        { id: 'f-loan', predicate: 'loan_balance', value_text: '400 000 kr (2320)', valid_from: null, source_document_id: null, sources: [{ accounts: [{ account: '2320', balance: 400000 }], as_of: '2026-10-01', derived: 'company' }] },
+        { id: 'f-top', predicate: 'top_counterparty', value_text: 'Almi Företag: 2 331 kr (12 mån)', valid_from: null, source_document_id: null, sources: [{ node: 'party:p-almi', from: '2025-10-01', to: '2026-10-01', derived: 'company' }] },
       ],
     })
     const g = await buildCompanyGraph(supabase, CO, TODAY)
