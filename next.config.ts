@@ -128,7 +128,7 @@ const nextConfig: NextConfig = {
   // runtime, never bundled. unpdf (pdf.js, pure JavaScript) is kept external
   // too, so the hosted function runs the same files Node runs in the tests
   // rather than a re-bundled copy of pdf.js.
-  serverExternalPackages: ['@firecrawl/anydoc', 'unpdf'],
+  serverExternalPackages: ['@firecrawl/anydoc', 'unpdf', 'heic-convert', 'heic-decode', 'libheif-js'],
   experimental: {
     optimizePackageImports: ['recharts', 'date-fns', 'framer-motion'],
     // Client router cache for dynamic routes: a page visited in the last
