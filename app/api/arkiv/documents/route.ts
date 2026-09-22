@@ -8,6 +8,7 @@ import { documentDate, documentTitle } from '@/lib/arkiv/documents/title'
 import type { Payload } from '@/lib/documents/extract/fields'
 import { searchDocumentPages, type PageHit } from '@/lib/documents/read/search'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
+import { NOT_STRUCTURED_MIME_FILTER } from '@/lib/documents/read/types'
 
 /**
  * GET /api/arkiv/documents?type=&q=&year=
@@ -89,6 +90,7 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
     .select('id, created_at, file_name, doc_type, admission_state, journal_entry_id')
     .eq('company_id', ctx.companyId)
     .in('admission_state', ['admitted', 'held'])
+    .or(NOT_STRUCTURED_MIME_FILTER)
     .order('created_at', { ascending: false })
     .limit(limit)
   if (types) query = query.in('doc_type', types)
