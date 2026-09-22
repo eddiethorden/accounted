@@ -5679,7 +5679,6 @@
   "journal_detail": {
     "title": "Verifikat {label}",
     "title_draft": "Utkast till verifikat",
-    "posted_on": "Bokförd {date}",
     "field_voucher": "Verifikationsnummer",
     "lines_count": "{count, plural, one {# rad} other {# rader}}",
     "accounts_loading": "Laddar kontoplan...",
@@ -5778,9 +5777,8 @@
     "toast_delete_failed_generic": "Kunde inte radera verifikat",
     "toast_save_note_failed": "Kunde inte spara anteckning",
     "delete_confirm_label": "Radera permanent",
-    "delete_warning_draft": "Utkastet har aldrig bokförts och kan tas bort utan att påverka verifikationsserien. Eventuella kopplade underlag behålls men avlänkas. Denna åtgärd kan inte ångras.",
-    "delete_warning_entry": "Verifikat {voucher} raderas permanent. Eventuella kopplade underlag behålls men avlänkas. Denna åtgärd kan inte ångras.",
-    "delete_dialog_heading": "Permanent radering",
+    "delete_warning_draft": "Utkastet har aldrig bokförts och kan tas bort utan att påverka verifikationsserien. Denna åtgärd kan inte ångras.",
+    "delete_warning_entry": "Verifikat {voucher} raderas permanent. Denna åtgärd kan inte ångras.",
     "delete_dialog_draft_body": "Utkastet och dess kontorader tas bort. Kopplade fakturor och transaktioner påverkas inte: de stannar kvar som obokförda. Underlag (kvitton, dokument) behålls men avlänkas.",
     "delete_dialog_entry_body": "Verifikatet och dess kontorader tas bort. Kopplade transaktioner och fakturor behåller sina uppgifter men markeras som ej bokförda. Underlag (kvitton, dokument) behålls men avlänkas."
   },
@@ -5902,7 +5900,6 @@
     "col_name": "Namn",
     "col_sru": "SRU",
     "col_type": "Typ",
-    "col_active": "Aktiv",
     "col_status": "Status",
     "system_badge": "System",
     "activated": "Aktiverat",
@@ -5961,7 +5958,8 @@
     "toast_pruned_with_skipped": "{deleted} konton togs bort, {skipped} hoppades över",
     "toast_prune_failed": "Kunde inte rensa kontoplanen",
     "bas_version_chip": "BAS 2026",
-    "footer_note": "Visar {shown} av {total} konton, grupperade per BAS-klass. SRU-koden är fältet i Skatteverkets räkenskapsschema (INK2R) och följer med i SIE-exporten. Enskild firma deklarerar via NE-bilagan, som mappar kontona automatiskt.",
+    "footer_count": "Visar {shown} av {total} konton",
+    "help_text": "Kontona är grupperade per BAS-klass. SRU-koden är fältet i Skatteverkets räkenskapsschema (INK2R) och följer med i SIE-exporten. Enskild firma deklarerar via NE-bilagan, som mappar kontona automatiskt.",
     "vat_treatment_label": "Momskod för momsdeklarationen",
     "vat_treatment_none": "Använd BAS-standard",
     "vat_treatment_help": "Styr vilken ruta kontots belopp hamnar i. En vald momskod går före BAS-standarden.",
@@ -7728,7 +7726,10 @@
     "opened_today": "idag",
     "opened_yesterday": "igår",
     "help_text": "Alla rapporter öppnas för det valda räkenskapsåret och kan avgränsas till valfri period inne i rapporten. Senast öppnad kommer ihåg vad du använder mest.",
-    "catalog_footnote": "Alla rapporter öppnas för valfri period och kan laddas ner som PDF. NE-bilagan visas i stället för INK2 för enskild firma."
+    "catalog_footnote": "Alla rapporter öppnas för valfri period och kan laddas ner som PDF. NE-bilagan visas i stället för INK2 för enskild firma.",
+    "no_fiscal_year_title": "Inget räkenskapsår valt",
+    "no_fiscal_year_description": "Skapa ett räkenskapsår för att kunna se rapporter.",
+    "no_fiscal_year_action": "Gå till inställningar"
   },
   "salary": {
     "title": "Löner",
