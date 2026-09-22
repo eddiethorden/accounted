@@ -77,7 +77,7 @@ export function AgreementLinksGraph({ title, nodes }: { title: string; nodes: Ar
                 <a href={n.href} target={n.external ? '_blank' : undefined} rel={n.external ? 'noreferrer' : undefined}>
                   <text
                     x={labelX}
-                    y={p.y + (n.sub ? 22 : 10)}
+                    y={p.y + (n.sub ? 22 : 18)}
                     fontSize={11}
                     textAnchor={anchor}
                     className="fill-foreground underline"
