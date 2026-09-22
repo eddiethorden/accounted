@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
@@ -111,14 +110,22 @@ interface WorklistRowProps {
   href: string
   icon: React.ComponentType<{ className?: string }>
   label: string
+  /** Data for this row (amounts, dates, who): a second muted line. */
   detail?: string
-  count: number
+  /**
+   * What the row means, for whoever wonders: a hover title on the label,
+   * never a second line. Explanations in the list flow are the clutter
+   * conventions 4 and 7 exist to prevent.
+   */
+  hint?: string
+  /** Omitted where the row's detail or amount already says how many. */
+  count?: number
   badge?: React.ReactNode
   /** The row's own control (the "Gör i Claude" pill); sits above the stretched link. */
   action?: React.ReactNode
 }
 
-function WorklistRow({ href, icon: Icon, label, detail, count, badge, action }: WorklistRowProps) {
+function WorklistRow({ href, icon: Icon, label, detail, hint, count, badge, action }: WorklistRowProps) {
   // The label is the link, stretched over the row with a pseudo-element, so
   // the pill can be a real button beside it instead of a button inside an
   // anchor. The pill sits above the stretched area (relative z-10).
@@ -129,7 +136,7 @@ function WorklistRow({ href, icon: Icon, label, detail, count, badge, action }: 
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13.5px]">
-          <Link href={href} className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
+          <Link href={href} title={hint} className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
             {label}
           </Link>
         </p>
@@ -137,9 +144,11 @@ function WorklistRow({ href, icon: Icon, label, detail, count, badge, action }: 
       </div>
       <span className="ml-auto flex shrink-0 items-center gap-2.5 pt-px">
         {badge}
-        <Badge variant="secondary" className="font-normal tabular-nums">
-          {count}
-        </Badge>
+        {/* A plain count, not a chip: every row has one, and a chip on
+            every row marks nothing (convention 5). */}
+        {count !== undefined && (
+          <span className="min-w-[2ch] text-right text-xs tabular-nums text-muted-foreground">{count}</span>
+        )}
         {action && <span className="relative z-10 flex items-center">{action}</span>}
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
       </span>
@@ -438,7 +447,7 @@ export default function AttGoraSection({
                         action={aiAction('inbox_document', counts.inbox_document)}
                         icon={Inbox}
                         label={t('row_inbox_documents')}
-                        detail={t('row_inbox_documents_detail')}
+                        hint={t('row_inbox_documents_detail')}
                         count={counts.inbox_document}
                       />
                     )}
@@ -467,7 +476,6 @@ export default function AttGoraSection({
                                 date: formatDate(skattekontoPayment.due),
                               })
                         }
-                        count={1}
                         badge={
                           <span className="text-xs tabular-nums text-muted-foreground">
                             {formatCurrency(skattekontoPayment.amount)}
@@ -489,7 +497,6 @@ export default function AttGoraSection({
                                 date: formatDate(p.oldest_expense_date),
                               })
                         }
-                        count={p.claim_count}
                         badge={
                           <span className="text-xs tabular-nums text-muted-foreground">
                             {formatCurrency(p.total_sek)}
@@ -537,7 +544,7 @@ export default function AttGoraSection({
                         href="/arkiv/granska"
                         icon={FileQuestion}
                         label={t('row_document_relevance')}
-                        detail={t('row_document_relevance_detail')}
+                        hint={t('row_document_relevance_detail')}
                         count={counts.document_relevance}
                       />
                     )}
@@ -554,7 +561,7 @@ export default function AttGoraSection({
                         href="/arkiv/granska#falt"
                         icon={FileQuestion}
                         label={t('row_document_field_review')}
-                        detail={t('row_document_field_review_detail')}
+                        hint={t('row_document_field_review_detail')}
                         count={counts.document_field_review}
                       />
                     )}
@@ -563,7 +570,7 @@ export default function AttGoraSection({
                         href="/arkiv/granska#fynd"
                         icon={FileQuestion}
                         label={t('row_arkiv_finding')}
-                        detail={t('row_arkiv_finding_detail')}
+                        hint={t('row_arkiv_finding_detail')}
                         count={counts.arkiv_finding}
                       />
                     )}
@@ -598,7 +605,7 @@ export default function AttGoraSection({
                         href="/arkiv/avtal"
                         icon={CalendarClock}
                         label={t('row_agreement_payment_missed')}
-                        detail={t('row_agreement_payment_missed_detail')}
+                        hint={t('row_agreement_payment_missed_detail')}
                         count={counts.agreement_payment_missed}
                       />
                     )}
@@ -608,7 +615,7 @@ export default function AttGoraSection({
                         action={aiAction('reconciliation_due', counts.reconciliation_due)}
                         icon={Scale}
                         label={t('row_reconciliation_due')}
-                        detail={t('row_reconciliation_due_detail')}
+                        hint={t('row_reconciliation_due_detail')}
                         count={counts.reconciliation_due}
                       />
                     )}

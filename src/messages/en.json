@@ -7308,7 +7308,7 @@
   },
   "att_gora_v2": {
     "title": "To do",
-    "help": "Everything waiting in the company, in the order it needs doing. Left: the tasks. Middle: the rows behind the selected task. Right: deadline, legal basis, dependencies and the assistant. The numbers match the sidebar."
+    "help": "Everything waiting in the company, grouped by what you do: Record, Pay, Review & complete and Monitor. Continue shows what you have started, such as drafts and salary runs. The connections fill the list for you: the agent ticks it off, the bank fetches the transactions by itself and Skatteverket reconciles the tax account and receives the VAT return."
   },
   "rules": {
       "title": "Rules",
@@ -7513,7 +7513,6 @@
     "kopplingar_skv_off": "not connected",
     "kopplingar_skv_on": "connected",
     "kopplingar_skv_aria": "Connect Skatteverket",
-    "kopplingar_note": "The agent ticks off the list for you, the bank fetches the transactions by itself, and Skatteverket reconciles the tax account and receives the VAT return.",
     "ai_fix_first_other": "Pick another agent",
     "ai_do_with": "Do in {client}",
     "ai_review_description": "The prompt carries the company name and id so {client} works in the right company.",
@@ -10212,7 +10211,6 @@
     "record_fact_chip": "fact about the company",
     "col_quantity": "Qty",
     "col_vat_rate": "VAT",
-    "action_search": "Search",
     "action_upload": "Upload",
     "type_unknown": "Unknown type",
     "linked_say_what": "Say what it is",

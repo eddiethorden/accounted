@@ -7308,7 +7308,7 @@
   },
   "att_gora_v2": {
     "title": "Att göra",
-    "help": "Allt som väntar i bolaget, i den ordning det behöver göras. Vänster: uppgifterna. Mitten: raderna bakom den valda uppgiften. Höger: deadline, lagrum, beroenden och assistentens läge. Siffrorna är samma som i sidomenyn."
+    "help": "Allt som väntar i bolaget, grupperat efter vad du gör: Bokför, Betala, Granska & komplettera och Bevaka. Fortsätt visar det du har påbörjat, som utkast och lönekörningar. Kopplingarna fyller listan åt dig: agenten bockar av den, banken hämtar transaktionerna själv och Skatteverket stämmer av skattekontot och tar emot momsen."
   },
   "rules": {
       "title": "Regler",
@@ -7513,7 +7513,6 @@
     "kopplingar_skv_off": "ej anslutet",
     "kopplingar_skv_on": "anslutet",
     "kopplingar_skv_aria": "Anslut Skatteverket",
-    "kopplingar_note": "Agenten bockar av listan åt dig, banken hämtar transaktionerna själv och Skatteverket stämmer av skattekontot och tar emot momsen.",
     "ai_fix_first_other": "Välj en annan agent",
     "ai_do_with": "Gör i {client}",
     "ai_review_description": "Prompten innehåller företagets namn och id så att {client} arbetar i rätt bolag.",
@@ -10212,7 +10211,6 @@
     "record_fact_chip": "faktum om bolaget",
     "col_quantity": "Antal",
     "col_vat_rate": "Moms",
-    "action_search": "Sök",
     "action_upload": "Ladda upp",
     "type_unknown": "Okänd typ",
     "linked_say_what": "Säg vad det är",

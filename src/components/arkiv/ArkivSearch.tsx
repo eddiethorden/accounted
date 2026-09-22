@@ -13,7 +13,7 @@ import { SourceLink } from './DefList'
  * The Arkiv search (phase 9c): one field over documents, agreements and
  * facts, answered with the record to open and the page it was read from.
  * Search is the in-app way to a fact; asking is done through the person's
- * own assistant, so the field carries the way there.
+ * own assistant, and the way there sits in the page's "?" help (ArkivHome).
  */
 export const SEARCH_MIN = 2
 
@@ -75,16 +75,7 @@ export function ArkivSearch({ query, onQueryChange }: { query: string; onQueryCh
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <ToolbarSearch id="arkiv-search" value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder={t('search_documents')} containerClassName="w-full max-w-md" autoComplete="off" />
-        <p className="text-[12.5px] text-muted-foreground">
-          {t('search_ask_lead')}{' '}
-          <Link href="/settings/api" className={`${QUIET_LINK_CLASS} text-foreground`}>
-            {t('search_ask_link')}
-          </Link>
-          {t('search_ask_tail')}
-        </p>
-      </div>
+      <ToolbarSearch id="arkiv-search" value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder={t('search_documents')} containerClassName="w-full max-w-md" autoComplete="off" />
 
       {failed && <p className="text-[13px] text-muted-foreground">{t('load_failed')}</p>}
       {loading && (
