@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +13,9 @@ import type { DocumentTextView } from '@/app/api/documents/[id]/text/route'
 import { DOC_TYPES } from '@/lib/documents/classify/taxonomy'
 import { primaryFields, schemaForType } from '@/lib/documents/extract/schemas'
 import { formatCurrency, formatDateLong } from '@/lib/utils'
+import { useToast } from '@/components/ui/use-toast'
 import { DefList, DefRow, Section, SourceLink, inlineHref } from './DefList'
+import { DocumentDecision } from './DocumentDecision'
 import { useFieldLabel } from './useFieldLabel'
 
 /**
@@ -32,13 +34,21 @@ export function DocumentRecord({ documentId }: { documentId: string }) {
   const [showAll, setShowAll] = useState(false)
   const [text, setText] = useState<DocumentTextView | null>(null)
   const [textOpen, setTextOpen] = useState(false)
+  // A person can say the document is something else at any time, not only while Arkiv still has a question about it.
+  const [changingType, setChangingType] = useState(false)
+  const { toast } = useToast()
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/arkiv/documents/${documentId}`)
+    if (!res.ok) throw new Error(String(res.status))
+    const { data } = (await res.json()) as { data: DocumentRecordView }
+    return data
+  }, [documentId])
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/arkiv/documents/${documentId}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status))
-        const { data } = (await res.json()) as { data: DocumentRecordView }
+    load()
+      .then((data) => {
         if (!cancelled) setView(data)
       })
       .catch(() => {
@@ -47,7 +57,7 @@ export function DocumentRecord({ documentId }: { documentId: string }) {
     return () => {
       cancelled = true
     }
-  }, [documentId])
+  }, [load])
 
   if (failed) return <p className="text-[13px] text-muted-foreground">{t('load_failed')}</p>
   if (!view) return <Skeleton className="h-40 w-full" />
@@ -82,12 +92,33 @@ export function DocumentRecord({ documentId }: { documentId: string }) {
         title={view.title}
         description={meta}
         action={
-          <Button asChild size="sm">
-            <a href={inlineHref(view.document_id, null)} target="_blank" rel="noreferrer">
-              {t('record_open_document')}
-            </a>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setChangingType(true)}>
+              {t('record_change_type')}
+            </Button>
+            <Button asChild size="sm">
+              <a href={inlineHref(view.document_id, null)} target="_blank" rel="noreferrer">
+                {t('record_open_document')}
+              </a>
+            </Button>
+          </div>
         }
+      />
+      <DocumentDecision
+        doc={
+          changingType
+            ? { document_id: view.document_id, file_name: view.file_name, created_at: view.created_at, page_count: view.page_count, doc_type: view.doc_type, question: 'type', summary: view.classification?.summary ?? null }
+            : null
+        }
+        onClose={() => setChangingType(false)}
+        onSaved={(message) => {
+          setChangingType(false)
+          toast({ title: message })
+          load()
+            .then(setView)
+            .catch(() => setFailed(true))
+        }}
+        onFailed={() => toast({ title: t('action_failed'), variant: 'destructive' })}
       />
       {(view.classification?.summary || signals.length > 0) && (
         <Section title={t('record_classification')}>
