@@ -28,7 +28,7 @@ export const HEIC_MIME_TYPES = ['image/heic', 'image/heif'] as const
  */
 export async function decodeHeicToJpeg(bytes: Buffer): Promise<Buffer> {
   const convert = (await import('heic-convert')).default
-  const out = await convert({ buffer: bytes as unknown as ArrayBufferLike, format: 'JPEG', quality: 0.9 })
+  const out = await convert({ buffer: bytes, format: 'JPEG', quality: 0.9 })
   return Buffer.from(out)
 }
 
