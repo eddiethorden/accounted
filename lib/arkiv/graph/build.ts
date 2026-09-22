@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { roundOre } from '@/lib/money'
+import { ACCOUNT_NUMBER_RE } from '@/lib/invariants'
 import { normalizeCounterpartyName } from '@/lib/bookkeeping/counterparty-templates'
 import { isPaymentText, merchantKey, merchantLabel } from './merchant-key'
 import { CLUSTER_LABELS, type ClusterId, type CompanyGraph, type GraphLink, type GraphNode } from './types'
@@ -65,7 +66,7 @@ function evidenceAccounts(evidence: Record<string, unknown> | null | undefined):
   if (typeof evidence?.account === 'string') out.add(evidence.account)
   if (Array.isArray(evidence?.accounts)) {
     for (const a of evidence.accounts) {
-      if (typeof a === 'string' && /^\d{4}$/.test(a)) out.add(a)
+      if (typeof a === 'string' && ACCOUNT_NUMBER_RE.test(a)) out.add(a)
       else if (a && typeof a === 'object' && typeof (a as { account?: unknown }).account === 'string') out.add((a as { account: string }).account)
     }
   }
