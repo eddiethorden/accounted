@@ -10385,6 +10385,7 @@
     "record_links": "Kopplingar",
     "record_source": "Källa",
     "record_open_document": "Öppna dokumentet",
+    "record_change_type": "Ändra typ",
     "record_open_page": "Öppna sida {page}",
     "record_under_review": "under granskning",
     "record_no_record": "Dokumentet har inte lästs till en post ännu.",
