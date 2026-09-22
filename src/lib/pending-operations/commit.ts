@@ -36,7 +36,7 @@ import { matchPairs, unmatchLink } from '@/lib/reconciliation/actions'
 import { signOffAccount } from '@/lib/reconciliation/signoff'
 import { bookResidualAndLink, ReconciliationResidualError } from '@/lib/reconciliation/residual'
 import { getErrorMessage } from '@/lib/errors/get-error-message'
-import { validateVatNumber } from '@/lib/vat/vies-client'
+import { validateVatNumber, vatValidationColumns } from '@/lib/vat/vies-client'
 import {
   isPersonalNumberOrgNumberDisallowed,
   normalizeReroutedPersonalNumber,
@@ -739,10 +739,8 @@ async function commitUpdateCustomer(
       if (changes.vat_number) {
         try {
           const vatResult = await validateVatNumber(changes.vat_number)
-          updateData.vat_number_validated = vatResult.valid
-          updateData.vat_number_validated_at = vatResult.valid
-            ? new Date().toISOString()
-            : null
+          const columns = vatValidationColumns(vatResult, current.vat_number, changes.vat_number)
+          if (columns) Object.assign(updateData, columns)
         } catch (err) {
           log.warn('Auto-VIES validation failed on staged customer update:', err)
           updateData.vat_number_validated = false

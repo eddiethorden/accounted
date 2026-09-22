@@ -1409,6 +1409,7 @@
     "vat_failed_title": "Verifiering misslyckades",
     "vat_failed_default": "VAT-numret kunde inte verifieras",
     "vat_error_title": "Kunde inte verifiera VAT-nummer",
+    "vat_unavailable_description": "VIES svarar inte just nu för det här landet. Det säger inget om numret, försök igen om en stund.",
     "payment_terms_label": "Betalningsvillkor (dagar)",
     "payment_terms_help": "Dagar från fakturadatum till förfallodag. 0 betyder betalning direkt.",
     "payment_terms_invalid": "Ange betalningsvillkor i hela dagar, 0 till 365. 0 betyder betalning direkt.",

@@ -5,7 +5,8 @@ import { encryptPersonnummer } from '@/lib/salary/personnummer'
 import { commitPendingOperation } from '../commit'
 import { validateVatNumber } from '@/lib/vat/vies-client'
 
-vi.mock('@/lib/vat/vies-client', () => ({
+vi.mock('@/lib/vat/vies-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/vat/vies-client')>()),
   validateVatNumber: vi.fn(),
 }))
 
@@ -159,6 +160,60 @@ describe('commitPendingOperation: update_customer', () => {
       vat_number_validated: true,
     })
     expect(validateVatNumber).toHaveBeenCalledWith('DE123456789')
+  })
+
+  it('keeps an earlier validation when VIES is unavailable for the same number', async () => {
+    vi.mocked(validateVatNumber).mockResolvedValueOnce({
+      valid: false,
+      unavailable: true,
+      country_code: 'FR',
+      vat_number: 'FR40303265045',
+      error: 'VAT validation service unavailable. Please try again later.',
+    })
+    const { supabase, enqueue, findCall } = createQueuedMockSupabase()
+    enqueue({ data: { id: 'op-customer-1' } })
+    enqueue({ data: { customer_type: 'eu_business', country: 'FR', vat_number: 'FR40303265045' } })
+    enqueue({ data: { id: CUSTOMER_ID, customer_type: 'eu_business', vat_number: 'FR40303265045', vat_number_validated: true } })
+    enqueue({ data: null })
+
+    const result = await commitPendingOperation(
+      supabase as never,
+      'user-1',
+      'company-1',
+      makePendingOp({
+        customer_id: CUSTOMER_ID,
+        changes: { vat_number: 'FR40303265045' },
+      }),
+    )
+
+    expect(result.status).toBe('committed')
+    const update = findCall('customers', 'update')?.[0] as Record<string, unknown>
+    expect(update).toBeDefined()
+    expect(update).not.toHaveProperty('vat_number_validated')
+    expect(update).not.toHaveProperty('vat_number_validated_at')
+  })
+
+  it('marks a changed number unverified when VIES is unavailable', async () => {
+    vi.mocked(validateVatNumber).mockResolvedValueOnce({ valid: false, unavailable: true })
+    const { supabase, enqueue, findCall } = createQueuedMockSupabase()
+    enqueue({ data: { id: 'op-customer-1' } })
+    enqueue({ data: { customer_type: 'eu_business', country: 'FR', vat_number: 'FR40303265045' } })
+    enqueue({ data: { id: CUSTOMER_ID, customer_type: 'eu_business', vat_number: 'FR12345678901', vat_number_validated: false } })
+    enqueue({ data: null })
+
+    const result = await commitPendingOperation(
+      supabase as never,
+      'user-1',
+      'company-1',
+      makePendingOp({
+        customer_id: CUSTOMER_ID,
+        changes: { vat_number: 'FR12345678901' },
+      }),
+    )
+
+    expect(result.status).toBe('committed')
+    const update = findCall('customers', 'update')?.[0] as Record<string, unknown>
+    expect(update).toMatchObject({ vat_number_validated: false, vat_number_validated_at: null })
   })
 
   it('clears the personal number when an individual becomes a business', async () => {

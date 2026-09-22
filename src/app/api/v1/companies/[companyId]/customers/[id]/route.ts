@@ -22,7 +22,7 @@ import { withApiV1 } from '@/lib/api/v1/with-api-v1'
 import { v1ErrorResponse, v1ErrorResponseFromCode, v1ValidationError } from '@/lib/api/v1/errors'
 import { readV1JsonBody } from '@/lib/api/v1/body'
 import { UpdateCustomerSchema } from '@/lib/api/schemas'
-import { validateVatNumber } from '@/lib/vat/vies-client'
+import { validateVatNumber, vatValidationColumns } from '@/lib/vat/vies-client'
 import { COUNTRY_CONSISTENCY_MESSAGES, checkCountryConsistency } from '@/lib/vat/country-codes'
 
 /** The stored fields the country-vs-type rule and the personnummer guards read. */
@@ -510,8 +510,20 @@ export const PATCH = withApiV1<{ params: Promise<{ companyId: string; id: string
         if (body.vat_number) {
           try {
             const vatResult = await validateVatNumber(body.vat_number)
-            updateData.vat_number_validated = vatResult.valid
-            updateData.vat_number_validated_at = vatResult.valid ? new Date().toISOString() : null
+            // Only an unavailable VIES needs the stored number: an outage
+            // must not wipe an earlier check of the same number.
+            const previousVatNumber = vatResult.unavailable
+              ? (
+                  await ctx.supabase
+                    .from('customers')
+                    .select('vat_number')
+                    .eq('company_id', ctx.companyId!)
+                    .eq('id', customerId)
+                    .maybeSingle()
+                ).data?.vat_number
+              : null
+            const columns = vatValidationColumns(vatResult, previousVatNumber, body.vat_number)
+            if (columns) Object.assign(updateData, columns)
           } catch (err) {
             ctx.log.warn('auto-VIES re-validation failed on customer update', err as Error)
             updateData.vat_number_validated = false

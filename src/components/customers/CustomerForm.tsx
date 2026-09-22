@@ -266,6 +266,16 @@ export default function CustomerForm({
         return
       }
 
+      if (result.unavailable) {
+        // No verdict from VIES: leave the button neutral, not a red cross.
+        toast({
+          title: t('vat_error_title'),
+          description: t('vat_unavailable_description'),
+          variant: 'destructive',
+        })
+        return
+      }
+
       setVatValidationResult({
         valid: result.valid,
         name: result.name,
