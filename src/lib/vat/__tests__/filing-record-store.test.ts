@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   listVatFilings,
   markVatPeriodFiled,
+  recordVatFilingConfirmed,
   unmarkVatPeriodFiled,
 } from '../filing-record-store'
 
@@ -386,5 +387,125 @@ describe('unmarkVatPeriodFiled', () => {
     await expect(
       unmarkVatPeriodFiled(alreadyPending.supabase, COMPANY, input, { today: TODAY }),
     ).resolves.toEqual({ ok: false, code: 'VAT_FILING_NOT_FOUND' })
+  })
+})
+
+describe('recordVatFilingConfirmed', () => {
+  const NOW = new Date('2026-09-08T10:30:42.000Z')
+
+  it('creates a confirmed row when the period predates the deadline calendar', async () => {
+    const { supabase, captured } = createStoreSupabase([
+      { data: null },
+      { data: { vat_taxable_base_over_40m: false } },
+      {
+        data: {
+          id: 'd-new',
+          tax_deadline_type: 'moms_quarterly',
+          tax_period: '2026-Q2',
+          is_completed: true,
+          completed_at: NOW.toISOString(),
+          status: 'confirmed',
+          notes: null,
+          due_date: '2026-08-17',
+        },
+      },
+    ])
+    const result = await recordVatFilingConfirmed(
+      supabase,
+      COMPANY,
+      { periodType: 'quarterly', year: 2026, period: 2 },
+      { now: NOW },
+    )
+    expect(result).toMatchObject({
+      created: true,
+      changed: true,
+      record: { source: 'skatteverket', tax_period: '2026-Q2', filed_on: '2026-09-08' },
+    })
+    expect(captured[2].insert).toMatchObject({
+      company_id: COMPANY,
+      title: 'Momsdeklaration Q2 2026',
+      due_date: '2026-08-17',
+      is_completed: true,
+      completed_at: NOW.toISOString(),
+      status: 'confirmed',
+      tax_deadline_type: 'moms_quarterly',
+      tax_period: '2026-Q2',
+      linked_report_period: { year: 2026, quarter: 2 },
+    })
+  })
+
+  it('confirms a pending row in place', async () => {
+    const { supabase, captured } = createStoreSupabase([
+      { data: pendingRow },
+      {
+        data: {
+          ...pendingRow,
+          is_completed: true,
+          completed_at: NOW.toISOString(),
+          status: 'confirmed',
+        },
+      },
+    ])
+    const result = await recordVatFilingConfirmed(
+      supabase,
+      COMPANY,
+      { periodType: 'quarterly', year: 2026, period: 2 },
+      { now: NOW },
+    )
+    expect(result).toMatchObject({ created: false, changed: true, record: { source: 'skatteverket' } })
+    expect(captured[1].update).toEqual({
+      is_completed: true,
+      completed_at: NOW.toISOString(),
+      status: 'confirmed',
+      status_changed_at: NOW.toISOString(),
+    })
+    expect(captured[1].filters).toContainEqual(['eq', 'id', 'd-q2'])
+    expect(captured[1].filters).toContainEqual(['eq', 'company_id', COMPANY])
+  })
+
+  it('upgrades a manual mark and keeps its reference', async () => {
+    const manual = {
+      ...pendingRow,
+      is_completed: true,
+      completed_at: '2026-09-03T12:00:00.000Z',
+      status: 'submitted',
+    }
+    const { supabase, captured } = createStoreSupabase([
+      { data: manual },
+      { data: { ...manual, completed_at: NOW.toISOString(), status: 'confirmed' } },
+    ])
+    const result = await recordVatFilingConfirmed(
+      supabase,
+      COMPANY,
+      { periodType: 'quarterly', year: 2026, period: 2 },
+      { now: NOW },
+    )
+    expect(result).toMatchObject({ created: false, changed: true })
+    expect(captured[1].update).not.toHaveProperty('notes')
+  })
+
+  it('leaves an already confirmed period untouched', async () => {
+    const confirmed = {
+      ...pendingRow,
+      is_completed: true,
+      completed_at: '2026-08-11T09:00:00.000Z',
+      status: 'confirmed',
+    }
+    const { supabase, captured } = createStoreSupabase([{ data: confirmed }])
+    const result = await recordVatFilingConfirmed(
+      supabase,
+      COMPANY,
+      { periodType: 'quarterly', year: 2026, period: 2 },
+      { now: NOW },
+    )
+    expect(result).toMatchObject({ created: false, changed: false })
+    expect(captured).toHaveLength(1)
+  })
+
+  it('throws on a read error', async () => {
+    const { supabase } = createStoreSupabase([{ error: { message: 'boom' } }])
+    await expect(
+      recordVatFilingConfirmed(supabase, COMPANY, { periodType: 'monthly', year: 2026, period: 7 }),
+    ).rejects.toMatchObject({ message: 'boom' })
   })
 })

@@ -222,8 +222,36 @@ export async function markVatPeriodFiled(
     return { ok: true, record, created: false, changed: true }
   }
 
-  // No row: build one the way the generator would (same title, due date and
-  // linked period), already completed.
+  // No row: build one the way the generator would, already completed.
+  const created = await insertCompletedPeriodRow(supabase, companyId, input, {
+    status: 'submitted',
+    completedAt: filedOnToCompletedAt(input.filedOn),
+    notes: withVatFilingReference(null, input.reference),
+    userId: input.userId ?? null,
+  })
+  const record = toRecord(created)
+  if (!record) throw new Error('vat filing: inserted deadline row did not read back as a filing')
+  return { ok: true, record, created: true, changed: true }
+}
+
+/**
+ * Insert the period's moms deadline row, already completed, the way the
+ * generator would build it (same title, due date and linked period). Used
+ * when the company has no row for the period: deadlines never generated, or
+ * the period predates the generator's window (a company created after the
+ * period's due date gets no row for it, yet may still file it).
+ */
+async function insertCompletedPeriodRow(
+  supabase: SupabaseClient,
+  companyId: string,
+  input: VatFilingPeriodInput,
+  fields: {
+    status: 'submitted' | 'confirmed'
+    completedAt: string
+    notes: string | null
+    userId: string | null
+  },
+): Promise<DeadlineRow> {
   const { data: settings, error: settingsError } = await supabase
     .from('company_settings')
     .select('vat_taxable_base_over_40m')
@@ -243,17 +271,17 @@ export async function markVatPeriodFiled(
     .from('deadlines')
     .insert({
       company_id: companyId,
-      user_id: input.userId ?? null,
+      user_id: fields.userId,
       title: `Momsdeklaration ${instance.periodLabel}`,
       due_date: dueDate,
       deadline_type: 'tax',
       priority: 'important',
       is_completed: true,
-      completed_at: filedOnToCompletedAt(input.filedOn),
+      completed_at: fields.completedAt,
       source: 'system',
-      status: 'submitted',
-      status_changed_at: now,
-      notes: withVatFilingReference(null, input.reference),
+      status: fields.status,
+      status_changed_at: new Date().toISOString(),
+      notes: fields.notes,
       tax_deadline_type: vatFilingDeadlineType(input.periodType),
       tax_period: instance.period,
       linked_report_type: 'vat',
@@ -267,9 +295,59 @@ export async function markVatPeriodFiled(
     .select('id, tax_deadline_type, tax_period, is_completed, completed_at, status, notes, due_date')
     .single()
   if (error) throw error
-  const record = toRecord(data as DeadlineRow)
+  return data as DeadlineRow
+}
+
+/**
+ * Record a filing Skatteverket has confirmed (a declaration observed at
+ * /inlamnat after the user signed it): the period's moms deadline becomes
+ * completed with status 'confirmed', or is created that way when the company
+ * has no row for the period. A manual 'submitted' mark is upgraded, since
+ * the kvittens is the stronger fact; its stored reference is kept.
+ *
+ * Without the insert, a period filed through the connection but missing from
+ * the deadline calendar left no record at all, and the momsdeklaration page
+ * kept opening the filed period (PostHog ticket 47).
+ */
+export async function recordVatFilingConfirmed(
+  supabase: SupabaseClient,
+  companyId: string,
+  input: VatFilingPeriodInput,
+  opts: { now?: Date; userId?: string | null } = {},
+): Promise<{ record: VatFilingRecord; created: boolean; changed: boolean }> {
+  const nowIso = (opts.now ?? new Date()).toISOString()
+  const existing = await findPeriodRow(supabase, companyId, input)
+
+  if (existing) {
+    const confirmed = confirmedRecord(existing)
+    if (confirmed) return { record: confirmed, created: false, changed: false }
+    const { data, error } = await supabase
+      .from('deadlines')
+      .update({
+        is_completed: true,
+        completed_at: nowIso,
+        status: 'confirmed',
+        status_changed_at: nowIso,
+      })
+      .eq('id', existing.id)
+      .eq('company_id', companyId)
+      .select('id, tax_deadline_type, tax_period, is_completed, completed_at, status, notes, due_date')
+      .single()
+    if (error) throw error
+    const record = toRecord(data as DeadlineRow)
+    if (!record) throw new Error('vat filing: confirmed deadline row did not read back as a filing')
+    return { record, created: false, changed: true }
+  }
+
+  const created = await insertCompletedPeriodRow(supabase, companyId, input, {
+    status: 'confirmed',
+    completedAt: nowIso,
+    notes: null,
+    userId: opts.userId ?? null,
+  })
+  const record = toRecord(created)
   if (!record) throw new Error('vat filing: inserted deadline row did not read back as a filing')
-  return { ok: true, record, created: true, changed: true }
+  return { record, created: true, changed: true }
 }
 
 /**
