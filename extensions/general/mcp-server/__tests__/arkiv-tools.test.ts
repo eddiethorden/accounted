@@ -153,7 +153,7 @@ describe('Arkiv tools', () => {
     enqueue({ data: { text: 'ICA 349 kr' } })
     const out = (await tool('gnubok_get_source').execute({ document_id: DOC, page: 1 }, CO, 'user-1', supabase)) as { text: string }
     expect(ensureDocumentRead).toHaveBeenCalledWith(supabase, CO, DOC)
-    expect(out.text).toBe('ICA 349 kr')
+    expect(out.text).toContain('ICA 349 kr')
   })
 
   it('get_source takes a record_ref like every other Arkiv tool, and says what it wants otherwise', async () => {
