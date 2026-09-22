@@ -113,7 +113,7 @@ describe('deriveDocument', () => {
     expect(findCall('agreements', 'upsert')?.[0]).toMatchObject({ counterparty_name: 'Fastighets AB Kvarnen', title: 'Hyresavtal Vasagatan 12' })
   })
 
-
+  it('on a rerun updates what changed and leaves settled, dismissed and completed rows alone', async () => {
     enqueue({ data: DOC })
     enqueue({ data: extraction() })
     enqueue({ data: { id: 'agr-1' } })
