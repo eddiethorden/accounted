@@ -18,6 +18,14 @@ vi.mock('@/lib/invoices/clear-settled-invoice-suggestions', () => ({
   clearSettledInvoiceSuggestions: mockClearSuggestions,
 }))
 
+// The archived-PDF anchoring after a link: mocked so it takes no slot in the
+// queued Supabase mock; its query shape is pinned by
+// lib/core/documents/__tests__/customer-invoice-underlag.test.ts.
+const { mockAnchorCustomerDoc } = vi.hoisted(() => ({ mockAnchorCustomerDoc: vi.fn() }))
+vi.mock('@/lib/core/documents/customer-invoice-underlag', () => ({
+  anchorCustomerInvoiceDocument: mockAnchorCustomerDoc,
+}))
+
 // ============================================================
 // validateVoucherForInvoiceLink: happy path + reject codes
 // ============================================================
@@ -751,6 +759,33 @@ describe('linkInvoiceToVoucher', () => {
     expect(result.ok).toBe(true)
     expect(mockClearSuggestions).toHaveBeenCalledTimes(1)
     expect(mockClearSuggestions).toHaveBeenCalledWith(supabase, 'company-1', 'invoice', 'inv-1')
+  })
+
+  it('attaches the invoice PDF to the linked verifikat as underlag after a successful link', async () => {
+    const { supabase, enqueue } = createQueuedMockSupabase()
+    enqueueRpcOk(enqueue, 'paid')
+
+    const result = await linkInvoiceToVoucher(supabase as never, 'user-1', 'company-1', {
+      invoiceId: 'inv-1',
+      journalEntryId: 'je-1',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mockAnchorCustomerDoc).toHaveBeenCalledTimes(1)
+    expect(mockAnchorCustomerDoc).toHaveBeenCalledWith(supabase, 'company-1', 'inv-1')
+  })
+
+  it('does not touch the invoice PDF when the RPC rejects the link', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { ok: false, code: 'LINK_VOUCHER_INVOICE_FULLY_PAID' },
+      error: null,
+    })
+    const result = await linkInvoiceToVoucher({ rpc } as never, 'user-1', 'company-1', {
+      invoiceId: 'inv-1',
+      journalEntryId: 'je-1',
+    })
+    expect(result.ok).toBe(false)
+    expect(mockAnchorCustomerDoc).not.toHaveBeenCalled()
   })
 
   it('leaves the suggestions alone on a partial payment: the invoice is still matchable', async () => {

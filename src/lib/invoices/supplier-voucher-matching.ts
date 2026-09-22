@@ -30,6 +30,7 @@ import {
 } from './invoice-matching'
 import { autoReconcileTransactionForLinkedVoucher } from '@/lib/reconciliation/bank-reconciliation'
 import { clearSettledInvoiceSuggestions } from './clear-settled-invoice-suggestions'
+import { anchorSupplierInvoiceDocument } from '@/lib/core/documents/supplier-invoice-underlag'
 import { documentCurrency, ledgerLineSideAmountIn } from '@/lib/bookkeeping/ledger-line-amount'
 import type { SupplierInvoice, Supplier } from '@/types'
 import { fetchEntryLines, type EntryLinesQuery } from '@/lib/bookkeeping/entry-lines'
@@ -841,6 +842,12 @@ export async function linkSupplierInvoiceToVoucher(
       })
     }
   }
+
+  // Anchor the invoice's retained document to its verifikat when it is still
+  // floating (kontantmetoden with no registration verifikat), exactly as the
+  // mark-paid and match routes do. Otherwise it waited for the daily sweep.
+  // Idempotent and never throws: the link has already committed.
+  await anchorSupplierInvoiceDocument(supabase, companyId, params.supplierInvoiceId)
 
   // Close the loop on the bank feed: the link above only advanced the supplier
   // invoice, leaving the bank transaction that paid it in the Transactions
