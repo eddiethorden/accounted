@@ -8,8 +8,10 @@ vi.mock('@/lib/documents/provenance', () => ({
   recordActivity: vi.fn(async () => 'activity-1'),
 }))
 vi.mock('../counterparty', () => ({ resolveCounterparty: vi.fn() }))
+vi.mock('@/lib/arkiv/graph/snapshot', () => ({ markCompanyGraphStale: vi.fn(async () => undefined) }))
 
-import { deriveDocument, initialDeadlineStatus, linkByPerson, needsRederivation } from '../store'
+import { deriveDocument, initialDeadlineStatus, linkByPerson, needsRederivation, withdrawDerivedAgreement } from '../store'
+import { markCompanyGraphStale } from '@/lib/arkiv/graph/snapshot'
 import { resolveCounterparty } from '../counterparty'
 import { recordActivity } from '@/lib/documents/provenance'
 import type { ExtractedField, Payload } from '@/lib/documents/extract/fields'
@@ -149,6 +151,40 @@ describe('linkByPerson', () => {
     expect(findCall('document_links', 'insert')?.[0]).toMatchObject({ target_kind: 'asset', asset_id: 'asset-1', basis: 'proven', method: 'person', created_by_user_id: 'user-1', activity_id: 'activity-1' })
     enqueue({ error: { code: '23505', message: 'dup' } })
     await expect(linkByPerson(supabase, { companyId: 'co-1', documentId: 'doc-1', userId: 'user-1', targetKind: 'asset', targetId: 'asset-1' })).resolves.toEqual({ conflict: true })
+  })
+})
+
+describe('withdrawDerivedAgreement', () => {
+  it('deprecates the facts, deletes the deadlines and the agreement, and marks the graph stale', async () => {
+    enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'subscription' } })
+    enqueue({ data: [{ id: 'fact-1' }, { id: 'fact-2' }] })
+    enqueue({ data: 'fact-0' })
+    enqueue({ data: null })
+    enqueue({ data: [{ id: 'dl-1' }] })
+    enqueue({ error: null })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'supplier_invoice', 'Dokumentet är supplier_invoice, inte ett avtal')).resolves.toEqual({ status: 'withdrawn', agreementId: 'agr-1', facts: 2, deadlines: 1 })
+    expect(mock.supabase.rpc).toHaveBeenCalledTimes(2)
+    expect(mock.supabase.rpc).toHaveBeenCalledWith('revert_company_fact', { p_fact_id: 'fact-1', p_reason: 'Dokumentet är supplier_invoice, inte ett avtal' })
+    expect(findCall('deadlines', 'like')).toEqual(['source_key', 'agreement:agr-1:%'])
+    expect(findCall('agreements', 'delete')).toBeDefined()
+    expect(findCalls('agreements', 'eq')).toEqual([['source_document_id', 'doc-1'], ['id', 'agr-1']])
+    expect(markCompanyGraphStale).toHaveBeenCalledWith(supabase, 'co-1')
+  })
+
+  it('withdraws nothing when the document made no agreement or the new type is the same kind', async () => {
+    enqueue({ data: null })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'receipt', 'x')).resolves.toEqual({ status: 'skipped', reason: 'no_agreement' })
+    enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'subscription' } })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'agreement.subscription', 'x')).resolves.toEqual({ status: 'skipped', reason: 'same_kind' })
+    expect(findCall('agreements', 'delete')).toBeUndefined()
+    expect(mock.supabase.rpc).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed write as an error', async () => {
+    enqueue({ data: { id: 'agr-1', company_id: 'co-1', kind: 'loan' } })
+    enqueue({ data: [] })
+    enqueue({ error: { message: 'boom' } })
+    await expect(withdrawDerivedAgreement(supabase, 'doc-1', 'other', 'x')).resolves.toEqual({ status: 'error', reason: 'deadlines delete failed: boom' })
   })
 })
 
