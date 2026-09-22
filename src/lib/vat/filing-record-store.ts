@@ -321,11 +321,14 @@ export async function recordVatFilingConfirmed(
   if (existing) {
     const confirmed = confirmedRecord(existing)
     if (confirmed) return { record: confirmed, created: false, changed: false }
+    // Upgrading a manual 'submitted' mark keeps the user's filed-on date: the
+    // kvittens confirms that filing, it does not move when it happened.
+    const completedAt = existing.is_completed && existing.completed_at ? existing.completed_at : nowIso
     const { data, error } = await supabase
       .from('deadlines')
       .update({
         is_completed: true,
-        completed_at: nowIso,
+        completed_at: completedAt,
         status: 'confirmed',
         status_changed_at: nowIso,
       })

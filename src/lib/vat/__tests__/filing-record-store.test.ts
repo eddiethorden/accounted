@@ -484,6 +484,32 @@ describe('recordVatFilingConfirmed', () => {
     expect(captured[1].update).not.toHaveProperty('notes')
   })
 
+  it('upgrades a manual mark without moving its filed-on date', async () => {
+    const manual = {
+      ...pendingRow,
+      is_completed: true,
+      completed_at: '2026-09-03T12:00:00.000Z',
+      status: 'submitted',
+    }
+    const { supabase, captured } = createStoreSupabase([
+      { data: manual },
+      { data: { ...manual, status: 'confirmed' } },
+    ])
+    const result = await recordVatFilingConfirmed(
+      supabase,
+      COMPANY,
+      { periodType: 'quarterly', year: 2026, period: 2 },
+      { now: NOW },
+    )
+    expect(captured[1].update).toEqual({
+      is_completed: true,
+      completed_at: '2026-09-03T12:00:00.000Z',
+      status: 'confirmed',
+      status_changed_at: NOW.toISOString(),
+    })
+    expect(result.record).toMatchObject({ source: 'skatteverket', filed_on: '2026-09-03' })
+  })
+
   it('leaves an already confirmed period untouched', async () => {
     const confirmed = {
       ...pendingRow,
