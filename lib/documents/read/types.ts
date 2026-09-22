@@ -60,7 +60,7 @@ export const OFFICE_MIME_TYPES = [
   'text/csv',
 ] as const
 
-export const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
+export const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'] as const
 export const TEXT_MIME_TYPES = ['text/plain', 'text/html', 'application/xhtml+xml'] as const
 /** Archived as-is, never read into pages: the file IS the structured record. */
 export const STRUCTURED_MIME_TYPES = ['application/xml', 'text/xml', 'application/json'] as const

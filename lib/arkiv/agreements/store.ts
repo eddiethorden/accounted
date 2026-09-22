@@ -3,7 +3,9 @@ import type { Payload } from '@/lib/documents/extract/fields'
 import { humanAgent, recordActivity, softwareAgent } from '@/lib/documents/provenance'
 import { addDays, addMonths, daysBetween, todayIso } from './dates'
 import { resolveCounterparty } from './counterparty'
-import { deriveAgreement, HORIZON, type AgreementDraft, type DeadlineDraft, type Derivation, type ObligationDraft } from './derive'
+import { agreementKindFor, deriveAgreement, HORIZON, type AgreementDraft, type DeadlineDraft, type Derivation, type ObligationDraft } from './derive'
+import { listLiveFacts, revertFact } from '@/lib/arkiv/facts/store'
+import { markCompanyGraphStale } from '@/lib/arkiv/graph/snapshot'
 
 /**
  * Arkiv phase 4: turn the current record of an agreement into rows that
@@ -126,6 +128,52 @@ export async function deriveDocument(supabase: SupabaseClient, documentId: strin
       status: 'error',
       reason: (err instanceof Error ? err.message : String(err)).slice(0, 300),
     }
+  }
+}
+
+export type WithdrawOutcome =
+  | { status: 'withdrawn'; agreementId: string; facts: number; deadlines: number }
+  | { status: 'skipped'; reason: 'not_found' | 'no_agreement' | 'same_kind' }
+  | { status: 'error'; reason: string }
+
+/**
+ * A person says the document is not what the model read it as, so what that
+ * reading derived goes: the agreement (its obligations and links cascade), the
+ * deadlines it put in the calendar, and its facts, which are deprecated with
+ * the reason rather than deleted. When the new type is the same kind of
+ * agreement, nothing is withdrawn: the re-extraction refreshes the record in
+ * place. Prod 2026-09-21: a subscription invoice typed as an agreement left an
+ * agreement, two obligations, a deadline and seven facts behind after retype.
+ */
+export async function withdrawDerivedAgreement(supabase: SupabaseClient, documentId: string, newDocType: string, reason: string): Promise<WithdrawOutcome> {
+  try {
+    const { data, error } = await supabase
+      .from('agreements')
+      .select('id, company_id, kind')
+      .eq('source_document_id', documentId)
+      .maybeSingle()
+    if (error) throw new Error(`agreement fetch failed: ${error.message}`)
+    if (!data) return { status: 'skipped', reason: 'no_agreement' }
+    const agreement = data as { id: string; company_id: string; kind: string }
+    if (agreementKindFor(newDocType) === agreement.kind) return { status: 'skipped', reason: 'same_kind' }
+
+    const facts = await listLiveFacts(supabase, agreement.company_id, { kind: 'agreement', id: agreement.id })
+    for (const fact of facts) await revertFact(supabase, fact.id, reason)
+
+    const { data: gone, error: deadlineError } = await supabase
+      .from('deadlines')
+      .delete()
+      .eq('company_id', agreement.company_id)
+      .like('source_key', `agreement:${agreement.id}:%`)
+      .select('id')
+    if (deadlineError) throw new Error(`deadlines delete failed: ${deadlineError.message}`)
+
+    const { error: deleteError } = await supabase.from('agreements').delete().eq('id', agreement.id)
+    if (deleteError) throw new Error(`agreement delete failed: ${deleteError.message}`)
+    await markCompanyGraphStale(supabase, agreement.company_id)
+    return { status: 'withdrawn', agreementId: agreement.id, facts: facts.length, deadlines: (gone ?? []).length }
+  } catch (err) {
+    return { status: 'error', reason: (err instanceof Error ? err.message : String(err)).slice(0, 300) }
   }
 }
 

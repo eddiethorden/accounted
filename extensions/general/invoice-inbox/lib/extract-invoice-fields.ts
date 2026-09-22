@@ -461,8 +461,10 @@ export function emptyResult(): InvoiceExtractionResult {
 // large image. HEIC/HEIF (iPhone default) is transcoded to JPEG when the
 // local sharp/libvips build can decode it; prebuilt binaries usually cannot
 // (patent licensing), in which case the caller falls through to the
-// unsupported-type path exactly as before.
-const IMAGE_DOWNSCALE_THRESHOLD_BYTES = 4 * 1024 * 1024
+// unsupported-type path exactly as before. The 5 MB limit is on the base64
+// the API receives, 4/3 of the file, so the file threshold is 3.75 MB, not 4:
+// a 4.13 MB photo was refused as "5506368 bytes > 5242880" (2026-09-22).
+const IMAGE_DOWNSCALE_THRESHOLD_BYTES = Math.floor(3.5 * 1024 * 1024)
 const IMAGE_MAX_DIMENSION = 2000
 
 async function normalizeImageForExtraction(
