@@ -108,9 +108,13 @@ export function ArkivSearch({ query, onQueryChange }: { query: string; onQueryCh
                   {hits.map((hit) => (
                     <li key={`${hit.record_ref}:${hit.page ?? 0}`} className="flex items-start justify-between gap-4 py-2">
                       <div className="min-w-0">
-                        <Link href={hit.href} className={`${QUIET_LINK_CLASS} text-[13px] text-foreground`}>
-                          {hit.title}
-                        </Link>
+                        {hit.href ? (
+                          <Link href={hit.href} className={`${QUIET_LINK_CLASS} text-[13px] text-foreground`}>
+                            {hit.title}
+                          </Link>
+                        ) : (
+                          <span className="text-[13px] text-foreground">{hit.title}</span>
+                        )}
                         {hit.subtitle ? <span className="ml-2 text-[11px] text-muted-foreground">{hit.subtitle}</span> : null}
                         {hit.snippet ? (
                           <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">

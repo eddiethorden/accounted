@@ -88,7 +88,7 @@ export function AgreementRecord({ agreementId }: { agreementId: string }) {
       role: 'counterparty',
       key: 'party',
       label: view.counterparty.name,
-      href: view.counterparty.party_id ? `/parties/${view.counterparty.party_id}` : null,
+      href: view.counterparty.party_id ? `/parties?party=${view.counterparty.party_id}` : null,
       color: 'dark',
     })
   const others = view.documents.filter((d) => d.document_id !== view.source.document_id)
@@ -248,7 +248,7 @@ export function AgreementRecord({ agreementId }: { agreementId: string }) {
             {view.counterparty.name ? (
               <DefRow label={t('col_counterparty')}>
                 {view.counterparty.party_id ? (
-                  <Link href={`/parties/${view.counterparty.party_id}`} className={QUIET_LINK_CLASS}>
+                  <Link href={`/parties?party=${view.counterparty.party_id}`} className={QUIET_LINK_CLASS}>
                     {view.counterparty.name}
                   </Link>
                 ) : (

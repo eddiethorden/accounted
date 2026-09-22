@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { ContextPicker } from '@/components/common/ContextPicker'
 import { AttnLine } from '@/components/ui/attn-line'
@@ -65,6 +66,13 @@ function CounterpartsPage() {
   const [merge, setMerge] = useState<{ subject: MergeCandidate; suggested: MergeCandidate[] } | null>(null)
   const [picker, setPicker] = useState<{ partyId: string; name: string } | null>(null)
   const [rename, setRename] = useState<{ row: CounterpartRow; name: string } | null>(null)
+  const searchParams = useSearchParams()
+
+  // ?party=<id> opens the dossier straight away: the archive and the graph link to a counterparty this way.
+  useEffect(() => {
+    const id = searchParams.get('party')
+    if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) setDossierId(id)
+  }, [searchParams])
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(query.trim()), 250)

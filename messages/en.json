@@ -10554,7 +10554,8 @@
       "orgnr_luhn": "Not a valid organisation number",
       "non_negative": "The amount is negative",
       "percent_range": "The percentage is outside 0 to 100",
-      "date_order": "The date is before the start date"
+      "date_order": "The date is before the start date",
+      "audit": "Spot check: Arkiv read this on its own and asks you to confirm"
     },
     "fields": {
       "amortisation_free_months": "Amortisation-free months",

@@ -25,8 +25,8 @@ export interface ArkivSearchHit {
   /** The matching passage for a page hit (matches wrapped in <b>), the kind and counterparty for an agreement, nothing for a fact. */
   snippet: string | null
   page: number | null
-  /** The record page. */
-  href: string
+  /** The record page; null for a fact with no page of its own (read off the ledger or the registers). */
+  href: string | null
   /** The original file, opened at the page it was read from. */
   source_href: string | null
 }
@@ -101,7 +101,7 @@ export const GET = withRouteContext('arkiv.search', async (request, ctx) => {
     if (i.kind === 'agreement') {
       return { record_ref: i.record_ref, kind: i.kind, title: i.title, subtitle: null, snippet: i.snippet, page: null, href: `/arkiv/avtal/${id}`, source_href: null }
     }
-    // A fact has no page of its own: it opens where it was read from, or the company facts when it was typed in.
+    // A fact has no page of its own: it opens where it was read from; one read off the ledger or the registers is the hit itself.
     return {
       record_ref: i.record_ref,
       kind: i.kind,
@@ -109,7 +109,7 @@ export const GET = withRouteContext('arkiv.search', async (request, ctx) => {
       subtitle: null,
       snippet: null,
       page: null,
-      href: i.document_id ? `/arkiv/dokument/${i.document_id}` : '/arkiv/myndighet',
+      href: i.document_id ? `/arkiv/dokument/${i.document_id}` : null,
       source_href: i.document_id ? inlineHref(i.document_id, null) : null,
     }
   })

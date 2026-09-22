@@ -62,7 +62,8 @@ describe('GET /api/arkiv/search', () => {
             source_href: `/api/documents/${DOC}/inline#page=2`,
           },
           { record_ref: `agreement:${AGR}`, kind: 'agreement', title: 'Hyresavtal Vasagatan 12', subtitle: null, snippet: 'rental · Kvarnen AB', page: null, href: `/arkiv/avtal/${AGR}`, source_href: null },
-          { record_ref: 'fact:f1', kind: 'fact', title: 'Momsperiod: kvartal', subtitle: null, snippet: null, page: null, href: '/arkiv/myndighet', source_href: null },
+          // A fact read off the ledger or the registers has no page of its own: the hit is the answer.
+          { record_ref: 'fact:f1', kind: 'fact', title: 'Momsperiod: kvartal', subtitle: null, snippet: null, page: null, href: null, source_href: null },
         ],
       },
     })

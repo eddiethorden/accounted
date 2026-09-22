@@ -47,14 +47,21 @@ export function hrefFor(node: GraphNode, graph: CompanyGraph): string | null {
     case 'document':
       return `/arkiv/dokument/${id}`
     case 'party':
-      return `/parties/${id}`
+      // The counterparty dossier is a sheet on the list, opened by the query.
+      return `/parties?party=${id}`
     case 'person':
       return `/salary/employees/${id}`
-    case 'fact':
+    case 'fact': {
+      // A fact opens the document it was read from; a ledger fact, the account it was read off; nothing else has a page.
+      const source = graph.links.find((x) => x.kind === 'source' && x.source === node.ref && x.target.startsWith('document:'))
+      if (source) return `/arkiv/dokument/${source.target.slice('document:'.length)}`
+      const account = graph.links.find((x) => x.kind === 'link' && x.source === node.ref && x.target.startsWith('account:'))
+      return account ? `/reports/huvudbok?account=${encodeURIComponent(account.target.slice('account:'.length))}` : null
+    }
     case 'authority':
       return '/arkiv/myndighet'
     case 'account':
-      return `/reports/general-ledger?account=${encodeURIComponent(String(node.meta.account ?? id))}`
+      return `/reports/huvudbok?account=${encodeURIComponent(String(node.meta.account ?? id))}`
     case 'deadline':
       return '/deadlines'
     case 'expected':
@@ -67,6 +74,8 @@ export function hrefFor(node: GraphNode, graph: CompanyGraph): string | null {
       return '/parties'
     case 'merchant':
       return '/transactions'
+    case 'documents_folded':
+      return node.meta.group === 'authority' ? '/arkiv/myndighet' : null
     default:
       return null
   }

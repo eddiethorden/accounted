@@ -42,6 +42,6 @@ describe('GET /api/arkiv/documents/[id]', () => {
     expect(view).toMatchObject({ file_name: 'Registreringsbevis.pdf', journal_entry: { id: 'je-1', voucher: 'A7' }, classification: { summary: 'Registreringsbevis för Arcim Technology AB.' } })
     expect((view.record as { fields: unknown[] }).fields).toEqual([{ field: 'org_number', label: 'org_number', value: '5595386219', page: 2, quote: 'Organisationsnummer 559538-6219', confidence: 1, under_review: false }])
     expect(view.facts).toEqual([{ fact_id: 'f1', predicate: 'org_number', label: 'Organisationsnummer', value_text: '5595386219', valid_from: null, sys_from: '2026-09-15', source_kind: 'extraction', superseded_by: false }])
-    expect(view.links).toEqual([{ link_id: 'l1', target_kind: 'party', target_id: 'p1', basis: 'proven', method: 'org_number', label: 'Bolagsverket', href: '/parties/p1' }])
+    expect(view.links).toEqual([{ link_id: 'l1', target_kind: 'party', target_id: 'p1', basis: 'proven', method: 'org_number', label: 'Bolagsverket', href: '/parties?party=p1' }])
   })
 })

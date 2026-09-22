@@ -51,6 +51,14 @@ describe('mergeReadings', () => {
     expect(out.reviewFields).toEqual(['maturity_on'])
   })
 
+  it('treats a placeholder written where the schema says null as no reading, so nobody is asked to confirm it', () => {
+    for (const placeholder of ['Not printed in document', 'not stated', 'N/A', 'Framgår ej av dokumentet', 'saknas', '-']) {
+      const out = mergeReadings(loan, reading({ ...LENDER, lender_org_number: { value: placeholder } }), reading(LENDER))
+      expect(out.payload.lender_org_number, placeholder).toMatchObject({ value: null, normalized: null })
+      expect(out.reviewFields, placeholder).toEqual([])
+    }
+  })
+
   it('fails the required check when both readings miss a required field', () => {
     const lenderOnly = reading({ lender_name: LENDER.lender_name })
     const out = mergeReadings(loan, lenderOnly, lenderOnly)

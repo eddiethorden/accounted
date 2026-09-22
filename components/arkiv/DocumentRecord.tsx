@@ -287,7 +287,7 @@ export function DocumentRecord({ documentId, initialPage = null }: { documentId:
             <DefList className="text-[13px]">
               {view.journal_entry && (
                 <DefRow label={t('linked_verifikat')}>
-                  <Link href={`/bookkeeping?entry=${view.journal_entry.id}`} className={QUIET_LINK_CLASS}>
+                  <Link href={`/bookkeeping/${view.journal_entry.id}`} className={QUIET_LINK_CLASS}>
                     {t('record_verifikat', { voucher: view.journal_entry.voucher })}
                   </Link>
                 </DefRow>

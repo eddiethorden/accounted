@@ -170,7 +170,7 @@ export const GET = withRouteContext('arkiv.document', async (_request, ctx, { pa
       basis: l.basis,
       method: l.method,
       label: l.party_id ? (partyName.get(l.party_id) ?? null) : l.agreement_id ? ((agreement.data as { title: string } | null)?.title ?? null) : null,
-      href: l.party_id ? `/parties/${l.party_id}` : l.agreement_id ? `/arkiv/avtal/${l.agreement_id}` : l.asset_id ? '/assets' : null,
+      href: l.party_id ? `/parties?party=${l.party_id}` : l.agreement_id ? `/arkiv/avtal/${l.agreement_id}` : l.asset_id ? '/assets' : null,
     })),
     agreement: (agreement.data as { id: string; title: string } | null) ?? null,
   }

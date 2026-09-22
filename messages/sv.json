@@ -10554,7 +10554,8 @@
       "orgnr_luhn": "Inte ett giltigt organisationsnummer",
       "non_negative": "Beloppet är negativt",
       "percent_range": "Procentsatsen ligger utanför 0 till 100",
-      "date_order": "Datumet ligger före startdatumet"
+      "date_order": "Datumet ligger före startdatumet",
+      "audit": "Stickprov: Arkiv läste det här på egen hand och ber dig bekräfta"
     },
     "fields": {
       "amortisation_free_months": "Amorteringsfria månader",

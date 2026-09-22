@@ -130,7 +130,7 @@ export function ArkivAgreements() {
                 <td className={`${TD_CLASS} tabular-nums`}>{a.ends_on ? formatDateLong(a.ends_on, locale) : ''}</td>
                 <td className={`${TD_CLASS} tabular-nums`}>{a.notice_deadline ? formatDateLong(a.notice_deadline.due_date, locale) : ''}</td>
                 <td className={`${TD_CLASS} pr-0`}>
-                  <a href={sourceHref(a)} target="_blank" rel="noreferrer" className={QUIET_LINK_CLASS} title={a.source.file_name}>
+                  <a href={sourceHref(a)} target="_blank" rel="noreferrer" className={QUIET_LINK_CLASS} title={a.source.file_name} onClick={(e) => e.stopPropagation()}>
                     {a.source.page ? t('source_page', { page: a.source.page }) : t('source_open')}
                   </a>
                 </td>

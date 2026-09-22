@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { ARKIV } from './palette'
 
 /**
@@ -44,6 +45,7 @@ const COLOR = { sage: ARKIV.sage, ochre: ARKIV.ochre, dark: 'var(--foreground)',
 const point = (deg: number, r: number) => ({ x: CX + r * Math.cos((deg * Math.PI) / 180), y: CY + r * Math.sin((deg * Math.PI) / 180) })
 
 export function AgreementLinksGraph({ title, nodes }: { title: string; nodes: Array<LinkNode & { role: keyof typeof ANGLES }> }) {
+  const t = useTranslations('arkiv')
   return (
     <div className="w-full max-w-[460px]">
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={title}>
@@ -71,17 +73,17 @@ export function AgreementLinksGraph({ title, nodes }: { title: string; nodes: Ar
                   {n.sub}
                 </text>
               )}
-              {n.href && n.lit && (
+              {n.href && (
                 <a href={n.href} target={n.external ? '_blank' : undefined} rel={n.external ? 'noreferrer' : undefined}>
                   <text
                     x={labelX}
-                    y={p.y + 22}
+                    y={p.y + (n.sub ? 22 : 10)}
                     fontSize={11}
                     textAnchor={anchor}
                     className="fill-foreground underline"
                     style={{ textDecoration: 'underline', textUnderlineOffset: 2 }}
                   >
-                    {n.sub ? 'Öppna dokumentet' : ''}
+                    {n.external ? t('record_open_document') : t('graph_open')}
                   </text>
                 </a>
               )}

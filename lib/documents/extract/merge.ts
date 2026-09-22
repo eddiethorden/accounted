@@ -64,10 +64,24 @@ function settle(kind: FieldKind, readings: [Reading, Reading], normalized: [stri
   return normalized[0] == null || normalized[1] == null ? 'one_reading' : 'disagreed'
 }
 
+/**
+ * A model that writes "Not printed in document" where the schema says null
+ * has made no reading: the placeholder must never become a value a person is
+ * asked to confirm, nor a fact.
+ */
+const PLACEHOLDER_RE = /^(?:n\/?a|none|null|unknown|okänd|okänt|saknas|ej angive[tn]|anges (?:ej|inte)|framgår (?:ej|inte)(?: av dokumentet)?|not (?:printed|stated|specified|provided|present|found|available|applicable|given|shown|listed|mentioned|included|visible)(?: (?:in|on) (?:the )?document)?|-+)\.?$/i
+
+function readValue(v: unknown): string | number | null {
+  if (typeof v === 'number') return v
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  return s && !PLACEHOLDER_RE.test(s) ? v : null
+}
+
 function toReading(raw: unknown): Reading {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   return {
-    value: typeof r.value === 'string' || typeof r.value === 'number' ? r.value : null,
+    value: readValue(r.value),
     page: typeof r.page === 'number' && Number.isInteger(r.page) && r.page >= 1 ? r.page : null,
     quote: typeof r.quote === 'string' && r.quote.trim() ? r.quote.trim().slice(0, 200) : null,
   }
