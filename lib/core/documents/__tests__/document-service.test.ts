@@ -886,8 +886,8 @@ describe('uploadDocument: document.uploaded subscribers and the response', () =>
       return doc
     })
 
-    await drain()
-    expect(slow.handler).toHaveBeenCalledOnce()
+    // The subscriber runs after several awaits inside uploadDocument: wait for it rather than one timer tick (CI flaked 3 times on 2026-09-22).
+    await vi.waitFor(() => expect(slow.handler).toHaveBeenCalledOnce())
     expect(settled).toBe(false)
 
     slow.release()
@@ -909,8 +909,7 @@ describe('uploadDocument: document.uploaded subscribers and the response', () =>
     expect(doc.id).toBe('doc-slow')
     expect(slow.finished).not.toHaveBeenCalled()
 
-    await drain()
-    expect(slow.handler).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(slow.handler).toHaveBeenCalledOnce())
     expect(slow.handler).toHaveBeenCalledWith(
       expect.objectContaining({
         document: expect.objectContaining({ id: 'doc-slow' }),
