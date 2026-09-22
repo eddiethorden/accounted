@@ -19,13 +19,15 @@ function enqueueInputs(input: {
   jobs?: unknown[]
   existing?: unknown[]
   ledger?: unknown[]
+  balanceLedger?: unknown[]
 }) {
   enqueue({ data: input.facts ?? [] })
   enqueue({ data: input.settings ?? null })
   enqueue({ data: input.agreements ?? [] })
   enqueue({ data: input.contents ?? [] })
   enqueue({ data: input.jobs ?? [] })
-  enqueue({ data: input.ledger ?? [] })
+  enqueue({ data: input.ledger ?? [] }) // cost accounts, twelve months
+  enqueue({ data: input.balanceLedger ?? [] }) // balance accounts, all time
   enqueue({ data: input.existing ?? [] })
 }
 
@@ -121,9 +123,12 @@ describe('ledger evidence', () => {
     enqueue({ data: [] }) // activities
     enqueue({ data: null }) // autonomy
     await lintCompany(supabase, 'co-1', '2026-10-01')
-    const ranges = EXPECTATION_RULES.flatMap((r) => [...(r.cost ? [r.cost] : []), ...(r.balance ?? [])])
-    const expected = ranges.map((r) => `and(account_number.gte.${r.from},account_number.lte.${r.to})`)
-    const sent = String(findCalls('journal_entry_lines', 'or')[0][0]).split(',and(').map((x, i) => (i === 0 ? x : 'and(' + x))
-    expect(sent.sort()).toEqual(expected.sort())
+    const split = (filter: unknown) => String(filter).split(',and(').map((x, i) => (i === 0 ? x : 'and(' + x))
+    const range = (r: { from: string; to: string }) => `and(account_number.gte.${r.from},account_number.lte.${r.to})`
+    const [costSent, balanceSent] = findCalls('journal_entry_lines', 'or').map((c) => split(c[0]))
+    expect(costSent.sort()).toEqual(EXPECTATION_RULES.flatMap((r) => (r.cost ? [range(r.cost)] : [])).sort())
+    expect(balanceSent.sort()).toEqual(EXPECTATION_RULES.flatMap((r) => (r.balance ?? []).map(range)).sort())
+    // The cost query has a date floor, the balance query has none: a standing balance is evidence whether or not it moved this year.
+    expect(findCalls('journal_entry_lines', 'gte')).toHaveLength(1)
   })
 })

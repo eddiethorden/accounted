@@ -173,23 +173,33 @@ async function loadLiveCompanyFacts(supabase: SupabaseClient, companyId: string)
 }
 
 /**
- * Posted lines on the accounts the expectation rules read, twelve months back.
- * PostgREST compares account numbers as text, which is exact for four digits.
+ * Posted lines on the accounts the expectation rules read: cost accounts
+ * twelve months back, balance accounts from the first posting, because a
+ * standing balance is evidence whether or not it moved this year. PostgREST
+ * compares account numbers as text, which is exact for four digits.
  */
 async function loadLedgerLines(supabase: SupabaseClient, companyId: string, today: string): Promise<LedgerLine[]> {
   const since = new Date(`${today}T00:00:00Z`)
   since.setUTCFullYear(since.getUTCFullYear() - 1)
-  const { data, error } = await supabase
-    .from('journal_entry_lines')
-    .select('account_number, debit_amount, credit_amount, journal_entries!inner(entry_date, status, company_id)')
-    .eq('journal_entries.company_id', companyId)
-    .eq('journal_entries.status', 'posted')
-    .gte('journal_entries.entry_date', since.toISOString().slice(0, 10))
-    // Literal on purpose: the phantom-column guard can only check what it can read. run.test.ts pins it to EXPECTATION_RULES.
-    .or('and(account_number.gte.8410,account_number.lte.8419),and(account_number.gte.2350,account_number.lte.2359),and(account_number.gte.2390,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849),and(account_number.gte.5010,account_number.lte.5019)')
-    .limit(5000)
-  if (error) throw new Error(`ledger fetch failed: ${error.message}`)
-  const rows = (data ?? []) as unknown as Array<{
+  const base = () =>
+    supabase
+      .from('journal_entry_lines')
+      .select('account_number, debit_amount, credit_amount, journal_entries!inner(entry_date, status, company_id)')
+      .eq('journal_entries.company_id', companyId)
+      .eq('journal_entries.status', 'posted')
+  // Literal on purpose: the phantom-column guard can only check what it can read. run.test.ts pins both to EXPECTATION_RULES.
+  const [cost, balance] = await Promise.all([
+    base()
+      .gte('journal_entries.entry_date', since.toISOString().slice(0, 10))
+      .or('and(account_number.gte.8410,account_number.lte.8419),and(account_number.gte.5010,account_number.lte.5019)')
+      .limit(5000),
+    base()
+      .or('and(account_number.gte.2350,account_number.lte.2359),and(account_number.gte.2390,account_number.lte.2399),and(account_number.gte.2840,account_number.lte.2849)')
+      .limit(5000),
+  ])
+  if (cost.error) throw new Error(`ledger fetch failed: ${cost.error.message}`)
+  if (balance.error) throw new Error(`ledger fetch failed: ${balance.error.message}`)
+  const rows = [...(cost.data ?? []), ...(balance.data ?? [])] as unknown as Array<{
     account_number: string | number
     debit_amount: number | string | null
     credit_amount: number | string | null

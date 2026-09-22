@@ -190,6 +190,15 @@ describe('expectedDocuments', () => {
     expect(expectedDocuments([line('8410', '2025-09-30'), line('8410', '2025-10-31'), line('8410', '2025-11-30')], [], '2026-10-01')).toEqual([])
   })
 
+  it('reads a standing loan balance as evidence even when nothing moved this half-year, and not a balance that went back to zero', () => {
+    // Paid out a year ago, no amortisation yet: the first rollout company's Almi loan.
+    const drafts = expectedDocuments([line('2359', '2025-10-01', 0, 500000)], [], '2026-10-01')
+    expect(drafts.map((d) => d.key)).toEqual(['document_expected:loan'])
+    expect(drafts[0].detail.evidence).toMatchObject({ balance_months: 6, cost_months: 0, accounts: ['2359'] })
+    // Repaid in full before the window: no loan to document.
+    expect(expectedDocuments([line('2359', '2025-10-01', 0, 500000), line('2359', '2026-03-15', 500000, 0)], [], '2026-10-01')).toEqual([])
+  })
+
   it('reads a moving loan balance as evidence too, and asks for a rental agreement from recurring rent', () => {
     const amortisation = [line('2350', '2026-07-31', 10417), line('2350', '2026-08-31', 10417), line('2350', '2026-09-30', 10417)]
     expect(expectedDocuments(amortisation, [], '2026-10-01').map((d) => d.key)).toEqual(['document_expected:loan'])
