@@ -209,8 +209,8 @@ export const SCHEMAS: Record<string, ExtractionSchemaDef> = {
   },
   'agreement.shareholder': {
     schemaType: 'agreement.shareholder',
-    // v2: an adherence agreement (anslutningsavtal) names the joining party, so it is not filed as a second copy of the main agreement.
-    version: 2,
+    // v3: an adherence agreement (anslutningsavtal) names the joining party, so it is not filed as a second copy of the main agreement (v2 had the fields but not in the eager set).
+    version: 3,
     subject: 'a shareholders agreement (aktieägaravtal) or an adherence agreement to one',
     keywords: ['aktieägaravtal', 'shareholders', 'hembud', 'förköp', 'drag', 'tag', 'styrelse', 'överlåtelse', 'adherence', 'anslutning'],
     fields: [
@@ -231,12 +231,13 @@ export const SCHEMAS: Record<string, ExtractionSchemaDef> = {
   },
   'agreement.investment': {
     schemaType: 'agreement.investment',
-    // v2: says whether the document is the investment agreement or an adherence to one.
-    version: 2,
+    // v3: says whether the document is the investment agreement or an adherence to one (v2 had the field but not in the eager set).
+    version: 3,
     subject: 'an investment or share subscription agreement, or an adherence agreement to one',
     keywords: ['investering', 'teckning', 'aktier', 'emission', 'värdering', 'pre-money', 'tillträde', 'closing', 'investment', 'subscription'],
     fields: [
-      ...party('investor', 'investor'),
+      { name: 'investor_name', kind: 'text', description: 'Name of the investor. Null when several investors are listed in a schedule: never a summary such as "multiple investors".', required: true },
+      { name: 'investor_org_number', kind: 'orgnr', description: 'Swedish organisation number of the investor, if printed.' },
       { name: 'adherence', kind: 'enum', options: ['yes', 'no'], description: 'yes when this document is an adherence agreement by which an additional investor joins an existing investment agreement; no when it is the investment agreement itself.' },
       { name: 'investment_amount', kind: 'amount', description: 'Amount invested.', required: true },
       { name: 'currency', kind: 'text', description: 'Currency, ISO code.' },

@@ -38,7 +38,8 @@ export interface Citation {
 export interface AgreementDraft {
   kind: AgreementKind
   title: string
-  counterparty: { name: string | null; orgNumber: string | null }
+  /** hint: a name the readings did not settle. Shown in a title or as counterparty text, never cited, never a party. */
+  counterparty: { name: string | null; orgNumber: string | null; hint?: string | null }
   startsOn: string | null
   endsOn: string | null
   noticeMonths: number | null
@@ -167,7 +168,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const endsOn = record.date('ends_on')
     const noticeMonths = record.number('notice_months')
     const renewalTerms = record.text('renewal_terms')
-    const title = `Hyresavtal ${record.text('premises_address') ?? counterparty.name ?? ''}`.trim()
+    const title = `Hyresavtal ${record.text('premises_address') ?? shown(counterparty) ?? ''}`.trim()
 
     const obligations: ObligationDraft[] = []
     if (amount != null && startsOn) {
@@ -221,7 +222,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const startsOn = record.date('starts_on')
     const termMonths = record.number('term_months')
     const endsOn = record.date('ends_on') ?? (startsOn && termMonths != null ? addMonths(startsOn, termMonths) : null)
-    const title = `Leasingavtal ${record.text('object_description') ?? counterparty.name ?? ''}`.trim()
+    const title = `Leasingavtal ${record.text('object_description') ?? shown(counterparty) ?? ''}`.trim()
 
     const obligations: ObligationDraft[] = []
     if (amount != null && startsOn) {
@@ -275,7 +276,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const instalment = printedInstalment ?? (principal != null && instalments ? roundOre(principal / instalments) : null)
     // Interest that compounds or falls due at maturity or conversion is never a monthly payment.
     const interestAccrues = interestAccruesUntilMaturity(record.text('interest_terms'))
-    const title = `Lån ${record.text('loan_number') ?? counterparty.name ?? ''}`.trim()
+    const title = `Lån ${record.text('loan_number') ?? shown(counterparty) ?? ''}`.trim()
 
     const obligations: ObligationDraft[] = []
     const firstAmortisation = startsOn && periodic && instalment != null ? addMonths(startsOn, freeMonths + step) : null
@@ -355,7 +356,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const endsOn = record.date('ends_on')
     const autoRenewal = record.text('auto_renewal') === 'yes'
     const noticeMonths = monthsFromProse(record.text('notice_period'))
-    const title = `Abonnemang ${record.text('service_description') ?? counterparty.name ?? ''}`.trim()
+    const title = `Abonnemang ${record.text('service_description') ?? shown(counterparty) ?? ''}`.trim()
 
     const obligations: ObligationDraft[] = []
     if (amount != null) {
@@ -413,7 +414,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const endsOn = record.date('ends_on')
     const noticeMonths = record.number('notice_months')
     const autoRenewal = record.text('auto_renewal') === 'yes'
-    const title = `Försäkring ${record.text('policy_number') ?? counterparty.name ?? ''}`.trim()
+    const title = `Försäkring ${record.text('policy_number') ?? shown(counterparty) ?? ''}`.trim()
     record.text('cover_description')
 
     const obligations: ObligationDraft[] = []
@@ -504,7 +505,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     // An adherence agreement is its own signed document, filed under the joining party, never as a second copy of the main agreement.
     const adherence = record.text('adherence') === 'yes'
     const joining = adherence ? party(record, 'adhering_party') : { name: null, orgNumber: null }
-    const title = adherence ? `Anslutningsavtal ${joining.name ?? ''} till aktieägaravtal ${company}`.replace(/\s+/g, ' ').trim() : `Aktieägaravtal ${company}`.trim()
+    const title = adherence ? `Anslutningsavtal ${shown(joining) ?? ''} till aktieägaravtal ${company}`.replace(/\s+/g, ' ').trim() : `Aktieägaravtal ${company}`.trim()
     // Read for its source: the parties are what the page shows as the excerpt.
     record.text('parties_summary')
     const deadlines: DeadlineDraft[] = endsOn ? [{ key: 'end', title: `${title} löper ut`, dueOn: endsOn, priority: 'normal', fields: ['ends_on'] }] : []
@@ -537,7 +538,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const closingOn = record.date('closing_on')
     const startsOn = record.date('signed_on')
     const adherence = record.text('adherence') === 'yes'
-    const title = `Investering ${counterparty.name ?? ''}${adherence ? ' (anslutning)' : ''}`.replace(/\s+/g, ' ').trim()
+    const title = `Investering ${shown(counterparty) ?? ''}${adherence ? ' (anslutning)' : ''}`.replace(/\s+/g, ' ').trim()
     const obligations: ObligationDraft[] = []
     if (amount != null && closingOn && inWindow(closingOn, window)) {
       obligations.push({ kind: 'payment', dueOn: closingOn, amount, currency, estimate: false, fields: ['investment_amount', 'closing_on'], direction: 'in' })
@@ -575,7 +576,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const startsOn = record.date('starts_on')
     const endsOn = record.date('ends_on')
     const noticeMonths = record.number('notice_months')
-    const title = `Kundavtal ${counterparty.name ?? record.text('service_description') ?? ''}`.trim()
+    const title = `Kundavtal ${shown(counterparty) ?? record.text('service_description') ?? ''}`.trim()
     const obligations: ObligationDraft[] = []
     if (amount != null && startsOn) {
       const fields = ['fee_amount', 'fee_period', 'starts_on']
@@ -622,7 +623,7 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
     const startsOn = record.date('starts_on') ?? record.date('signed_on')
     const endsOn = record.date('ends_on')
     const noticeMonths = record.number('notice_months')
-    const title = `Avtal ${counterparty.name ?? ''}`.trim()
+    const title = `Avtal ${shown(counterparty) ?? ''}`.trim()
     record.text('subject')
     const deadlines: DeadlineDraft[] = []
     if (endsOn && noticeMonths != null) {
@@ -658,10 +659,14 @@ const DERIVERS: Record<AgreementKind, Deriver> = {
   },
 }
 
-/** The name may be a hint; the organisation number is identity and must be settled. */
+/** A settled name and organisation number; when the name did not settle, its reading as a hint for display only. */
 function party(record: SettledRecord, prefix: string): AgreementDraft['counterparty'] {
-  return { name: record.text(`${prefix}_name`) ?? record.hint(`${prefix}_name`), orgNumber: record.text(`${prefix}_org_number`) }
+  const name = record.text(`${prefix}_name`)
+  return { name, orgNumber: record.text(`${prefix}_org_number`), hint: name ? null : record.hint(`${prefix}_name`) }
 }
+
+/** What to call the counterparty in a title: the settled name, else the hint. */
+const shown = (c: AgreementDraft['counterparty']): string | null => c.name ?? c.hint ?? null
 
 const inWindow = (iso: string, window: Window) => iso >= window.from && iso <= window.to
 

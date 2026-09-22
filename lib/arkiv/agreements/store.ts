@@ -251,7 +251,7 @@ async function upsertAgreement(supabase: SupabaseClient, doc: DocumentRow, extra
         kind: draft.kind,
         title: draft.title.slice(0, 200),
         counterparty_party_id: partyId,
-        counterparty_name: draft.counterparty.name,
+        counterparty_name: draft.counterparty.name ?? draft.counterparty.hint ?? null,
         starts_on: draft.startsOn,
         ends_on: draft.endsOn,
         notice_months: draft.noticeMonths,

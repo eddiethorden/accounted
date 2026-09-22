@@ -93,7 +93,27 @@ describe('deriveDocument', () => {
     ])
   })
 
-  it('on a rerun updates what changed and leaves settled, dismissed and completed rows alone', async () => {
+  it('labels the agreement with a disputed name but never makes a party from it', async () => {
+    enqueue({ data: DOC })
+    enqueue({ data: extraction({ review_fields: ['landlord_name'] }) })
+    enqueue({ data: { id: 'agr-1' } }) // agreement upsert
+    enqueue({}) // retire other party links
+    enqueue({ data: null }) // party link exists?
+    enqueue({}) // party link insert
+    enqueue({ data: null }) // agreement link exists?
+    enqueue({}) // agreement link insert
+    enqueue({ data: [] }) // existing obligations
+    enqueue({}) // obligations insert
+    enqueue({ data: [] }) // existing deadlines
+    enqueue({}) // notice deadline insert
+    enqueue({}) // end deadline insert
+    await deriveDocument(supabase, 'doc-1', { today: '2026-09-15' })
+    // Identity comes from the settled organisation number only; the disputed name is display text on the agreement.
+    expect(resolveCounterparty).toHaveBeenCalledWith(supabase, expect.objectContaining({ name: null, orgNumber: '5560167452' }))
+    expect(findCall('agreements', 'upsert')?.[0]).toMatchObject({ counterparty_name: 'Fastighets AB Kvarnen', title: 'Hyresavtal Vasagatan 12' })
+  })
+
+
     enqueue({ data: DOC })
     enqueue({ data: extraction() })
     enqueue({ data: { id: 'agr-1' } })

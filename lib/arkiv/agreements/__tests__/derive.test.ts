@@ -198,7 +198,7 @@ describe('phase 6 kinds', () => {
       reviewFields: [],
       today,
     })!
-    expect(adherence.agreement).toMatchObject({ kind: 'shareholder', title: 'Anslutningsavtal Boltonshield AB till aktieägaravtal Arcim Technology AB', counterparty: { name: 'Boltonshield AB', orgNumber: '5594605627' } })
+    expect(adherence.agreement).toMatchObject({ kind: 'shareholder', title: 'Anslutningsavtal Boltonshield AB till aktieägaravtal Arcim Technology AB', counterparty: { name: 'Boltonshield AB', orgNumber: '5594605627', hint: null } })
     const investment = deriveAgreement({
       schemaType: 'agreement.investment',
       payload: { investor_name: f('Boltonshield AB'), investment_amount: f(1000000), adherence: f('yes') },
@@ -215,7 +215,8 @@ describe('phase 6 kinds', () => {
       reviewFields: ['lender_name'],
       today,
     })!
-    expect(loan.agreement).toMatchObject({ title: 'Lån Propel Capital VII AB', counterparty: { name: 'Propel Capital VII AB', orgNumber: '5595138057' } })
+    // The hint names the title; the settled name stays null so no party is made from a disputed reading.
+    expect(loan.agreement).toMatchObject({ title: 'Lån Propel Capital VII AB', counterparty: { name: null, orgNumber: '5595138057', hint: 'Propel Capital VII AB' } })
     expect(loan.agreement.sources).not.toHaveProperty('lender_name')
   })
 
