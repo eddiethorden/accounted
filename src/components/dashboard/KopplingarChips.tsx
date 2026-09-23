@@ -22,8 +22,8 @@ import { AI_CLIENTS, aiConnectAction, openAiConnector, type AiClient } from '@/l
  * bank, Skatteverket), one chip each on a single row under the list. Each
  * chip names the connection, says whether it is on, and carries the connect
  * pill while it is off; a connected chip stays as a quiet status readout.
- * One sentence under the row explains what the three give, and drops once
- * everything is connected. Founder direction 2026-09-14: the connections
+ * What the three give is explained behind the page's "?" (convention 7),
+ * not in a sentence under the row. Founder direction 2026-09-14: the connections
  * are part of the Att göra section, in the same visual language, with the
  * connect action as a pill like every other control.
  */
@@ -49,7 +49,6 @@ export function KopplingarChips({
   const showSkv = skvExtension && skvCapability && !isSandbox
   const connectedAi = AI_CLIENTS.filter((c) => aiClients.includes(c.id))
   const aiOn = connectedAi.length > 0
-  const allOn = aiOn && hasBank && (hasSkatteverket || !showSkv)
 
   function connect(client: AiClient) {
     const action = aiConnectAction(client, { origin: window.location.origin, appName })
@@ -128,9 +127,6 @@ export function KopplingarChips({
           />
         )}
       </ul>
-      {!allOn && (
-        <p className="mt-3 max-w-[72ch] text-xs leading-5 text-muted-foreground">{t('kopplingar_note')}</p>
-      )}
     </div>
   )
 }

@@ -271,6 +271,7 @@ import {
   resolveMcpCompanyContext,
 } from './company-routing'
 import { findUnknownArgKeys, listArgKeys, shortestExampleFor } from './arg-guard'
+import { decodeToolArgs } from './unicode-escape-guard'
 import { findSupplierCandidates, type SupplierRow } from './supplier-candidates'
 import {
   matchSupplierByIdentity,
@@ -303,6 +304,7 @@ import { resolveCashAccountScope } from '@/lib/reconciliation/cash-account-scope
 import { findMatchingInvoices } from '@/lib/invoices/invoice-matching'
 import { sanitizeDeliveryRecipientStatuses } from '@/lib/invoices/delivery-recipient-statuses'
 import { listRotRutCandidates, createRotRutPayoutRequest } from '@/lib/invoices/rot-rut-service'
+import { getPayoutOreRounding } from '@/lib/invoices/rot-rut-receivable'
 import { importRotRutBeslutFile } from '@/lib/invoices/rot-rut-beslut-import'
 import { computeRefusedShares } from '@/lib/invoices/rot-rut-reclaim'
 import {
@@ -393,8 +395,8 @@ import { readAgiSubmissionStatus } from '@/extensions/general/skatteverket/lib/a
 import { buildMomsuppgift, resolveRedovisare, resolveRedovisningsperiod } from '@/extensions/general/skatteverket/lib/declaration-prep'
 import { writeSkatteverketAudit } from '@/extensions/general/skatteverket/lib/audit'
 import { skvAuthCodeToStructured } from '@/extensions/general/skatteverket/lib/error-map'
-import { findCompanyTokenUser, hasVerifiedGrant } from '@/extensions/general/skatteverket/lib/resolve-auth'
-import { getSystemAuthMode, isSystemAuthConfigured } from '@/extensions/general/skatteverket/lib/system-auth/config'
+import { getSkvConnectionHealth, SKV_NEEDS_RECONSENT_MESSAGE } from './skv-connection-health'
+import { suggestToolNames } from './tool-suggest'
 // Stage-time preview for book_skattekonto_row(s): same deterministic rule
 // matcher the skattekonto list page and the booking commit path use. The
 // actual booking runs in the extension's registry-resolved commit service on
@@ -2179,8 +2181,12 @@ const SKV_VAT_STATUS_OUTPUT_SCHEMA = {
   properties: {
     redovisare: { type: 'string', description: '12-digit redovisare' },
     redovisningsperiod: { type: 'string', description: 'YYYYMM' },
-    submitted: { type: ['object', 'null'], description: 'Inlämnad deklaration, or null if none on file' },
-    decided: { type: ['object', 'null'], description: 'Beslutad deklaration, or null if not yet decided' },
+    // Skatteverket answers inlämnat with a LIST (every submission for the
+    // period), and clients that validate structuredContent refused the whole
+    // result when the schema said object (feedback seq 694132). Passed through
+    // as Skatteverket sends it, so both shapes are allowed.
+    submitted: { type: ['object', 'array', 'null'], description: 'Inlämnad deklaration as Skatteverket returns it (a list of submissions, or one object), or null if none on file' },
+    decided: { type: ['object', 'array', 'null'], description: 'Beslutad deklaration as Skatteverket returns it, or null if not yet decided' },
   },
   required: ['redovisare', 'redovisningsperiod', 'submitted', 'decided'],
 } as const
@@ -3823,6 +3829,14 @@ const ASSET_WRITE_PROPERTIES = {
       required: ['name', 'cost', 'useful_life_months'],
     },
   },
+  opening_accumulated_depreciation: {
+    type: 'number',
+    description: 'Accumulated depreciation for this asset from the previous asset register, SEK, 0 to acquisition_cost - salvage_value. No voucher or automatic reconciliation: manually reconcile register totals with the imported ledger before depreciation or disposal. Manual ledger postings do not lock opening edits; depreciation posted through Accounted\'s asset register or disposal does. Component opening balances are unsupported; keep the component breakdown.',
+  },
+  opening_depreciation_date: {
+    type: ['string', 'null'],
+    description: 'yyyy-MM-dd the opening amount is stated per; required when the amount is above 0, between acquisition_date and today (Europe/Stockholm). Zero amount clears the date.',
+  },
   notes: { type: 'string' },
 } as const
 
@@ -4723,7 +4737,8 @@ export const tools: McpTool[] = [
       type: 'object',
       properties: {
         available: { type: 'boolean' },
-        connected: { type: 'boolean' },
+        connected: { type: 'boolean', description: 'true only when Skatteverket calls will work now' },
+        status: { type: 'string', enum: ['connected', 'needs_reconsent', 'not_connected', 'unavailable'] },
         token_expires_at: { type: ['string', 'null'] },
         connect_url: { type: ['string', 'null'] },
         instructions: { type: 'string' },
@@ -4743,18 +4758,26 @@ export const tools: McpTool[] = [
         .maybeSingle()
       if (error) throw error
       const token = data as { expires_at: string } | null
-      const connected = Boolean(token)
+      // A token row is not a working connection: one flagged needs_reconsent
+      // used to answer connected: true (feedback seq 604946) while the
+      // briefing said the opposite. Same health check as the briefing now.
+      const health = await getSkvConnectionHealth(supabase, companyId)
+      const needsReconsent = health?.status === 'needs_reconsent'
+      const connected = health?.status === 'active'
       const connectUrl = `${connectLinkBaseUrl()}/api/extensions/ext/skatteverket/authorize?return_to=%2F`
       return {
         available: enabled,
         connected,
+        status: !enabled ? 'unavailable' : connected ? 'connected' : needsReconsent ? 'needs_reconsent' : 'not_connected',
         token_expires_at: token?.expires_at ?? null,
         connect_url: enabled ? connectUrl : null,
         instructions: !enabled
           ? 'The Skatteverket integration is not enabled on this installation. Declarations can still be downloaded as files and filed manually at skatteverket.se.'
           : connected
             ? 'Skatteverket is connected. Skattekonto syncs automatically; momsdeklaration and AGI can be filed from here (each filing stages for approval).'
-            : 'On claude.ai/Claude Desktop a connect card with an open-in-browser button is rendered with this result; on other clients give the user the connect_url as a link. They must be logged in to Accounted there; Skatteverket asks them to identify with BankID as firmatecknare and approve the access, then they land back in Accounted. Tell them to come back here when done.',
+            : needsReconsent
+              ? `The Skatteverket session has expired (the personal login lasts about an hour, so this is normal). Only a person can renew it: give the user the connect_url and ask them to sign in again with BankID, then continue. Do not call Skatteverket tools until they confirm. ${SKV_NEEDS_RECONSENT_MESSAGE}`
+              : 'On claude.ai/Claude Desktop a connect card with an open-in-browser button is rendered with this result; on other clients give the user the connect_url as a link. They must be logged in to Accounted there; Skatteverket asks them to identify with BankID as firmatecknare and approve the access, then they land back in Accounted. Tell them to come back here when done.',
       }
     },
   },
@@ -5719,44 +5742,7 @@ export const tools: McpTool[] = [
       // session start instead of discovering a dead session mid-task.
       // Best-effort and emitted only when a connection (or verified system
       // grant) exists: never-connected companies pay no payload for it.
-      // The system-before-user priority mirrors resolveReadAuth
-      // (skatteverket/lib/resolve-auth.ts); not reused directly because the
-      // briefing needs token metadata (createdAt, reconsent status) that
-      // resolveReadAuth deliberately collapses into an auth result.
-      const safeSkvConnection = (async (): Promise<
-        | {
-            status: 'active' | 'needs_reconsent'
-            source: 'user' | 'system'
-            connected_at?: string | null
-            message?: string
-          }
-        | null
-      > => {
-        try {
-          if (process.env.SKATTEVERKET_ENABLED !== 'true') return null
-          if (
-            getSystemAuthMode() === 'on' &&
-            isSystemAuthConfigured() &&
-            (await hasVerifiedGrant(companyId, 'lasombud'))
-          ) {
-            return { status: 'active', source: 'system' }
-          }
-          const token = await findCompanyTokenUser(supabase, companyId)
-          if (!token) return null
-          if (token.needsReconsent) {
-            return {
-              status: 'needs_reconsent',
-              source: 'user',
-              connected_at: token.createdAt,
-              message:
-                'Skatteverket-sessionen har gått ut. Skatteverkets personliga inloggning gäller bara ca 1 timme, så detta är normalt. Be användaren ansluta igen med BankID under Inställningar → Skatteverket; bara en person kan göra det, så försök inte med Skatteverket-verktyg förrän användaren bekräftat.',
-            }
-          }
-          return { status: 'active', source: 'user', connected_at: token.createdAt }
-        } catch {
-          return null
-        }
-      })()
+      const safeSkvConnection = getSkvConnectionHealth(supabase, companyId)
 
       const [profileRes, memoryRes, userRes, companyRes, settingsRes, dimensionsRes] = await Promise.all([
         supabase
@@ -5793,7 +5779,7 @@ export const tools: McpTool[] = [
           .maybeSingle(),
         supabase
           .from('company_settings')
-          .select('accounting_method, dimensions_enabled')
+          .select('accounting_method, dimensions_enabled, company_name')
           .eq('company_id', companyId)
           .maybeSingle(),
         safeDimensionsRead,
@@ -5833,12 +5819,15 @@ export const tools: McpTool[] = [
         | { name: string | null; org_number: string | null; entity_type: string | null }
         | null
       const settingsRow = settingsRes.data as
-        | { accounting_method: string | null; dimensions_enabled?: boolean | null }
+        | { accounting_method: string | null; dimensions_enabled?: boolean | null; company_name?: string | null }
         | null
       const company = {
         id: companyId,
         company_id: companyId,
-        name: companyRow?.name ?? null,
+        // The name the owner edits in Inställningar, as gnubok_list_companies
+        // shows it; companies.name is the onboarding snapshot and goes stale on
+        // a rename (feedback seq 580571, 670221: two names for one company).
+        name: settingsRow?.company_name || companyRow?.name || null,
         org_number: companyRow?.org_number ?? null,
         entity_type: companyRow?.entity_type ?? null,
         accounting_method: settingsRow?.accounting_method ?? null,
@@ -18574,6 +18563,18 @@ export const tools: McpTool[] = [
       const txDesc = transaction.merchant_name || transaction.description || transactionId
       // Booking order: largest first, as the matcher offers them.
       const ordered = [...requests].sort((a, b) => expectedRotRutPayoutAmount(b) - expectedRotRutPayoutAmount(a))
+      // A fully paid begäran also clears the öre its invoices carry on 1513
+      // beyond the requested kronor (3740). Preview only: the commit
+      // recomputes it at booking.
+      const oreRoundings = await Promise.all(
+        ordered.map((r) => {
+          const payout = expectedRotRutPayoutAmount(r)
+          return payout >= Number(r.requested_total)
+            ? getPayoutOreRounding(supabase, companyId, r, payout).then((x) => x.rounding)
+            : 0
+        }),
+      )
+      const oreRoundingTotal = roundOre(oreRoundings.reduce((sum, x) => sum + x, 0))
 
       return stagePendingOperation(supabase, companyId, userId, 'settle_rot_rut_payout',
         `ROT/RUT-utbetalning: ${txDesc} → ${ordered.map((r) => r.name).join(', ')}`,
@@ -18584,20 +18585,114 @@ export const tools: McpTool[] = [
           transaction_currency: transaction.currency,
           transaction_date: transaction.date,
           expected_total: expectedTotal,
-          requests: ordered.map((r) => ({
+          requests: ordered.map((r, i) => ({
             request_id: r.id,
             name: r.name,
             deduction_type: r.deduction_type,
+            status: r.status,
+            expected_payout: expectedRotRutPayoutAmount(r),
+            ore_rounding: oreRoundings[i],
+          })),
+          ore_rounding_total: oreRoundingTotal,
+        },
+        actor,
+        {
+          description: `After approval the transfer is booked debit 19xx / credit 1513 (one leg per begäran)${oreRoundingTotal > 0 ? `, plus debit 3740 Öresavrundning ${oreRoundingTotal} kr so 1513 clears the öre the whole-kronor begäran left` : ''}, every begäran is marked paid and the row is linked. Verify with gnubok_list_rot_rut_payout_requests.`,
+          tool: 'gnubok_list_rot_rut_payout_requests',
+        },
+        { dateForPeriodCheck: transaction.date },
+      )
+    },
+  },
+
+  {
+    name: 'gnubok_link_rot_rut_payout_voucher',
+    keywords: ['rotavdrag', 'rutavdrag', 'utbetalning skatteverket', '1513', 'koppla verifikat', 'öresavrundning'],
+    title: 'Link Existing Rot/Rut Payout Voucher',
+    catalogVisibility: 'search',
+    description:
+      'Link ROT/RUT begäran to a payout voucher already booked by hand (credits 1513; öre rounding allowed). Books nothing, marks the begäran settled. For an unbooked bank row use gnubok_settle_rot_rut_payout instead. Stages.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        journal_entry_id: { type: 'string', description: 'The posted payout voucher (debit 19xx / credit 1513)' },
+        request_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 10 },
+      },
+      required: ['journal_entry_id', 'request_ids'],
+    },
+    outputSchema: STAGED_OPERATION_SCHEMA,
+    annotations: ANNOTATIONS_STAGED_WRITE,
+    async execute(args, companyId, userId, supabase, actor) {
+      const journalEntryId = args.journal_entry_id as string
+      const rawIds = Array.isArray(args.request_ids) ? (args.request_ids as unknown[]) : []
+      const requestIds = [...new Set(rawIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
+      if (!journalEntryId || requestIds.length === 0) {
+        throw codedError('VALIDATION_ERROR', 'journal_entry_id and request_ids are required')
+      }
+      if (requestIds.length > 10) {
+        throw codedError('VALIDATION_ERROR', 'request_ids: at most 10 begäran per voucher')
+      }
+
+      // Plain reads only: a staging tool writes nothing but the pending row,
+      // so the link_rot_rut_payout_voucher RPC (which locks and writes) runs at
+      // approval and makes the final call on every rule. This only refuses
+      // what can never pass and shows the approver the numbers.
+      const [{ data: voucher, error: voucherError }, { data: requestRows, error: reqError }] = await Promise.all([
+        supabase
+          .from('journal_entries')
+          .select('id, entry_date, voucher_series, voucher_number, description, status, lines:journal_entry_lines(account_number, debit_amount, credit_amount)')
+          .eq('company_id', companyId)
+          .eq('id', journalEntryId)
+          .maybeSingle(),
+        supabase
+          .from('rot_rut_payout_requests')
+          .select('id, name, deduction_type, status, requested_total, decided_total, settlement_journal_entry_id')
+          .eq('company_id', companyId)
+          .in('id', requestIds),
+      ])
+      if (voucherError) throw dbError(voucherError)
+      if (reqError) throw dbError(reqError)
+      if (!voucher) throw registryError('ROT_RUT_LINK_VOUCHER_NOT_FOUND')
+      if (voucher.status !== 'posted') throw registryError('ROT_RUT_LINK_VOUCHER_NOT_ELIGIBLE')
+      const requests = (requestRows ?? []) as Array<RotRutPayoutRequestCandidate & { name: string }>
+      if (requests.length !== requestIds.length) throw registryError('ROT_RUT_REQUEST_NOT_FOUND')
+      const other = requests.find((r) => r.settlement_journal_entry_id && r.settlement_journal_entry_id !== journalEntryId)
+      if (other) throw registryError('ROT_RUT_LINK_ALREADY_SETTLED')
+
+      let bankAmount = 0
+      let receivableCredit = 0
+      for (const line of (voucher.lines ?? []) as Array<{ account_number: string; debit_amount: number; credit_amount: number }>) {
+        const net = Number(line.debit_amount) - Number(line.credit_amount)
+        if (line.account_number === '1513') receivableCredit -= net
+        else if (line.account_number.startsWith('19')) bankAmount += net
+      }
+      const expectedTotal = roundOre(requests.reduce((sum, r) => sum + expectedRotRutPayoutAmount(r), 0))
+      const voucherLabel = `${voucher.voucher_series}${voucher.voucher_number}`
+
+      return stagePendingOperation(supabase, companyId, userId, 'link_rot_rut_payout_voucher',
+        `ROT/RUT-utbetalning: koppla ${voucherLabel} till ${requests.map((r) => r.name).join(', ')}`,
+        { journal_entry_id: journalEntryId, request_ids: requestIds },
+        {
+          journal_entry_id: journalEntryId,
+          voucher_number: voucherLabel,
+          entry_date: voucher.entry_date,
+          bank_amount: roundOre(bankAmount),
+          voucher_1513_credit: roundOre(receivableCredit),
+          expected_total: expectedTotal,
+          rounding: roundOre(receivableCredit - expectedTotal),
+          requests: requests.map((r) => ({
+            request_id: r.id,
+            name: r.name,
             status: r.status,
             expected_payout: expectedRotRutPayoutAmount(r),
           })),
         },
         actor,
         {
-          description: 'After approval the transfer is booked debit 19xx / credit 1513 (one leg per begäran), every begäran is marked paid and the row is linked. Verify with gnubok_list_rot_rut_payout_requests.',
+          description: 'After approval every begäran points at the voucher and reads paid (or partially paid); no new voucher is booked. Verify with gnubok_list_rot_rut_payout_requests.',
           tool: 'gnubok_list_rot_rut_payout_requests',
         },
-        { dateForPeriodCheck: transaction.date },
       )
     },
   },
@@ -21915,10 +22010,19 @@ export const tools: McpTool[] = [
       if (gate) throw new AssetGateError(gate)
       const accounts = await resolveCreateAccounts(supabase, companyId, body)
       const cost = roundOre(body.acquisition_cost)
+      // Normalize the opening fields once so the staged params and the
+      // preview the approver sees carry the same values.
+      const openingAmount = roundOre(body.opening_accumulated_depreciation ?? 0)
+      const openingDate = openingAmount > 0 ? body.opening_depreciation_date ?? null : null
+      const params = {
+        ...body,
+        opening_accumulated_depreciation: openingAmount,
+        opening_depreciation_date: openingDate,
+      }
       return stagePendingOperation(
         supabase, companyId, userId, 'create_asset',
         `Ny anläggningstillgång: ${body.name}, ${cost} SEK`,
-        body as Record<string, unknown>,
+        params as Record<string, unknown>,
         {
           name: body.name,
           category: body.category,
@@ -21929,7 +22033,9 @@ export const tools: McpTool[] = [
           depreciation_method: body.depreciation_method ?? 'linear',
           accounts,
           k3_component_count: body.k3_components?.length ?? 0,
-          will: 'add the asset to the anläggningsregister; no voucher is posted (the purchase is already booked)',
+          opening_accumulated_depreciation: openingAmount,
+          opening_depreciation_date: openingDate,
+          will: 'add the asset to the anläggningsregister; no voucher is posted (the purchase and any opening accumulated depreciation are already booked)',
         },
         actor,
         undefined,
@@ -24163,9 +24269,24 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
           : ''
         : outerToolName
       const toolName = toCanonicalToolName(requestedToolName)
-      const rawToolArgs = viaBridge
+      const innerToolArgs = viaBridge
         ? ((outerToolArgs.arguments ?? {}) as Record<string, unknown>)
         : outerToolArgs
+      // tools/list advertises company_id on the bridges themselves (every
+      // company-dependent tool gets it), so agents send it NEXT TO `tool`.
+      // Dropping it there silently ran the inner tool on the key's default
+      // company and returned another company's data (feedback seq 561118,
+      // 694132). Carry it into the inner arguments; two different ids is an
+      // ambiguity the caller has to resolve, never a guess.
+      const bridgeCompanyConflict =
+        viaBridge &&
+        outerToolArgs.company_id !== undefined &&
+        innerToolArgs.company_id !== undefined &&
+        outerToolArgs.company_id !== innerToolArgs.company_id
+      const rawToolArgs =
+        viaBridge && outerToolArgs.company_id !== undefined && innerToolArgs.company_id === undefined
+          ? { ...innerToolArgs, company_id: outerToolArgs.company_id }
+          : innerToolArgs
 
       const tool = tools.find((t) => t.name === toolName)
 
@@ -24188,7 +24309,11 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       // below still runs against the real target. An unknown-but-named target
       // falls through to the unknown-tool handler below, which lists what
       // exists.
-      const refusal = bridge ? bridgeRefusalReason(bridge, requestedToolName, tool) : null
+      const refusal = bridgeCompanyConflict
+        ? `company_id is given twice with different values (${String(outerToolArgs.company_id)} next to "tool", ${String(innerToolArgs.company_id)} inside "arguments"). Send it once.`
+        : bridge
+          ? bridgeRefusalReason(bridge, requestedToolName, tool)
+          : null
       if (refusal) {
         const bridgeError = toToolError(codedError('VALIDATION_ERROR', refusal), {
           toolName: outerCanonicalName,
@@ -24241,11 +24366,34 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         const available = tools
           .map((t) => toPublicToolName(t.name, toolNamespace))
           .join(', ')
+        // Closest real tools first, each with how to reach it, so a guessed
+        // name (get_journal_entry, list_bank_accounts) turns into the right
+        // call instead of a scan of the whole catalog. Only tools this key may
+        // call are suggested, as gnubok_search_tools filters.
+        const suggestions = suggestToolNames(
+          requestedToolName,
+          tools.filter((t) => {
+            const required = TOOL_SCOPE_MAP[t.name]
+            return !required || hasScope(keyScopes, required)
+          }),
+        )
+        const didYouMean =
+          suggestions.length > 0
+            ? ` Did you mean: ${suggestions
+                .map((t) => {
+                  const via = toolCallableVia(t, isStagingTool(t))
+                  const name = toPublicToolName(t.name, toolNamespace)
+                  return via === 'call_tool' || via === 'stage_tool'
+                    ? `${name} (via ${toPublicToolName(`gnubok_${via}`, toolNamespace)})`
+                    : name
+                })
+                .join(', ')}? Or search with ${toPublicToolName('gnubok_search_tools', toolNamespace)}.`
+            : ` Search with ${toPublicToolName('gnubok_search_tools', toolNamespace)}.`
         return NextResponse.json(
           jsonRpcError(
             id ?? null,
             -32602,
-            `Unknown tool: "${requestedToolName}". Available tools: ${available}`
+            `Unknown tool: "${requestedToolName}".${didYouMean} Available tools: ${available}`
           )
         )
       }
@@ -24289,7 +24437,10 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       const companyRoutingStartedAt = Date.now()
       try {
         const extracted = extractRequestedCompany(rawToolArgs)
-        toolArgs = extracted.toolArgs
+        // An agent that double-escapes åäö sends a literal "\u00f6"; decode
+        // it here, once for every tool, before it can be stored as verifikat
+        // text that only a logged rättelse can change (unicode-escape-guard.ts).
+        toolArgs = decodeToolArgs(extracted.toolArgs)
 
         // Hosts do not reliably enforce inputSchema, so a misspelled
         // parameter used to be dropped silently (see arg-guard.ts). Thrown

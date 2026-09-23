@@ -59,6 +59,8 @@ function mockSupabase(opts: {
   company?: { name: string | null; org_number: string | null; entity_type: string | null } | null
   // company_settings.accounting_method. undefined → no settings row (null data).
   accountingMethod?: string | null
+  // company_settings.company_name: the name edited in Inställningar.
+  settingsCompanyName?: string | null
   // Dimension registry (dimensions PR3). Default: empty → block omitted.
   dimensionRows?: Array<{ id: string; sie_dim_no: number; name: string }>
   dimensionValueRows?: Array<{ dimension_id: string; code: string; name: string }>
@@ -158,11 +160,14 @@ function mockSupabase(opts: {
             eq: vi.fn(() => ({
               maybeSingle: vi.fn().mockResolvedValue({
                 data:
-                  opts.accountingMethod === undefined && opts.dimensionsEnabled === undefined
+                  opts.accountingMethod === undefined &&
+                  opts.dimensionsEnabled === undefined &&
+                  opts.settingsCompanyName === undefined
                     ? null
                     : {
                         accounting_method: opts.accountingMethod ?? null,
                         dimensions_enabled: opts.dimensionsEnabled ?? false,
+                        company_name: opts.settingsCompanyName ?? null,
                       },
                 error: null,
               }),
@@ -259,6 +264,19 @@ describe('gnubok_get_agent_briefing tool', () => {
       entity_type: 'aktiebolag',
       accounting_method: 'cash',
     })
+  })
+
+  it('names the company as Inställningar does after a rename: feedback seq 580571, 670221', async () => {
+    const tool = tools.find((t) => t.name === 'gnubok_get_agent_briefing')!
+    const supabase = mockSupabase({
+      profile: null,
+      company: { name: 'Piteå kyl & hushåll', org_number: '556677-8899', entity_type: 'aktiebolag' },
+      settingsCompanyName: 'StarkAiVision',
+    })
+    const result = (await tool.execute({}, 'company-1', 'user-1', supabase as never, { type: 'api_key' })) as {
+      company: { name: string | null }
+    }
+    expect(result.company.name).toBe('StarkAiVision')
   })
 
   it('always returns the company id even when the company/settings rows are missing', async () => {

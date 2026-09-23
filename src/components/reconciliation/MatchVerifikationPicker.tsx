@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Check, Search, X } from 'lucide-react'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { formatVoucher } from '@/lib/bookkeeping/voucher-series-resolver'
+import { matchesVoucherSearch } from '@/lib/reconciliation/voucher-search'
 
 /**
  * Map the endpoint's 0-1 match confidence (attached only when candidates are
@@ -141,16 +142,7 @@ export function MatchVerifikationPicker({
     const q = search.trim().toLowerCase()
     const base = q.length === 0
       ? glLines
-      : glLines.filter((line) => {
-          const amt = (line.debit_amount > 0 ? line.debit_amount : line.credit_amount).toString()
-          return (
-            formatVoucher(line).toLowerCase().includes(q) ||
-            line.entry_date.toLowerCase().includes(q) ||
-            amt.includes(q) ||
-            (line.entry_description || '').toLowerCase().includes(q) ||
-            (line.line_description || '').toLowerCase().includes(q)
-          )
-        })
+      : glLines.filter((line) => matchesVoucherSearch({ ...line, voucher: formatVoucher(line) }, q))
     return base.slice(0, 25)
   }, [search, glLines])
 

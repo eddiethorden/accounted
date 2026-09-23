@@ -8,7 +8,7 @@ import ExtractionStatus from '@/components/ui/extraction-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { TD_CLASS, CHECKBOX_REVEAL_CLASS } from '@/components/ui/dry-table'
+import { TD_CLASS, CHECKBOX_REVEAL_CLASS, HOVER_REVEAL_CLASS } from '@/components/ui/dry-table'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { isImportedTransaction } from '@/lib/transactions/origin'
 import {
@@ -506,7 +506,7 @@ export default function TransactionInboxCard({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="mr-2 h-7 w-7 text-muted-foreground hover:text-foreground"
+                    className={cn('mr-2 h-7 w-7 text-muted-foreground hover:text-foreground data-[state=open]:opacity-100', HOVER_REVEAL_CLASS)}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('more_actions_aria')}
                     title={t('more_actions_aria')}
