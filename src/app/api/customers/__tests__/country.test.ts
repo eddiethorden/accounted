@@ -54,7 +54,8 @@ vi.mock('@/lib/auth/require-write', () => ({
 vi.mock('@/lib/init', () => ({ ensureInitialized: vi.fn() }))
 
 // Never reach VIES from a unit test.
-vi.mock('@/lib/vat/vies-client', () => ({
+vi.mock('@/lib/vat/vies-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/vat/vies-client')>()),
   validateVatNumber: vi.fn().mockResolvedValue({ valid: false }),
 }))
 

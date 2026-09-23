@@ -18,6 +18,13 @@ vi.mock('@/lib/invoices/clear-settled-invoice-suggestions', () => ({
   clearSettledInvoiceSuggestions: mockClearSuggestions,
 }))
 
+// The retained-document anchoring after a link: mocked so it takes no slot in
+// the queued Supabase mock; pinned by supplier-invoice-underlag.test.ts.
+const { mockAnchorSupplierDoc } = vi.hoisted(() => ({ mockAnchorSupplierDoc: vi.fn() }))
+vi.mock('@/lib/core/documents/supplier-invoice-underlag', () => ({
+  anchorSupplierInvoiceDocument: mockAnchorSupplierDoc,
+}))
+
 // Which voucher line settles the invoice is a DB function
 // (supplier_invoice_settlement_side, read through supplier-settlement-side.ts).
 // Stubbed so the lookup takes no slot in the queued Supabase mock. Every test
@@ -339,6 +346,7 @@ describe('linkSupplierInvoiceToVoucher', () => {
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.code).toBe('LINK_SI_VOUCHER_INVOICE_NOT_FOUND')
+    expect(mockAnchorSupplierDoc).not.toHaveBeenCalled()
   })
 
   it('rejects with INVOICE_FULLY_PAID when the RPC reports the invoice is already paid', async () => {
@@ -436,6 +444,10 @@ describe('linkSupplierInvoiceToVoucher', () => {
       'supplier_invoice',
       invoice.id,
     )
+
+    // The invoice's retained document is anchored to its verifikat right away
+    // instead of waiting for the daily floating-document sweep.
+    expect(mockAnchorSupplierDoc).toHaveBeenCalledWith(supabase, 'company-1', invoice.id)
   })
 
   it('still returns success even if the post-link invoice re-fetch is empty (event is best-effort)', async () => {

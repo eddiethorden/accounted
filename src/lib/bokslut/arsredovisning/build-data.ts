@@ -12,6 +12,7 @@ import {
 } from '@/lib/bokslut/ixbrl/k2-mapper'
 import { buildBrRows, buildRrRows } from './statement-rows'
 import { getNarrative, type NarrativeRow } from './narrative-service'
+import { applyNoteOverrides, normalizeNoteOverrides } from './note-overrides'
 import {
   anyAssetHasComponents,
   buildEquityChangesNote,
@@ -34,6 +35,22 @@ import type {
   KassaflodesAnalysisSummary,
 } from './types'
 import type { AccountingFramework, Asset, TrialBalanceRow } from '@/types'
+
+/** Warning when the K3 kassaflödesanalys cannot be generated. Exported so
+ *  buildCanonicalAnnualReport can drop it when the statement is omitted by
+ *  choice (cash-flow-omission.ts): a failure to build a statement the
+ *  document leaves out is not something the user has to fix. */
+export const K3_CASH_FLOW_FAILED_WARNING =
+  'Kassaflödesanalysen kunde inte genereras automatiskt. Kontrollera att ingående och utgående saldo på 19xx finns och kör om bokslutet.'
+
+/** The K3 notice enumerating what the PDF contains. */
+export function k3ContentsNotice(hasCashFlow: boolean): string {
+  return (
+    'Bolaget redovisar enligt K3 (BFNAR 2012:1). Soliditeten är beräknad med 79,4 % av obeskattade reserver inräknat i eget kapital. PDF:en innehåller '
+    + (hasCashFlow ? 'kassaflödesanalys, förändring av eget kapital och utökade noter' : 'förändring av eget kapital och utökade noter')
+    + ': granska innehållet mot er specifika redovisning innan inlämning.'
+  )
+}
 
 /**
  * Pre-populate the K2 årsredovisning data for a fiscal period. Loads:
@@ -279,7 +296,9 @@ export async function buildArsredovisningData(
         () => ({ ok: false as const }),
       ),
     ])
-    noter = noterResult.notes
+    // User-edited note texts (K3 only: the K2 notes feed the iXBRL filing,
+    // which this override path does not cover).
+    noter = applyNoteOverrides(noterResult.notes, normalizeNoteOverrides(narrative?.note_overrides))
     noterWarnings = noterResult.warnings
     if (cashFlowSettled.ok) {
       const { cashFlow } = cashFlowSettled
@@ -298,9 +317,7 @@ export async function buildArsredovisningData(
     } else {
       // A partial SIE import can leave 1xxx without an IB row: the report
       // throws. Surface as a warning instead of blocking the whole ÅR.
-      noterWarnings.push(
-        'Kassaflödesanalysen kunde inte genereras automatiskt. Kontrollera att ingående och utgående saldo på 19xx finns och kör om bokslutet.',
-      )
+      noterWarnings.push(K3_CASH_FLOW_FAILED_WARNING)
     }
 
     // Equity-changes statement: derived from the post-level mapping. We
@@ -355,11 +372,7 @@ export async function buildArsredovisningData(
     // generateKassaflodesanalys failed we already pushed "kunde inte
     // genereras" above, and claiming the PDF contains one in the very next
     // warning would contradict it on the same screen.
-    warnings.push(
-      'Bolaget redovisar enligt K3 (BFNAR 2012:1). Soliditeten är beräknad med 79,4 % av obeskattade reserver inräknat i eget kapital. PDF:en innehåller '
-        + (kassaflodesanalys ? 'kassaflödesanalys, förändring av eget kapital och utökade noter' : 'förändring av eget kapital och utökade noter')
-        + ': granska innehållet mot er specifika redovisning innan inlämning.',
-    )
+    warnings.push(k3ContentsNotice(Boolean(kassaflodesanalys)))
   }
   if (entityType === 'unknown') {
     warnings.push(
@@ -451,6 +464,9 @@ export async function buildArsredovisningData(
       parent_company_org_number: narrative?.parent_company_org_number ?? null,
       parent_company_city: narrative?.parent_company_city ?? null,
       medelantal_anstallda_override: narrative?.medelantal_anstallda_override ?? null,
+      omit_kassaflodesanalys: narrative?.omit_kassaflodesanalys ?? false,
+      kassaflodesanalys_omission_confirmed:
+        narrative?.kassaflodesanalys_omission_confirmed ?? false,
       confirmations: {
         long_term_debt_over_five_years:
           narrative?.long_term_debt_over_five_years_confirmed ?? false,

@@ -33,6 +33,7 @@ import { WintClient, WintApiError } from '@/lib/providers/wint/client'
 import { loginWint, WintLoginRejectedError } from '@/lib/providers/wint/oauth'
 import { normalizeOrgNumber } from '@/lib/company-lookup/normalize-org-number'
 import { fetchCompanyInfoDirect } from '@/lib/providers/provider-data-fetcher'
+import { resolveConsent as resolveConsentForIdentity } from '@/lib/providers/resolve-consent'
 import type { CompanyInformationDto } from '@/lib/providers/dto'
 import { createLogger } from '@/lib/logger'
 import type { ConsentRecord, OtcResponse } from '../types'
@@ -491,7 +492,9 @@ export async function exchangeAuthToken(
   // to: the user (or someone who lured them) may have signed in to a different
   // Fortnox/Visma company. Same guard as Bokio/WINT in submitProviderToken:
   // refuse BEFORE anything is stored, so a foreign ledger never gets imported.
-  await assertProviderCompanyMatchesConsent(supabase, consentId, provider, tokenResponse.access_token)
+  const providerOrgNumber = await assertProviderCompanyMatchesConsent(
+    supabase, consentId, provider, tokenResponse.access_token,
+  )
 
   // Store tokens
   const { error: tokenError } = await supabase
@@ -505,10 +508,14 @@ export async function exchangeAuthToken(
     })
   if (tokenError) throw new Error('Provider credentials could not be saved')
 
-  // Mark consent as accepted
+  // Mark consent as accepted and record which provider company it opens. The
+  // org number is the durable source identity the migration job pipeline
+  // keys its idempotency on (create_provider_migration_job refuses a consent
+  // without one). `undefined` is dropped by the JSON serialisation, so a
+  // provider that reported no org number leaves the column untouched.
   const { error: consentError } = await supabase
     .from('provider_consents')
-    .update({ status: 1 })
+    .update({ status: 1, org_number: providerOrgNumber ?? undefined })
     .eq('id', consentId)
   if (consentError) throw new Error('Provider connection could not be accepted')
 
@@ -517,21 +524,24 @@ export async function exchangeAuthToken(
 
 /**
  * Compare the org number of the company the freshly issued token opens with
- * the org number of the Accounted company that owns the consent.
+ * the org number of the Accounted company that owns the consent, and return
+ * the provider's (normalised) org number so the caller can persist it as the
+ * consent's source identity.
  *
  * Only a confident mismatch blocks (throws ProviderCompanyMismatchError). A
  * missing org number on either side is not evidence of anything: Accounted
  * allows companies without one, a provider response can omit it, and the
  * company-information call itself can fail for reasons unrelated to identity
  * (scope not granted on this app registration, provider hiccup). Those cases
- * fall through and the connect completes exactly as before.
+ * fall through and the connect completes exactly as before; the return value
+ * is then null and no identity is recorded.
  */
 async function assertProviderCompanyMatchesConsent(
   supabase: ReturnType<typeof createServiceClient>,
   consentId: string,
   provider: ProviderName,
   accessToken: string,
-): Promise<void> {
+): Promise<string | null> {
   let info: CompanyInformationDto | null
   try {
     info = await fetchCompanyInfoDirect(provider, accessToken)
@@ -541,23 +551,38 @@ async function assertProviderCompanyMatchesConsent(
       consentId,
       reason: error instanceof Error ? error.message : 'unknown',
     })
-    return
+    return null
   }
 
-  const providerOrgNumber = normalizeOrgNumber(info?.organizationNumber)
-  if (!providerOrgNumber) return
+  if (!normalizeOrgNumber(info?.organizationNumber)) return null
 
   const { data: consent } = await supabase
     .from('provider_consents')
     .select('company_id')
     .eq('id', consentId)
     .maybeSingle()
-  if (!consent?.company_id) return
+  if (!consent?.company_id) return null
+
+  return providerOrgNumberMatchingCompany(supabase, consent.company_id as string, info)
+}
+
+/**
+ * The provider's org number, normalised, after checking it against the
+ * Accounted company's own. Throws ProviderCompanyMismatchError on a confident
+ * mismatch; null when the provider reported no valid org number.
+ */
+async function providerOrgNumberMatchingCompany(
+  supabase: ReturnType<typeof createServiceClient>,
+  companyId: string,
+  info: CompanyInformationDto | null,
+): Promise<string | null> {
+  const providerOrgNumber = normalizeOrgNumber(info?.organizationNumber)
+  if (!providerOrgNumber) return null
 
   const { data: targetCompany } = await supabase
     .from('companies')
     .select('org_number')
-    .eq('id', consent.company_id as string)
+    .eq('id', companyId)
     .maybeSingle()
   const targetOrgNumber = normalizeOrgNumber(targetCompany?.org_number)
 
@@ -568,6 +593,90 @@ async function assertProviderCompanyMatchesConsent(
       info?.companyName?.trim() || null,
     )
   }
+  return providerOrgNumber
+}
+
+/** Mirrors the RPC's account key: separators do not make an identity. */
+function hasIdentity(value: unknown): boolean {
+  return typeof value === 'string' && value.replace(/[^\p{L}\p{N}]/gu, '') !== ''
+}
+
+export type SourceIdentityOutcome = 'present' | 'filled' | 'unavailable'
+
+/**
+ * Make sure a consent carries the provider company's durable identity before
+ * a migration job is created for it.
+ *
+ * create_provider_migration_job keys every imported source record on
+ * (provider, account key), where the account key is the consent's org number
+ * or, failing that, the provider's tenant id. It survives OAuth reconnects, so
+ * a renewed consent resumes the same job and never re-imports what an earlier
+ * consent already brought in. Fortnox and Visma consents connected before the
+ * OAuth exchange recorded the org number have neither, and the RPC refuses
+ * them. This fills the org number in from the provider itself: the same
+ * company-information call the exchange makes, with the same mismatch guard,
+ * so the identity is always what the credentials actually open and never an
+ * assumption copied from the Accounted company.
+ *
+ * Idempotent: a consent that already has an identity is not touched, and the
+ * write only lands on a still-empty column. Provider failures are not fatal
+ * here ('unavailable'); the RPC then reports the missing identity itself.
+ */
+export async function ensureConsentSourceIdentity(
+  companyId: string,
+  consentId: string,
+): Promise<SourceIdentityOutcome> {
+  const supabase = createServiceClient()
+
+  const { data: consent } = await supabase
+    .from('provider_consents')
+    .select('provider, org_number')
+    .eq('id', consentId)
+    .eq('company_id', companyId)
+    .in('status', [0, 1])
+    .maybeSingle()
+  if (!consent?.provider) return 'unavailable'
+  if (hasIdentity(consent.org_number)) return 'present'
+
+  const { data: tokens } = await supabase
+    .from('provider_consent_tokens')
+    .select('provider_company_id')
+    .eq('consent_id', consentId)
+    .maybeSingle()
+  if (!tokens) return 'unavailable'
+  if (hasIdentity(tokens.provider_company_id)) return 'present'
+
+  const provider = consent.provider as ProviderName
+  let info: CompanyInformationDto | null
+  try {
+    const resolved = await resolveConsentForIdentity(companyId, consentId)
+    info = await fetchCompanyInfoDirect(provider, resolved.accessToken, resolved.providerCompanyId)
+  } catch (error) {
+    log.warn('provider company information unavailable; source identity not filled', {
+      provider,
+      consentId,
+      reason: error instanceof Error ? error.message : 'unknown',
+    })
+    return 'unavailable'
+  }
+
+  const orgNumber = await providerOrgNumberMatchingCompany(supabase, companyId, info)
+  if (!orgNumber) {
+    log.warn('provider reported no valid org number; source identity not filled', { provider, consentId })
+    return 'unavailable'
+  }
+
+  const { error } = await supabase
+    .from('provider_consents')
+    .update({ org_number: orgNumber })
+    .eq('id', consentId)
+    .eq('company_id', companyId)
+    .or('org_number.is.null,org_number.eq.')
+  if (error) {
+    log.warn('source identity could not be saved', { provider, consentId, reason: error.message })
+    return 'unavailable'
+  }
+  return 'filled'
 }
 
 export async function submitProviderToken(

@@ -174,6 +174,26 @@ async function pickAnchorEntry(
   for (const row of (paymentRows ?? []) as { journal_entry_id: string | null }[]) {
     push(row.journal_entry_id)
   }
+  return firstAnchorableEntry(supabase, companyId, candidates, 'supplier invoice', {
+    supplierInvoiceId,
+  })
+}
+
+/**
+ * The first of `candidates` (in the caller's preference order) that can take
+ * an underlag right now: a posted entry in an open, unlocked period. A
+ * reversed entry is no longer a live booking, and enforce_period_lock_documents
+ * rejects the write outright once the period is closed or locked. Shared by the
+ * supplier- and customer-invoice anchoring so the two never disagree on which
+ * verifikat is eligible.
+ */
+export async function firstAnchorableEntry(
+  supabase: SupabaseClient,
+  companyId: string,
+  candidates: string[],
+  subject: 'supplier invoice' | 'customer invoice',
+  logContext: Record<string, unknown> = {},
+): Promise<string | null> {
   if (candidates.length === 0) return null
 
   const { data: entries, error } = await supabase
@@ -193,9 +213,9 @@ async function pickAnchorEntry(
     // onwards and the result was dropped on the floor, so the caller's "no
     // verifikat can anchor it" warning was the only signal, and it named the
     // wrong cause.
-    log.error('failed to resolve period lock state for supplier invoice anchoring', {
+    log.error(`failed to resolve period lock state for ${subject} anchoring`, {
       companyId,
-      supplierInvoiceId,
+      ...logContext,
       reason: error.message,
     })
     return null
