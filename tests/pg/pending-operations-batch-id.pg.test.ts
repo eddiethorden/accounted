@@ -4,7 +4,7 @@ import { seedCompany } from '@/tests/pg/fixtures'
 import { getPool } from '@/tests/pg/setup'
 
 /**
- * pg-real coverage for migration 20260919200000_pending_operations_batch_id.
+ * pg-real coverage for migration 20260923160000_pending_operations_batch_id.
  *
  * Locks in:
  *   - batch_id exists as a nullable uuid column.
@@ -36,7 +36,7 @@ async function insertPendingOperation(params: {
   return rows[0]!.id
 }
 
-describe('pending_operations.batch_id (migration 20260919200000)', () => {
+describe('pending_operations.batch_id (migration 20260923160000)', () => {
   it('exposes batch_id as a nullable uuid column', async () => {
     const { rows } = await getPool().query<{
       data_type: string

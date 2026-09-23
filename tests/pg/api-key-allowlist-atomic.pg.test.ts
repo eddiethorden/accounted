@@ -4,7 +4,7 @@ import { insertCompany, insertCompanyMember, seedCompany } from '@/tests/pg/fixt
 import { getPool } from '@/tests/pg/setup'
 
 /**
- * pg-real coverage for migration 20260919220000_api_key_allowlist_atomic.
+ * pg-real coverage for migration 20260923160200_api_key_allowlist_atomic.
  *
  * Locks in:
  *   - create_api_key_with_allowlist writes the api_keys row and its
@@ -96,7 +96,7 @@ async function keysWithHash(keyHash: string): Promise<number> {
   return Number(rows[0]!.n)
 }
 
-describe('create_api_key_with_allowlist (migration 20260919220000)', () => {
+describe('create_api_key_with_allowlist (migration 20260923160200)', () => {
   it('writes the key row and one allowlist row per company for a valid list', async () => {
     const { userId, companyId } = await seedCompany()
     const second = await insertCompany({ createdBy: userId, name: 'Second AB' })
@@ -232,7 +232,7 @@ describe('create_api_key_with_allowlist (migration 20260919220000)', () => {
   })
 })
 
-describe('replace_api_key_allowlist (migration 20260919220000)', () => {
+describe('replace_api_key_allowlist (migration 20260923160200)', () => {
   it('swaps the set: drops what is no longer listed, adds what is missing, returns the new size', async () => {
     const { userId, companyId } = await seedCompany()
     const second = await insertCompany({ createdBy: userId, name: 'Second AB' })

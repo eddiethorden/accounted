@@ -196,14 +196,35 @@ const KNOWN_STALE_ON_CONFLICT: Record<string, string> = {}
 // the OAuth token route and the settings key-creation route write the
 // allowlist as one bulk insert of { api_key_id, company_id } rows mapped from
 // the selected ids (a row per company cannot be an object literal). Both
-// columns are created by migration 20260919210000 and the same shape is
+// columns are created by migration 20260923160100 and the same shape is
 // pinned by tests/pg/api-key-companies.pg.test.ts.
 // 2026-09-19 later: those two bulk inserts, the PATCH route's upsert array
 // and its interpolated not-in prune moved into two SECURITY DEFINER RPCs
 // (create_api_key_with_allowlist, replace_api_key_allowlist, migration
-// 20260919220000) so key + allowlist are one transaction; the count is 405.
-// The ceiling stays at 409 as headroom.
-const UNRESOLVED_CEILING = 409
+// 20260923160200) so key + allowlist are one transaction; the count is 405.
+// The ceiling stayed at 409 as headroom; merged 2026-09-23 under the
+// Arkiv ceiling below, which already covers it.
+// 2026-09-21 Arkiv merge train (phases 1 to 5 each add their own entry below;
+// main stood at 407 of 407 when the train started). Headroom of 3 restored
+// here so a parallel merge to main does not stall the train: 407 -> 410 base.
+// Phase 1 page text (+1): lib/documents/read/store.ts inserts one
+// document_pages row per page built by a map; the columns are literal inside
+// the callback but the scanner reads only object and array literals.
+// Phase 2 classification (+1): the human-override UPDATE on
+// document_attachments is a partial patch (doc_type and admission columns);
+// one literal per key combination is not viable.
+// Phase 3 extraction (+4): the job queue's status patch spreads a partial
+// update, the extraction save carries the model's field payload, and the
+// provenance upsert builds its row and names its conflict target from the
+// row's own keys.
+// Phase 4 links and agreements (+1): lib/arkiv/agreements/store.ts
+// syncObligations inserts one row per due date built by a map.
+// Phase 5 facts (+5): five .or() filters whose values are a date or a search
+// term at runtime (lib/arkiv/facts/store.ts, arkiv-tools.ts,
+// behandlingshistorik.ts: valid_from/valid_to as of a date, belief window,
+// ilike on title and counterparty), which PostgREST can only express as a
+// formatted or-string.
+const UNRESOLVED_CEILING = 422
 
 /**
  * Floor on statically resolved column references. Guards the guard: if a change
@@ -238,11 +259,11 @@ beforeAll(() => {
   schema = buildSchemaFromMigrations(path.join(ROOT, 'supabase', 'migrations'))
   scan = scanColumnRefs(
     listSourceFiles([
-      path.join(ROOT, 'app'),
-      path.join(ROOT, 'lib'),
-      path.join(ROOT, 'components'),
-      path.join(ROOT, 'extensions'),
-      path.join(ROOT, 'hooks'),
+      path.join(ROOT, 'src', 'app'),
+      path.join(ROOT, 'src', 'lib'),
+      path.join(ROOT, 'src', 'components'),
+      path.join(ROOT, 'src', 'extensions'),
+      path.join(ROOT, 'src', 'hooks'),
       path.join(ROOT, 'scripts'),
     ]),
     schema,

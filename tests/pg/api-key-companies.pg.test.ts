@@ -4,7 +4,7 @@ import { insertCompany, insertCompanyMember, seedCompany } from '@/tests/pg/fixt
 import { getPool } from '@/tests/pg/setup'
 
 /**
- * pg-real coverage for migration 20260919210000_api_key_companies.
+ * pg-real coverage for migration 20260923160100_api_key_companies.
  *
  * Locks in:
  *   - The table shape: composite primary key, both FKs ON DELETE CASCADE, the
@@ -66,7 +66,7 @@ async function validate(keyHash: string): Promise<ValidateRow[]> {
   return rows
 }
 
-describe('api_key_companies (migration 20260919210000): shape', () => {
+describe('api_key_companies (migration 20260923160100): shape', () => {
   it('has the expected columns and a composite primary key', async () => {
     const { rows } = await getPool().query<{
       column_name: string
