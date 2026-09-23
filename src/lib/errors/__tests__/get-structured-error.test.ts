@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getStructuredError } from '../get-structured-error'
 import { BookkeepingDatabaseError } from '@/lib/bookkeeping/errors'
+import { dbError } from '../db-error'
 
 describe('getStructuredError', () => {
   it.each([
@@ -200,5 +201,34 @@ describe('getStructuredError: throw-site remediation', () => {
     expect(result.code).toBe('PERIOD_NOT_LOCKED')
     expect(result.remediation?.tool).toBe('gnubok_lock_period')
     expect(result.remediation?.description).toBeTruthy()
+  })
+})
+
+describe('getStructuredError: .single() with no row', () => {
+  it('maps PGRST116 with 0 rows to NOT_FOUND, not retryable', () => {
+    const err = dbError({
+      code: 'PGRST116',
+      message: 'Cannot coerce the result to a single JSON object',
+      details: 'The result contains 0 rows',
+    })
+    const s = getStructuredError(err)
+    expect(s.code).toBe('NOT_FOUND')
+    expect(s.retryable).toBe(false)
+    expect(s.message_sv).not.toMatch(/Något gick fel/)
+    expect(s.message_en).toMatch(/no record with that id/)
+  })
+
+  it('maps PGRST116 without details to NOT_FOUND (the id-lookup shape)', () => {
+    const s = getStructuredError({ code: 'PGRST116', message: 'Cannot coerce the result to a single JSON object' })
+    expect(s.code).toBe('NOT_FOUND')
+  })
+
+  it('leaves PGRST116 with several rows alone: that is a query bug, not a missing record', () => {
+    const s = getStructuredError({
+      code: 'PGRST116',
+      message: 'Cannot coerce the result to a single JSON object',
+      details: 'The result contains 2 rows',
+    })
+    expect(s.code).not.toBe('NOT_FOUND')
   })
 })

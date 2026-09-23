@@ -395,8 +395,8 @@ import { readAgiSubmissionStatus } from '@/extensions/general/skatteverket/lib/a
 import { buildMomsuppgift, resolveRedovisare, resolveRedovisningsperiod } from '@/extensions/general/skatteverket/lib/declaration-prep'
 import { writeSkatteverketAudit } from '@/extensions/general/skatteverket/lib/audit'
 import { skvAuthCodeToStructured } from '@/extensions/general/skatteverket/lib/error-map'
-import { findCompanyTokenUser, hasVerifiedGrant } from '@/extensions/general/skatteverket/lib/resolve-auth'
-import { getSystemAuthMode, isSystemAuthConfigured } from '@/extensions/general/skatteverket/lib/system-auth/config'
+import { getSkvConnectionHealth, SKV_NEEDS_RECONSENT_MESSAGE } from './skv-connection-health'
+import { suggestToolNames } from './tool-suggest'
 // Stage-time preview for book_skattekonto_row(s): same deterministic rule
 // matcher the skattekonto list page and the booking commit path use. The
 // actual booking runs in the extension's registry-resolved commit service on
@@ -2181,8 +2181,12 @@ const SKV_VAT_STATUS_OUTPUT_SCHEMA = {
   properties: {
     redovisare: { type: 'string', description: '12-digit redovisare' },
     redovisningsperiod: { type: 'string', description: 'YYYYMM' },
-    submitted: { type: ['object', 'null'], description: 'Inlämnad deklaration, or null if none on file' },
-    decided: { type: ['object', 'null'], description: 'Beslutad deklaration, or null if not yet decided' },
+    // Skatteverket answers inlämnat with a LIST (every submission for the
+    // period), and clients that validate structuredContent refused the whole
+    // result when the schema said object (feedback seq 694132). Passed through
+    // as Skatteverket sends it, so both shapes are allowed.
+    submitted: { type: ['object', 'array', 'null'], description: 'Inlämnad deklaration as Skatteverket returns it (a list of submissions, or one object), or null if none on file' },
+    decided: { type: ['object', 'array', 'null'], description: 'Beslutad deklaration as Skatteverket returns it, or null if not yet decided' },
   },
   required: ['redovisare', 'redovisningsperiod', 'submitted', 'decided'],
 } as const
@@ -4725,7 +4729,8 @@ export const tools: McpTool[] = [
       type: 'object',
       properties: {
         available: { type: 'boolean' },
-        connected: { type: 'boolean' },
+        connected: { type: 'boolean', description: 'true only when Skatteverket calls will work now' },
+        status: { type: 'string', enum: ['connected', 'needs_reconsent', 'not_connected', 'unavailable'] },
         token_expires_at: { type: ['string', 'null'] },
         connect_url: { type: ['string', 'null'] },
         instructions: { type: 'string' },
@@ -4745,18 +4750,26 @@ export const tools: McpTool[] = [
         .maybeSingle()
       if (error) throw error
       const token = data as { expires_at: string } | null
-      const connected = Boolean(token)
+      // A token row is not a working connection: one flagged needs_reconsent
+      // used to answer connected: true (feedback seq 604946) while the
+      // briefing said the opposite. Same health check as the briefing now.
+      const health = await getSkvConnectionHealth(supabase, companyId)
+      const needsReconsent = health?.status === 'needs_reconsent'
+      const connected = health?.status === 'active'
       const connectUrl = `${connectLinkBaseUrl()}/api/extensions/ext/skatteverket/authorize?return_to=%2F`
       return {
         available: enabled,
         connected,
+        status: !enabled ? 'unavailable' : connected ? 'connected' : needsReconsent ? 'needs_reconsent' : 'not_connected',
         token_expires_at: token?.expires_at ?? null,
         connect_url: enabled ? connectUrl : null,
         instructions: !enabled
           ? 'The Skatteverket integration is not enabled on this installation. Declarations can still be downloaded as files and filed manually at skatteverket.se.'
           : connected
             ? 'Skatteverket is connected. Skattekonto syncs automatically; momsdeklaration and AGI can be filed from here (each filing stages for approval).'
-            : 'On claude.ai/Claude Desktop a connect card with an open-in-browser button is rendered with this result; on other clients give the user the connect_url as a link. They must be logged in to Accounted there; Skatteverket asks them to identify with BankID as firmatecknare and approve the access, then they land back in Accounted. Tell them to come back here when done.',
+            : needsReconsent
+              ? `The Skatteverket session has expired (the personal login lasts about an hour, so this is normal). Only a person can renew it: give the user the connect_url and ask them to sign in again with BankID, then continue. Do not call Skatteverket tools until they confirm. ${SKV_NEEDS_RECONSENT_MESSAGE}`
+              : 'On claude.ai/Claude Desktop a connect card with an open-in-browser button is rendered with this result; on other clients give the user the connect_url as a link. They must be logged in to Accounted there; Skatteverket asks them to identify with BankID as firmatecknare and approve the access, then they land back in Accounted. Tell them to come back here when done.',
       }
     },
   },
@@ -5721,44 +5734,7 @@ export const tools: McpTool[] = [
       // session start instead of discovering a dead session mid-task.
       // Best-effort and emitted only when a connection (or verified system
       // grant) exists: never-connected companies pay no payload for it.
-      // The system-before-user priority mirrors resolveReadAuth
-      // (skatteverket/lib/resolve-auth.ts); not reused directly because the
-      // briefing needs token metadata (createdAt, reconsent status) that
-      // resolveReadAuth deliberately collapses into an auth result.
-      const safeSkvConnection = (async (): Promise<
-        | {
-            status: 'active' | 'needs_reconsent'
-            source: 'user' | 'system'
-            connected_at?: string | null
-            message?: string
-          }
-        | null
-      > => {
-        try {
-          if (process.env.SKATTEVERKET_ENABLED !== 'true') return null
-          if (
-            getSystemAuthMode() === 'on' &&
-            isSystemAuthConfigured() &&
-            (await hasVerifiedGrant(companyId, 'lasombud'))
-          ) {
-            return { status: 'active', source: 'system' }
-          }
-          const token = await findCompanyTokenUser(supabase, companyId)
-          if (!token) return null
-          if (token.needsReconsent) {
-            return {
-              status: 'needs_reconsent',
-              source: 'user',
-              connected_at: token.createdAt,
-              message:
-                'Skatteverket-sessionen har gått ut. Skatteverkets personliga inloggning gäller bara ca 1 timme, så detta är normalt. Be användaren ansluta igen med BankID under Inställningar → Skatteverket; bara en person kan göra det, så försök inte med Skatteverket-verktyg förrän användaren bekräftat.',
-            }
-          }
-          return { status: 'active', source: 'user', connected_at: token.createdAt }
-        } catch {
-          return null
-        }
-      })()
+      const safeSkvConnection = getSkvConnectionHealth(supabase, companyId)
 
       const [profileRes, memoryRes, userRes, companyRes, settingsRes, dimensionsRes] = await Promise.all([
         supabase
@@ -5795,7 +5771,7 @@ export const tools: McpTool[] = [
           .maybeSingle(),
         supabase
           .from('company_settings')
-          .select('accounting_method, dimensions_enabled')
+          .select('accounting_method, dimensions_enabled, company_name')
           .eq('company_id', companyId)
           .maybeSingle(),
         safeDimensionsRead,
@@ -5835,12 +5811,15 @@ export const tools: McpTool[] = [
         | { name: string | null; org_number: string | null; entity_type: string | null }
         | null
       const settingsRow = settingsRes.data as
-        | { accounting_method: string | null; dimensions_enabled?: boolean | null }
+        | { accounting_method: string | null; dimensions_enabled?: boolean | null; company_name?: string | null }
         | null
       const company = {
         id: companyId,
         company_id: companyId,
-        name: companyRow?.name ?? null,
+        // The name the owner edits in Inställningar, as gnubok_list_companies
+        // shows it; companies.name is the onboarding snapshot and goes stale on
+        // a rename (feedback seq 580571, 670221: two names for one company).
+        name: settingsRow?.company_name || companyRow?.name || null,
         org_number: companyRow?.org_number ?? null,
         entity_type: companyRow?.entity_type ?? null,
         accounting_method: settingsRow?.accounting_method ?? null,
@@ -24271,9 +24250,24 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
           : ''
         : outerToolName
       const toolName = toCanonicalToolName(requestedToolName)
-      const rawToolArgs = viaBridge
+      const innerToolArgs = viaBridge
         ? ((outerToolArgs.arguments ?? {}) as Record<string, unknown>)
         : outerToolArgs
+      // tools/list advertises company_id on the bridges themselves (every
+      // company-dependent tool gets it), so agents send it NEXT TO `tool`.
+      // Dropping it there silently ran the inner tool on the key's default
+      // company and returned another company's data (feedback seq 561118,
+      // 694132). Carry it into the inner arguments; two different ids is an
+      // ambiguity the caller has to resolve, never a guess.
+      const bridgeCompanyConflict =
+        viaBridge &&
+        outerToolArgs.company_id !== undefined &&
+        innerToolArgs.company_id !== undefined &&
+        outerToolArgs.company_id !== innerToolArgs.company_id
+      const rawToolArgs =
+        viaBridge && outerToolArgs.company_id !== undefined && innerToolArgs.company_id === undefined
+          ? { ...innerToolArgs, company_id: outerToolArgs.company_id }
+          : innerToolArgs
 
       const tool = tools.find((t) => t.name === toolName)
 
@@ -24296,7 +24290,11 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       // below still runs against the real target. An unknown-but-named target
       // falls through to the unknown-tool handler below, which lists what
       // exists.
-      const refusal = bridge ? bridgeRefusalReason(bridge, requestedToolName, tool) : null
+      const refusal = bridgeCompanyConflict
+        ? `company_id is given twice with different values (${String(outerToolArgs.company_id)} next to "tool", ${String(innerToolArgs.company_id)} inside "arguments"). Send it once.`
+        : bridge
+          ? bridgeRefusalReason(bridge, requestedToolName, tool)
+          : null
       if (refusal) {
         const bridgeError = toToolError(codedError('VALIDATION_ERROR', refusal), {
           toolName: outerCanonicalName,
@@ -24349,11 +24347,34 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         const available = tools
           .map((t) => toPublicToolName(t.name, toolNamespace))
           .join(', ')
+        // Closest real tools first, each with how to reach it, so a guessed
+        // name (get_journal_entry, list_bank_accounts) turns into the right
+        // call instead of a scan of the whole catalog. Only tools this key may
+        // call are suggested, as gnubok_search_tools filters.
+        const suggestions = suggestToolNames(
+          requestedToolName,
+          tools.filter((t) => {
+            const required = TOOL_SCOPE_MAP[t.name]
+            return !required || hasScope(keyScopes, required)
+          }),
+        )
+        const didYouMean =
+          suggestions.length > 0
+            ? ` Did you mean: ${suggestions
+                .map((t) => {
+                  const via = toolCallableVia(t, isStagingTool(t))
+                  const name = toPublicToolName(t.name, toolNamespace)
+                  return via === 'call_tool' || via === 'stage_tool'
+                    ? `${name} (via ${toPublicToolName(`gnubok_${via}`, toolNamespace)})`
+                    : name
+                })
+                .join(', ')}? Or search with ${toPublicToolName('gnubok_search_tools', toolNamespace)}.`
+            : ` Search with ${toPublicToolName('gnubok_search_tools', toolNamespace)}.`
         return NextResponse.json(
           jsonRpcError(
             id ?? null,
             -32602,
-            `Unknown tool: "${requestedToolName}". Available tools: ${available}`
+            `Unknown tool: "${requestedToolName}".${didYouMean} Available tools: ${available}`
           )
         )
       }
