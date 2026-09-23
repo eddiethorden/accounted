@@ -56,16 +56,21 @@ describe('GET /api/arkiv/documents', () => {
       data: [
         { id: 'doc-a', created_at: '2026-09-15T10:00:00Z', file_name: 'Almilånedokument.pdf', doc_type: 'agreement.loan', admission_state: 'admitted', journal_entry_id: null },
         { id: 'doc-b', created_at: '2026-09-14T10:00:00Z', file_name: 'kvitto.jpg', doc_type: 'receipt', admission_state: 'admitted', journal_entry_id: 'je-1', extracted_data: { supplier: { name: 'Systembolaget' }, invoice: { invoiceDate: '2026-09-11', currency: 'SEK' }, totals: { total: 2388.8 } } },
+        // Minutes the inbox once read as an invoice: the counterparty carries over, the "total" (a prominent figure) does not.
+        { id: 'doc-c', created_at: '2026-09-13T10:00:00Z', file_name: 'Stamma.pdf', doc_type: 'minutes.agm', admission_state: 'admitted', journal_entry_id: null, extracted_data: { supplier: { name: 'Arcim Technology AB' }, invoice: { invoiceDate: '2026-06-01', currency: 'SEK' }, totals: { total: 20.83 } } },
       ],
     })
     enqueue({ data: [{ id: 'je-1', voucher_series: 'A', voucher_number: 5 }] })
     const { status, body } = await parseJsonResponse(await call())
     expect(status).toBe(200)
     const rows = (body as { data: Array<Record<string, unknown>> }).data
+    const row = (id: string) => rows.find((r) => r.document_id === id)
     // An agreement with no reading is titled by its type: the file name stays in the row's title attribute.
-    expect(rows[0]).toMatchObject({ document_id: 'doc-a', title: 'Låneavtal', file_name: 'Almilånedokument.pdf', counterparty: null, amount: null, href: '/arkiv/dokument/doc-a', linked: { agreement_id: null } })
-    // A receipt the inbox read: titled, dated and priced from that reading.
-    expect(rows[1]).toMatchObject({ document_id: 'doc-b', title: 'Kvitto Systembolaget', counterparty: 'Systembolaget', amount: 2388.8, currency: 'SEK', document_date: '2026-09-11', linked: { voucher: 'A5' }, href: '/arkiv/dokument/doc-b' })
+    expect(row('doc-a')).toMatchObject({ title: 'Låneavtal', file_name: 'Almilånedokument.pdf', counterparty: null, amount: null, href: '/arkiv/dokument/doc-a', linked: { agreement_id: null } })
+    // A receipt the inbox read: titled, dated and priced from that reading (and sorted by that date).
+    expect(row('doc-b')).toMatchObject({ title: 'Kvitto Systembolaget', counterparty: 'Systembolaget', amount: 2388.8, currency: 'SEK', document_date: '2026-09-11', linked: { voucher: 'A5' }, href: '/arkiv/dokument/doc-b' })
+    expect(row('doc-c')).toMatchObject({ title: 'Bolagsstämma', counterparty: 'Arcim Technology AB', amount: null, currency: null })
+    expect(rows.map((r) => r.document_id)).toEqual(['doc-a', 'doc-c', 'doc-b'])
     expect(findCalls('document_extractions', 'in')).toEqual([])
     expect(findCalls('agreements', 'in')).toEqual([])
   })

@@ -116,7 +116,7 @@ export const GET = withRouteContext('arkiv.document', async (_request, ctx, { pa
     title: documentTitle({
       docType: d.doc_type,
       fileName: d.file_name,
-      payload: ext?.payload ?? underlagPayload(d.extracted_data as Record<string, unknown> | null),
+      payload: ext?.payload ?? underlagPayload(d.extracted_data as Record<string, unknown> | null, d.doc_type),
       agreementTitle: (agreement.data as { title: string } | null)?.title ?? null,
     }),
     created_at: d.created_at,

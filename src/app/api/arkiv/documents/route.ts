@@ -144,7 +144,7 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
 
   const rows: ArkivDocumentRow[] = docs.map((d) => {
     // The brain's reading when there is one; the inbox's Underlag reading otherwise.
-    const payload = payloadByDoc.get(d.id) ?? underlagPayload(d.extracted_data)
+    const payload = payloadByDoc.get(d.id) ?? underlagPayload(d.extracted_data, d.doc_type)
     const agreement = agreementByDoc.get(d.id)
     const settled = (...names: string[]) => names.map((n) => payload[n]?.normalized).find((v) => v != null) ?? null
     const counterparty =
