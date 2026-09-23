@@ -47,14 +47,14 @@ are written in domain terms, never in a provider's terms.
 
 | Capability | Port | Registry | Worked example |
 |---|---|---|---|
-| Bank feed | `lib/bank-feed/port.ts` | `lib/bank-feed/registry.ts` | `extensions/general/enable-banking/lib/bank-feed/` |
-| E-invoicing (Peppol) | `lib/invoices/peppol-transport.ts` (`PeppolTransport`) | `registerPeppolTransport`, selection in `lib/invoices/transports/index.ts` | `lib/invoices/transports/qvalia.ts`, `lib/invoices/transports/connector.ts` |
-| Tax agency (Skatteverket) | Port pending; today `extensions/general/skatteverket/lib/api-client.ts` with a transport seam in `connector-mode.ts` | | |
+| Bank feed | `src/lib/bank-feed/port.ts` | `src/lib/bank-feed/registry.ts` | `src/extensions/general/enable-banking/lib/bank-feed/` |
+| E-invoicing (Peppol) | `src/lib/invoices/peppol-transport.ts` (`PeppolTransport`) | `registerPeppolTransport`, selection in `src/lib/invoices/transports/index.ts` | `src/lib/invoices/transports/qvalia.ts`, `src/lib/invoices/transports/connector.ts` |
+| Tax agency (Skatteverket) | Port pending; today `src/extensions/general/skatteverket/lib/api-client.ts` with a transport seam in `connector-mode.ts` | | |
 
 If your capability has no port yet, create one only when a second
 implementation exists or is being built at the same time (for example a
 direct adapter and the Connect adapter). One implementation does not
-justify an interface. Mirror `lib/bank-feed`: a `port.ts` with the types
+justify an interface. Mirror `src/lib/bank-feed`: a `port.ts` with the types
 and the adapter interface, a `registry.ts` with register, resolve and a
 test hook, and a `__tests__/registry.test.ts`.
 
@@ -71,7 +71,7 @@ export interface BankFeedAdapter {
 
 ### 2. Write the adapter inside an extension
 
-Provider code belongs in an extension under `extensions/general/<name>/`,
+Provider code belongs in an extension under `src/extensions/general/<name>/`,
 never in core. Scaffold one with the `create-extension` skill or
 `npx tsx scripts/create-extension.ts`, enable it in `extensions.config.json`
 and run `npm run setup:extensions`. Core must build with zero extensions,
@@ -84,7 +84,7 @@ Inside the extension:
   prefix, document them in `.env.example` and `docs/SELF-HOSTING.md`.
 - `lib/<capability>/index.ts`: an idempotent `ensure...Adapters()` that
   registers the adapter, called at extension module load (see
-  `extensions/general/enable-banking/index.ts`) and by any entry point that
+  `src/extensions/general/enable-banking/index.ts`) and by any entry point that
   resolves an adapter.
 - Keep the provider's HTTP client separate from the adapter so the same
   client can run behind a different transport later.
@@ -107,7 +107,7 @@ code.
   `node scripts/checks/no-new-antipatterns.mjs --update` and say so in the
   PR body: the guard exists to keep provider hosts out of core and out of
   unrelated code, not to block adapters.
-- New user-facing strings go in both `messages/sv.json` and `messages/en.json`.
+- New user-facing strings go in both `src/messages/sv.json` and `src/messages/en.json`.
 - If the adapter needs a migration, use the `supabase-migration` skill and
   ship a `*.pg.test.ts` for any trigger, RPC or policy.
 

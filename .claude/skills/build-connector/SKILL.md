@@ -14,9 +14,9 @@ is the order of operations and the checks that are easy to forget.
    remote adapter (a service outside the repo, through Connect), or app
    (public API, MCP, webhooks). If unsure: does the source feed a port
    (bank feed, e-invoicing, tax agency)? Then door 1 or 2. Otherwise door 3.
-2. **Find the port.** `lib/bank-feed/port.ts`, `lib/invoices/peppol-transport.ts`.
+2. **Find the port.** `src/lib/bank-feed/port.ts`, `src/lib/invoices/peppol-transport.ts`.
    Create a new port only when two implementations exist or are being built
-   together; mirror `lib/bank-feed` (port, registry, registry test).
+   together; mirror `src/lib/bank-feed` (port, registry, registry test).
 3. **Write the adapter in an extension**, never in core. Direct adapter on
    own credentials; idempotent registration at module load; provider HTTP
    client separate from the adapter.
@@ -28,7 +28,7 @@ is the order of operations and the checks that are easy to forget.
 6. **Gates.** `npx vitest run <dir>`, `npm run lint`, `npm run check:types`,
    `npm run check:guards`. Re-baseline `provider-host` with
    `node scripts/checks/no-new-antipatterns.mjs --update` and say so in the
-   PR body. Strings in both `messages/sv.json` and `messages/en.json`.
+   PR body. Strings in both `src/messages/sv.json` and `src/messages/en.json`.
 7. **PR body** with a `## First principles` section and the environment
    variables introduced.
 
@@ -44,7 +44,7 @@ is the order of operations and the checks that are easy to forget.
 
 ## Worked examples in the repo
 
-- Bank feed port and registry: `lib/bank-feed/`
-- Two adapters for one port: `extensions/general/enable-banking/lib/bank-feed/{direct,connect}.ts`
-- Transport seam for a provider client: `extensions/general/enable-banking/lib/transport.ts`
-- Peppol as a transport registry: `lib/invoices/peppol-transport.ts`, `lib/invoices/transports/`
+- Bank feed port and registry: `src/lib/bank-feed/`
+- Two adapters for one port: `src/extensions/general/enable-banking/lib/bank-feed/{direct,connect}.ts`
+- Transport seam for a provider client: `src/extensions/general/enable-banking/lib/transport.ts`
+- Peppol as a transport registry: `src/lib/invoices/peppol-transport.ts`, `src/lib/invoices/transports/`
