@@ -29,7 +29,7 @@ interface OAuthClient {
   revoked_at: string | null
 }
 
-export function OAuthClientsPanel() {
+export function OAuthClientsPanel({ className }: { className?: string } = {}) {
   const t = useTranslations('settings_oauth_clients')
   const locale = useLocale()
   const { toast } = useToast()
@@ -116,7 +116,7 @@ export function OAuthClientsPanel() {
 
   return (
     <>
-      <SettingsGroup>
+      <SettingsGroup className={className}>
         {/* Group eyebrow with the group's primary action on the right. Styling
             mirrors SettingsGroup's label line; the "?" holds the old panel
             description. */}
