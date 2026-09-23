@@ -16,6 +16,7 @@
  * not in `postgresCodeToStructured()` and still fall through to 500.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { NoteOverrides } from './note-overrides'
 
 export interface NarrativeOverrides {
   description: string | null
@@ -63,6 +64,15 @@ export interface NarrativeOverrides {
   parent_company_confirmed: boolean
   agm_disposition_outcome: 'proposal_approved' | 'alternative_decision' | null
   agm_disposition_decision: string | null
+  /** K3 note texts the user replaced, keyed by EditableNoteKey. A missing
+   *  key means the generated text (note-overrides.ts). */
+  note_overrides: NoteOverrides
+  /** K3: leave the kassaflödesanalys out. Honoured only when the company
+   *  is not a större företag (cash-flow-omission.ts). */
+  omit_kassaflodesanalys: boolean
+  /** The user confirmed the company is not a större företag under ÅRL
+   *  1 kap. 3 §, needed when the product cannot determine the size. */
+  kassaflodesanalys_omission_confirmed: boolean
 }
 
 /**
@@ -103,6 +113,9 @@ export interface NarrativeRow {
   parent_company_confirmed: boolean
   agm_disposition_outcome: 'proposal_approved' | 'alternative_decision' | null
   agm_disposition_decision: string | null
+  note_overrides: NoteOverrides
+  omit_kassaflodesanalys: boolean
+  kassaflodesanalys_omission_confirmed: boolean
   updated_at: string
 }
 
@@ -112,7 +125,7 @@ const TABLE = 'arsredovisning_narratives'
 // of API responses. GDPR Art.25.2 / ISO A.8.3 data-minimization: callers
 // only need the narrative content + last-updated timestamp.
 const NARRATIVE_API_COLUMNS =
-  'id, company_id, fiscal_period_id, description, important_events, resultatdisposition, proposed_dividend, agm_date, long_term_debt_over_five_years, securities_pledged, contingent_liabilities, parent_company_name, parent_company_org_number, parent_company_city, medelantal_anstallda_override, member_count_change, insatser_repayable_next_year, forlagsinsatser_dividend_right, forlagsinsatser_redeemable_two_years, long_term_debt_over_five_years_confirmed, securities_pledged_confirmed, contingent_liabilities_confirmed, parent_company_confirmed, agm_disposition_outcome, agm_disposition_decision, updated_at'
+  'id, company_id, fiscal_period_id, description, important_events, resultatdisposition, proposed_dividend, agm_date, long_term_debt_over_five_years, securities_pledged, contingent_liabilities, parent_company_name, parent_company_org_number, parent_company_city, medelantal_anstallda_override, member_count_change, insatser_repayable_next_year, forlagsinsatser_dividend_right, forlagsinsatser_redeemable_two_years, long_term_debt_over_five_years_confirmed, securities_pledged_confirmed, contingent_liabilities_confirmed, parent_company_confirmed, agm_disposition_outcome, agm_disposition_decision, note_overrides, omit_kassaflodesanalys, kassaflodesanalys_omission_confirmed, updated_at'
 
 /**
  * The medelantal anställda override alone, for a period other than the one

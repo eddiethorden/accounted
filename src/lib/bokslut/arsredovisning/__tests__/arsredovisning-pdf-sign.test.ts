@@ -122,6 +122,8 @@ function makeLossYearData(framework: 'k2' | 'k3'): ArsredovisningData {
       insatser_repayable_next_year: null,
       forlagsinsatser_dividend_right: null,
       forlagsinsatser_redeemable_two_years: null,
+      omit_kassaflodesanalys: false,
+      kassaflodesanalys_omission_confirmed: false,
       confirmations: {
         long_term_debt_over_five_years: true,
         securities_pledged: true,

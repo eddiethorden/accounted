@@ -95,6 +95,25 @@ function isPreselected(status: UnderlagPlanStatus): boolean {
   return status === 'matched'
 }
 
+/**
+ * The source label, when it differs from our own. The SIE import renumbers
+ * per series and skips empty or voided vouchers, so source A46 routinely lands
+ * on A45 here. Matching is on the source number (the one the filename carries),
+ * so showing only our number reads as "mapped one too low" (crm#122).
+ */
+function differingSourceLabel(candidate: UnderlagPlanCandidate): string | null {
+  const source = candidate.source_voucher_label
+  if (!source) return null
+  return source.toUpperCase() === (candidate.voucher_label ?? '').toUpperCase() ? null : source
+}
+
+/** "A45 (ursprungligt A46)" when the numbers differ, else just "A45". */
+function candidateLabel(candidate: UnderlagPlanCandidate, t: Translate): string {
+  const own = candidate.voucher_label ?? ''
+  const source = differingSourceLabel(candidate)
+  return source ? t('underlag_target_with_source', { label: own, source }) : own
+}
+
 function badgeVariant(status: UnderlagPlanStatus): 'secondary' | 'warning' | 'destructive' {
   if (status === 'ambiguous' || status === 'needs_confirmation') return 'warning'
   if (status === 'period_locked') return 'destructive'
@@ -135,6 +154,12 @@ export default function UnderlagImportWizard() {
   }
   const currentStepIndex = steps.indexOf(step)
   const progress = ((currentStepIndex + 1) / steps.length) * 100
+
+  const anyRenumbered = useMemo(
+    () => rows.some((row) => row.candidates.some((c) => differingSourceLabel(c) !== null)),
+    [rows],
+  )
+  const anyManualInput = useMemo(() => rows.some((row) => row.candidates.length === 0), [rows])
 
   const selectedRows = useMemo(
     () => rows.filter((row) => row.selected && row.targetId),
@@ -519,6 +544,16 @@ export default function UnderlagImportWizard() {
               year: planPeriod?.name ?? '',
             })}
           </p>
+          {anyRenumbered && (
+            <p className="text-[12.5px] leading-5 text-muted-foreground">
+              {t('underlag_renumbered_hint')}
+            </p>
+          )}
+          {anyManualInput && (
+            <p className="text-[12.5px] leading-5 text-muted-foreground">
+              {t('underlag_manual_hint')}
+            </p>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[13px]">
@@ -663,7 +698,7 @@ function TargetCell({
     const only = row.candidates[0]
     return (
       <div className="flex items-center gap-2">
-        <span className="tabular-nums">{only.voucher_label}</span>
+        <span className="tabular-nums">{candidateLabel(only, t)}</span>
         <span className="text-muted-foreground">{formatDate(only.entry_date)}</span>
         {row.status !== 'matched' && (
           <Badge variant={badgeVariant(row.status)} className="font-normal">
@@ -693,7 +728,7 @@ function TargetCell({
               value={candidate.journal_entry_id}
               disabled={candidate.period_locked}
             >
-              {candidate.voucher_label} {formatDate(candidate.entry_date)}
+              {candidateLabel(candidate, t)} {formatDate(candidate.entry_date)}
               {candidate.period_locked ? ` (${t('underlag_status_period_locked')})` : ''}
             </option>
           ))}
@@ -710,7 +745,8 @@ function TargetCell({
       <Input
         value={row.manualRef}
         placeholder={t('underlag_manual_placeholder')}
-        aria-label={t('underlag_manual_placeholder')}
+        aria-label={t('underlag_manual_label')}
+        title={t('underlag_manual_label')}
         className="h-8 w-32 text-[13px]"
         onChange={(e) => onManualRefChange(e.target.value)}
         onBlur={onManualRefSubmit}

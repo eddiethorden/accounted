@@ -123,7 +123,18 @@ describe('exchangeAuthToken: provider company must match the consent company', (
       access_token: 'access-1',
       refresh_token: 'refresh-1',
     })
-    expect(db.findCall('provider_consents', 'update')?.[0]).toEqual({ status: 1 })
+    // The org number the token opened is the consent's durable source
+    // identity: without it create_provider_migration_job refuses the consent.
+    expect(db.findCall('provider_consents', 'update')?.[0]).toEqual({ status: 1, org_number: TARGET_ORG })
+  })
+
+  it('records the org number even when the Accounted company has none to compare with', async () => {
+    const db = useDb('company-1', null)
+    ;(fetchCompanyInfoDirect as Mock).mockResolvedValue({ companyName: 'Bolag AB', organizationNumber: '556016-0680' })
+
+    await exchangeAuthToken('consent-1', 'fortnox', 'code', 'https://cb')
+
+    expect(db.findCall('provider_consents', 'update')?.[0]).toEqual({ status: 1, org_number: TARGET_ORG })
   })
 
   it('does not block when the provider reports no org number', async () => {
@@ -135,6 +146,8 @@ describe('exchangeAuthToken: provider company must match the consent company', (
     expect(db.findCall('provider_consent_tokens', 'upsert')).toBeDefined()
     // Nothing to compare against: the target company is not even looked up.
     expect(db.findCall('companies', 'select')).toBeUndefined()
+    // No identity is invented: the column is left alone (undefined is dropped).
+    expect(db.findCall('provider_consents', 'update')?.[0]).toMatchObject({ status: 1, org_number: undefined })
   })
 
   it('does not block when the Accounted company has no org number', async () => {

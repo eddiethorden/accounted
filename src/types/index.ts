@@ -1833,6 +1833,8 @@ export interface VatValidationResult {
   country_code?: string
   vat_number?: string
   error?: string
+  /** VIES gave no verdict (member state down or throttled): not "invalid". */
+  unavailable?: boolean
 }
 
 // Exchange rate response

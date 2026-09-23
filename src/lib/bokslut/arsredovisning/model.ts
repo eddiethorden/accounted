@@ -1,5 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { buildArsredovisningData } from './build-data'
+import {
+  buildArsredovisningData,
+  K3_CASH_FLOW_FAILED_WARNING,
+  k3ContentsNotice,
+} from './build-data'
+import { cashFlowOmissionRule, resolveCashFlowOmission } from './cash-flow-omission'
 import { listSignatureRequests } from './signature-service'
 import { getAnnualReportProfile } from './profile-service'
 import { evaluateAnnualReportEligibility } from './eligibility'
@@ -10,6 +15,8 @@ import {
 import {
   ANNUAL_REPORT_SCHEMA_VERSION,
   type AnnualReportDisclosureState,
+  type AnnualReportEligibilityResult,
+  type AnnualReportProfile,
   type AnnualReportSizeMetrics,
   type AnnualReportValidationStage,
   type CanonicalAnnualReport,
@@ -91,6 +98,38 @@ function disclosureState(
   }
 }
 
+/**
+ * K3 kassaflödesanalys omission: decided here, not in buildArsredovisningData,
+ * because the law keys it on the ÅRL 1:3 § size classification computed from
+ * the finished report (cash-flow-omission.ts). A request the law does not
+ * allow leaves the statement in; completeness then says why.
+ */
+export function applyCashFlowOmission(
+  report: Awaited<ReturnType<typeof buildArsredovisningData>>,
+  eligibility: AnnualReportEligibilityResult,
+  metrics: AnnualReportSizeMetrics,
+  profile: AnnualReportProfile,
+): void {
+  if (report.accounting_framework !== 'k3') return
+  const omission = resolveCashFlowOmission({
+    rule: cashFlowOmissionRule({
+      framework: report.accounting_framework,
+      sizeClassification: eligibility.size_classification,
+      metrics,
+      securitiesTradedOnRegulatedMarket: profile.securities_traded_on_regulated_market,
+    }),
+    requested: report.disclosures.omit_kassaflodesanalys,
+    confirmed: report.disclosures.kassaflodesanalys_omission_confirmed,
+  })
+  report.kassaflodesanalys_omission = omission
+  if (omission.omitted) {
+    delete report.kassaflodesanalys
+    report.warnings = report.warnings
+      .filter((warning) => warning !== K3_CASH_FLOW_FAILED_WARNING)
+      .map((warning) => (warning === k3ContentsNotice(true) ? k3ContentsNotice(false) : warning))
+  }
+}
+
 export async function buildCanonicalAnnualReport(
   supabase: SupabaseClient,
   companyId: string,
@@ -136,6 +175,7 @@ export async function buildCanonicalAnnualReport(
     profile,
     metrics,
   })
+  applyCashFlowOmission(report, eligibility, metrics, profile)
   const disclosures = disclosureState(report)
   let validation = validateAnnualReportCompleteness({
     report,

@@ -9,6 +9,7 @@ import type {
   AnnualReportValidationResult,
   AnnualReportValidationStage,
 } from './compliance-types'
+import { cashFlowOmissionIssues } from './cash-flow-omission'
 import { normalizeOrgNumber } from '@/lib/company-lookup/normalize-org-number'
 import { isEntityType, requiresAuditorRegardlessOfSize } from '@/lib/company/entity-type'
 
@@ -333,6 +334,7 @@ export function validateAnnualReportCompleteness(
       'Slutför K3:s upplysningsmatris och oberoende regelverksgranskning innan versionen låses.',
     )
   }
+  issues.push(...cashFlowOmissionIssues(report.kassaflodesanalys_omission))
 
   if (stage !== 'draft') {
     if (report.signatures.length === 0) {

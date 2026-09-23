@@ -140,13 +140,19 @@ export default function UserMenu({
   // Outside click. Two carve-outs: elements already removed from the DOM
   // (isConnected: clicking a row that re-renders must not read as outside,
   // known concept bug pattern), and portaled dialogs (the support dialog
-  // opens above the menu; interacting with it must not unmount it).
+  // opens above the menu; interacting with it must not unmount it). The
+  // dialog's backdrop sits outside [role="dialog"], so while a modal dialog
+  // is open the menu stays put: a click on the backdrop belongs to the
+  // dialog, and closing the menu there would unmount the dialog with it.
+  // data-state="open" narrows this to Radix dialogs; the docked assistant
+  // sheet is also role="dialog" but must not pin the menu open.
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
       const target = e.target as HTMLElement
       if (!target.isConnected) return
       if (target.closest('[role="dialog"]')) return
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return
       if (
         (!triggerRef.current || !triggerRef.current.contains(target)) &&
         (!menuRef.current || !menuRef.current.contains(target))

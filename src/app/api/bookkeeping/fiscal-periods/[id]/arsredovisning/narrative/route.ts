@@ -8,6 +8,11 @@ import {
   upsertNarrative,
 } from '@/lib/bokslut/arsredovisning/narrative-service'
 import {
+  EDITABLE_NOTE_KEYS,
+  NOTE_OVERRIDE_MAX_LENGTH,
+  normalizeNoteOverrides,
+} from '@/lib/bokslut/arsredovisning/note-overrides'
+import {
   isValidParentCompanyIdentifier,
   PARENT_COMPANY_IDENTIFIER_ERROR,
 } from '@/lib/bokslut/arsredovisning/parent-company-identifier'
@@ -124,6 +129,22 @@ const PostSchema = z.object({
     .nullable()
     .optional(),
   agm_disposition_decision: sanitizedText(2000).nullable().optional(),
+  // K3 note texts replacing the generated ones, keyed by the stable note
+  // key (note-overrides.ts). The whole object is replaced on save; a null
+  // or blank value resets that note to the generated text. Unknown keys are
+  // a 400: only text notes are editable, never notes computed from the books.
+  note_overrides: z
+    .partialRecord(
+      z.enum(EDITABLE_NOTE_KEYS),
+      sanitizedText(NOTE_OVERRIDE_MAX_LENGTH).nullable(),
+    )
+    .optional()
+    .transform((value) => (value === undefined ? undefined : normalizeNoteOverrides(value))),
+  // K3: leave the kassaflödesanalys out. Stored as the user's choice; the
+  // document honours it only when the company is not a större företag
+  // (ÅRL 2 kap. 1 §, 1 kap. 3 §), see cash-flow-omission.ts.
+  omit_kassaflodesanalys: z.boolean().optional(),
+  kassaflodesanalys_omission_confirmed: z.boolean().optional(),
 }).strict().superRefine((value, ctx) => {
   if (
     value.agm_disposition_outcome === 'alternative_decision' &&

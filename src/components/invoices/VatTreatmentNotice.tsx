@@ -84,6 +84,10 @@ export function VatTreatmentNotice({
         return
       }
       const validation = result as VatValidationResult
+      if (validation.unavailable) {
+        toast({ title: t('error_title'), description: t('error_description'), variant: 'destructive' })
+        return
+      }
       if (!validation.valid) {
         toast({
           title: t('invalid_title'),
