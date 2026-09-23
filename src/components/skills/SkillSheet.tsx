@@ -7,7 +7,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { ArrowUpRight, Plus, X } from 'lucide-react'
 import { SlideOver, SlideOverContent } from '@/components/ui/slide-over'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { AI_CLIENTS, aiChatLink, openAiConnector, type AiClient } from '@/lib/onboarding/ai-clients'
+import { AI_CLIENTS, aiChatLink, aiPrefilledChatLink, openAiConnector, type AiClient } from '@/lib/onboarding/ai-clients'
 import { registrySkillSlug, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
 import { formatDateLong } from '@/lib/utils'
@@ -19,10 +19,17 @@ export type SheetTarget =
   | { kind: 'own'; slug: string; name: string; installationId: string; draft?: boolean }
 
 /**
- * Copies the prompt and opens an empty chat. The chat opens synchronously so
- * the popup is not blocked; the prompt travels by clipboard, never in the URL.
+ * Opens a chat for the prompt. The chat opens synchronously so the popup is
+ * not blocked. With `prefill` the prompt is typed into the new chat through
+ * ?q= (see aiPrefilledChatLink): only for curated skills, whose prompt is
+ * fixed text plus a skill slug. An own skill's prompt carries the name the
+ * user wrote, so it is copied for them to paste into an empty chat instead.
  */
-export function copyPromptAndOpen(prompt: string, client: AiClient): Promise<boolean> {
+export function copyPromptAndOpen(prompt: string, client: AiClient, prefill = false): Promise<boolean> {
+  if (prefill) {
+    openAiConnector(aiPrefilledChatLink(client, prompt))
+    return Promise.resolve(true)
+  }
   const copying = navigator.clipboard?.writeText(prompt) ?? Promise.reject(new Error('No clipboard'))
   openAiConnector(aiChatLink(client))
   return copying.then(() => true, () => false)
@@ -36,9 +43,9 @@ async function readBody(url: string): Promise<string> {
 
 /**
  * The opened skill: a dark, still sheet from the right ("Stilla"). It shows
- * what the skill does and the sentence to say to the AI. "Kopiera och öppna"
- * copies the prompt and opens an empty chat: the prompt names a skill and
- * nothing else, but it still travels by clipboard, never in the chat URL.
+ * what the skill does and the sentence to say to the AI. The run button
+ * opens a chat with a curated skill's prompt already typed in; an own
+ * skill's prompt is copied for the user to paste (see copyPromptAndOpen).
  */
 export function SkillSheet({ target, companyId, client, canWrite, todo, usage, onClose, onConnect, onEdit, onDelete, onAdd }: {
   target: SheetTarget | null
@@ -107,7 +114,7 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
   }
 
   function copyAndOpen() {
-    void copyPromptAndOpen(prompt, client).then((ok) => setCopyState(ok ? 'copied' : 'failed'))
+    void copyPromptAndOpen(prompt, client, !own).then((ok) => setCopyState(ok ? 'copied' : 'failed'))
   }
 
   return (
@@ -166,13 +173,13 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
                   <ArrowUpRight className="h-4 w-4" aria-hidden />
                 </button>
               </span>
-              <p className={styles.goHint}>{t('run_hint', { client: clientName })}</p>
+              <p className={styles.goHint}>{t(own ? 'run_hint' : 'run_hint_prefilled', { client: clientName })}</p>
               <div className={styles.nightBtns}>
                 <button type="button" className={`${styles.pill} ${styles.pillGhost}`} onClick={copyFull}>{t(fullCopy === 'copied' ? 'copied_full' : 'copy_full')}</button>
                 {own && onEdit && <button type="button" className={`${styles.pill} ${styles.pillGhost}`} disabled={!canWrite} onClick={() => onEdit(own)}>{t('edit_answers')}</button>}
                 {own && <button type="button" className={`${styles.pill} ${styles.pillGhost}`} disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</button>}
               </div>
-              {copyState !== 'idle' && <p role="status" className={styles.nightNote}>{copyState === 'copied' ? t('copied_open', { client: clientName }) : t('copy_failed')}</p>}
+              {copyState !== 'idle' && <p role="status" className={styles.nightNote}>{copyState === 'copied' ? t(own ? 'copied_open' : 'prefilled_open', { client: clientName }) : t('copy_failed')}</p>}
               {copyState === 'failed' && <pre className={styles.fullText} data-ph-mask>{prompt}</pre>}
               {fullCopy === 'failed' && <p role="alert" className={styles.nightNote}>{t('body_failed')}</p>}
               {deleteFailed && <p role="alert" className={styles.nightNote}>{t('save_failed')}</p>}

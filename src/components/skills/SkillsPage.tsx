@@ -330,7 +330,7 @@ function Registry({ companyId }: { companyId: string }) {
   function runSuggestion(id: RegistrySkillId) {
     if (!isConnected) { setSheet({ kind: 'registry', id, locked: true }); return }
     const prompt = t('prompt', { say: t(`skills.${id}.say`), skill: registrySkillSlug(id, client) })
-    void copyPromptAndOpen(prompt, client).then((ok) => setSuggestCopied(ok ? 'copied' : 'failed'))
+    void copyPromptAndOpen(prompt, client, true).then((ok) => setSuggestCopied(ok ? 'copied' : 'failed'))
   }
   function openRow(row: Row) {
     setSheet(row.own
@@ -400,7 +400,7 @@ function Registry({ companyId }: { companyId: string }) {
                 {t(`suggest.${suggestion[0]}.cta`, { client: clientName, count: suggestion[1] })}
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden />
               </button>
-              {suggestCopied !== 'idle' && <span role="status" className={styles.suggestNote}>{suggestCopied === 'copied' ? t('copied_open', { client: clientName }) : t('copy_failed')}</span>}
+              {suggestCopied === 'copied' && <span role="status" className={styles.suggestNote}>{t('prefilled_open', { client: clientName })}</span>}
             </div>
           )}
         </div>

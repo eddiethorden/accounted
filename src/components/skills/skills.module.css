@@ -40,6 +40,9 @@
   flex-direction: column;
   gap: 32px;
 }
+/* The top bar already carries 16px below it (globals.css .page-header); cancel
+   it so the hero sits the app's usual 16px under the bar, not 16 + 32. */
+.page > :global(.page-header) { margin-bottom: -16px; }
 
 /* ── the panel: Stockholm strata, two burning keys and the create key ── */
 .hero {
