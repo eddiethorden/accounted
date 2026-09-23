@@ -6482,7 +6482,7 @@ export const tools: McpTool[] = [
     catalogVisibility: 'search',
     keywords: ['kvittojakten', 'kvitto', 'underlag', 'saknar underlag', 'mail'],
     title: 'Kvittojakten Worklist',
-    description: 'What lacks an underlag, shaped for a mail search: posted verifikat and unbooked purchases, largest first, with counterparty, amount, date window, portal hint, the inbox address to forward to and a next step per item. Load skill kvittojakten first.',
+    description: 'What lacks an underlag, shaped for a mail search: unbooked purchases first, then posted verifikat, largest first within each, with counterparty, amount, date window, portal hint, the inbox address to forward to and a next step per item. Load skill kvittojakten first.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

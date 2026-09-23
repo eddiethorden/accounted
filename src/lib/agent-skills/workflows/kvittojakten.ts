@@ -95,7 +95,7 @@ Call \`gnubok_list_companies\`. One company: use it. Several: ask the user which
 
 ### Step 2: Get the worklist
 
-\`gnubok_call_tool({ tool: "gnubok_receipt_hunt_worklist", arguments: { limit: 25 } })\`. The worklist is not in tools/list, so it is always invoked through \`gnubok_call_tool\` (a chosen \`company_id\` goes inside \`arguments\`). Each item is one missing underlag, largest first:
+\`gnubok_call_tool({ tool: "gnubok_receipt_hunt_worklist", arguments: { limit: 25 } })\`. The worklist is not in tools/list, so it is always invoked through \`gnubok_call_tool\` (a chosen \`company_id\` goes inside \`arguments\`). Each item is one missing underlag: unbooked bank purchases first (a receipt found now lets the purchase be booked from it), then booked verifikat, largest first within each:
 
 - \`kind: "verifikat"\` with a \`journal_entry_id\` (already booked), or \`kind: "transaction"\` with a \`transaction_id\` (a bank purchase not booked yet)
 - \`counterparty\`, \`description\`, \`invoice_number\`, \`amount\` + \`currency\`, \`date\`
