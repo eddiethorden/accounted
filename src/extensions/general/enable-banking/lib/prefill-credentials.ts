@@ -1,3 +1,4 @@
+import { isEntityType, usesPersonnummerAsOrgNumber } from '@/lib/company/entity-type'
 import type { AuthMethod, AuthMethodCredential } from './api-client'
 
 /**
@@ -38,6 +39,15 @@ export interface PrefillCompany {
 }
 
 /**
+ * Whether the stored org number is the owner's personnummer (an enskild
+ * firma). An unknown or missing form is treated as not, so it never gets the
+ * personnummer handling.
+ */
+function orgIdIsPersonnummer(company: PrefillCompany): boolean {
+  return isEntityType(company.entity_type) && usesPersonnummerAsOrgNumber(company.entity_type)
+}
+
+/**
  * The 10-digit identifier: the organisationsnummer for a company, the
  * personnummer without century (YYMMDDXXXX) for a sole trader. Null when the
  * stored number does not reduce to 10 digits.
@@ -47,7 +57,7 @@ export function companyIdDigits(company: PrefillCompany): string | null {
   if (digits.length === 10) return digits
   // A sole trader's personnummer may be stored with the century
   // (YYYYMMDDXXXX); drop it for the 10-digit form.
-  if (digits.length === 12 && company.entity_type === 'enskild_firma' && /^(19|20)/.test(digits)) {
+  if (digits.length === 12 && orgIdIsPersonnummer(company) && /^(19|20)/.test(digits)) {
     return digits.slice(2)
   }
   return null
@@ -63,7 +73,7 @@ export function companyIdDigits(company: PrefillCompany): string | null {
  * (used from the year the person turns 100) moves it one century back.
  */
 export function soleTraderPersonnummer12(company: PrefillCompany, now: Date = new Date()): string | null {
-  if (company.entity_type !== 'enskild_firma') return null
+  if (!orgIdIsPersonnummer(company)) return null
   const raw = company.org_number ?? ''
   const digits = raw.replace(/\D/g, '')
   if (digits.length === 12) return /^(19|20)/.test(digits) ? digits : null
@@ -109,7 +119,7 @@ export function buildPrefilledCredentials(
   const credential = method?.credentials?.find((c) => c.name === COMPANY_ID_CREDENTIAL)
   if (!credential) return undefined
 
-  if (company.entity_type === 'enskild_firma') {
+  if (orgIdIsPersonnummer(company)) {
     // Longest form first: a template that accepts the 12-digit form belongs
     // to a bank that takes the full personnummer for a sole trader.
     const candidates = [soleTraderPersonnummer12(company, now), companyIdDigits(company)]
