@@ -660,6 +660,7 @@
     "subtitle": "Förklaringar av skatte- och bokföringstermer på ren svenska.",
     "search_placeholder": "Sök efter term...",
     "filter_all": "Alla",
+    "category_filter_label": "Filtrera på kategori",
     "no_results": "Inga termer hittades för \"{query}\"",
     "no_results_title": "Inga träffar",
     "templates_title": "Dokument & Mallar",

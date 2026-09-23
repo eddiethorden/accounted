@@ -335,6 +335,7 @@ export default function HelpPage() {
             value={selectedCategory ?? 'all'}
             onChange={(value) => setSelectedCategory(value === 'all' ? null : value)}
             options={categoryOptions}
+            aria-label={t('category_filter_label')}
           />
         </div>
       </div>

@@ -660,6 +660,7 @@
     "subtitle": "Definitions of Swedish tax and bookkeeping terms (in Swedish, these terms appear in your dealings with Skatteverket).",
     "search_placeholder": "Search for a term...",
     "filter_all": "All",
+    "category_filter_label": "Filter by category",
     "no_results": "No terms found for \"{query}\"",
     "no_results_title": "No matches",
     "templates_title": "Documents & Templates",
