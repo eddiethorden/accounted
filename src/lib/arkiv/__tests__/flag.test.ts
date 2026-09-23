@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { arkivBrainRollout, isArkivBrainEnabled, isArkivEnabled } from '../flag'
+import { arkivBrainRollout, arkivSectionRollout, isArkivBrainEnabled, isArkivEnabled, isArkivSectionEnabled } from '../flag'
 
 const saved = { brain: process.env.ARKIV_BRAIN_COMPANY_IDS, old: process.env.ARKIV_COMPANY_IDS }
 
@@ -21,6 +21,29 @@ describe('isArkivEnabled (the shelf)', () => {
   })
 })
 
+describe('isArkivSectionEnabled (the Dokument section in the app)', () => {
+  it('is nobody when ARKIV_COMPANY_IDS is unset, the listed companies otherwise, everyone for *', () => {
+    delete process.env.ARKIV_COMPANY_IDS
+    expect(arkivSectionRollout()).toEqual([])
+    expect(isArkivSectionEnabled('co-1')).toBe(false)
+    process.env.ARKIV_COMPANY_IDS = ' co-1, ,co-2 ,co-1'
+    expect(arkivSectionRollout()).toEqual(['co-1', 'co-2'])
+    expect(isArkivSectionEnabled('co-1')).toBe(true)
+    expect(isArkivSectionEnabled('co-3')).toBe(false)
+    expect(isArkivSectionEnabled(null)).toBe(false)
+    process.env.ARKIV_COMPANY_IDS = '*'
+    expect(arkivSectionRollout()).toBe('all')
+    expect(isArkivSectionEnabled('anyone')).toBe(true)
+  })
+
+  it('does not open the shelf or the brain', () => {
+    process.env.ARKIV_COMPANY_IDS = 'co-1'
+    delete process.env.ARKIV_BRAIN_COMPANY_IDS
+    expect(isArkivEnabled('co-9')).toBe(true)
+    expect(isArkivBrainEnabled('co-1')).toBe(false)
+  })
+})
+
 describe('arkivBrainRollout', () => {
   it('is nobody when unset, everyone for *, and the listed ids otherwise', () => {
     delete process.env.ARKIV_BRAIN_COMPANY_IDS
@@ -33,7 +56,7 @@ describe('arkivBrainRollout', () => {
     expect(arkivBrainRollout()).toEqual(['co-1', 'co-2'])
   })
 
-  it('no longer reads the pilot flag', () => {
+  it('does not read the section flag', () => {
     delete process.env.ARKIV_BRAIN_COMPANY_IDS
     process.env.ARKIV_COMPANY_IDS = 'co-1'
     expect(arkivBrainRollout()).toEqual([])
