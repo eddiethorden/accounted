@@ -271,6 +271,7 @@ import {
   resolveMcpCompanyContext,
 } from './company-routing'
 import { findUnknownArgKeys, listArgKeys, shortestExampleFor } from './arg-guard'
+import { decodeToolArgs } from './unicode-escape-guard'
 import { findSupplierCandidates, type SupplierRow } from './supplier-candidates'
 import {
   matchSupplierByIdentity,
@@ -24396,7 +24397,10 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       const companyRoutingStartedAt = Date.now()
       try {
         const extracted = extractRequestedCompany(rawToolArgs)
-        toolArgs = extracted.toolArgs
+        // An agent that double-escapes åäö sends a literal "\u00f6"; decode
+        // it here, once for every tool, before it can be stored as verifikat
+        // text that only a logged rättelse can change (unicode-escape-guard.ts).
+        toolArgs = decodeToolArgs(extracted.toolArgs)
 
         // Hosts do not reliably enforce inputSchema, so a misspelled
         // parameter used to be dropped silently (see arg-guard.ts). Thrown
