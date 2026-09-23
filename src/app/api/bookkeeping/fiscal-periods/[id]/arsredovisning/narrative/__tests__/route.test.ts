@@ -168,6 +168,60 @@ describe('POST /api/bookkeeping/fiscal-periods/[id]/arsredovisning/narrative', (
     expect(res.status).toBe(200)
   })
 
+  it('returns 400 for a note override on a note that is not editable', async () => {
+    setupSupabase()
+    const res = await POST(
+      postReq({ note_overrides: { medelantal_anstallda: 'Tio anställda.' } }),
+      idParams,
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 for a note override longer than the cap', async () => {
+    setupSupabase()
+    const res = await POST(
+      postReq({ note_overrides: { redovisningsprinciper: 'x'.repeat(8001) } }),
+      idParams,
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('saves note overrides with blank or null entries dropped, plus the cash-flow choice', async () => {
+    const { enqueue, findCall } = setupSupabase()
+    enqueue({ data: { id: 'period-1' } }) // fiscal_periods ownership check
+    enqueue({ data: null }) // no registrerad submission
+    enqueue({
+      data: {
+        ...narrativeRow,
+        note_overrides: { redovisningsprinciper: 'Egen text.' },
+        omit_kassaflodesanalys: true,
+        kassaflodesanalys_omission_confirmed: true,
+      },
+    }) // upsert
+    enqueue({ data: null }) // clear narrative confirmation
+    const res = await POST(
+      postReq({
+        note_overrides: {
+          redovisningsprinciper: 'Egen text.',
+          vasentliga_handelser_efter_balansdagen: '   ',
+        },
+        omit_kassaflodesanalys: true,
+        kassaflodesanalys_omission_confirmed: true,
+      }),
+      idParams,
+    )
+    expect(res.status).toBe(200)
+    const upsertArgs = findCall('arsredovisning_narratives', 'upsert')
+    expect(upsertArgs?.[0]).toMatchObject({
+      note_overrides: { redovisningsprinciper: 'Egen text.' },
+      omit_kassaflodesanalys: true,
+      kassaflodesanalys_omission_confirmed: true,
+    })
+    expect(
+      (upsertArgs?.[0] as { note_overrides: Record<string, string> }).note_overrides,
+    ).not.toHaveProperty('vasentliga_handelser_efter_balansdagen')
+  })
+
   it('returns 400 when the payload contains an unknown field', async () => {
     setupSupabase()
     const res = await POST(

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { validateBody } from '@/lib/api/validate'
 import { UpdateCustomerSchema } from '@/lib/api/schemas'
-import { validateVatNumber } from '@/lib/vat/vies-client'
+import { validateVatNumber, vatValidationColumns } from '@/lib/vat/vies-client'
 import { withRouteContext } from '@/lib/api/with-route-context'
 import { errorResponseFromCode } from '@/lib/errors/get-structured-error'
 import { encryptCustomerPersonalNumber, maskCustomerRow } from '@/lib/customers/protect-personal-number'
@@ -224,17 +224,19 @@ export const PATCH = withRouteContext(
       try {
         if (body.vat_number) {
           const vatResult = await validateVatNumber(body.vat_number)
-          const validatedAt = vatResult.valid ? new Date().toISOString() : null
-          await supabase
-            .from('customers')
-            .update({
-              vat_number_validated: vatResult.valid,
-              vat_number_validated_at: validatedAt,
-            })
-            .eq('id', id)
-            .eq('company_id', companyId)
-          data.vat_number_validated = vatResult.valid
-          data.vat_number_validated_at = validatedAt
+          const columns = vatValidationColumns(vatResult, existing.vat_number, body.vat_number)
+          if (columns) {
+            await supabase
+              .from('customers')
+              .update({
+                vat_number_validated: columns.vat_number_validated,
+                vat_number_validated_at: columns.vat_number_validated_at,
+              })
+              .eq('id', id)
+              .eq('company_id', companyId)
+            data.vat_number_validated = columns.vat_number_validated
+            data.vat_number_validated_at = columns.vat_number_validated_at
+          }
         } else {
           await supabase
             .from('customers')

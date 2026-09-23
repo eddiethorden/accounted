@@ -50,6 +50,10 @@ vi.mock('@/extensions/general/skatteverket/lib/kvittens-notification', () => ({
   sendKvittensNotification: vi.fn().mockResolvedValue({ sent: true }),
 }))
 
+vi.mock('@/lib/vat/filing-record-store', () => ({
+  recordVatFilingConfirmed: vi.fn().mockResolvedValue({ created: false, changed: true }),
+}))
+
 vi.mock('@/lib/deadlines/complete-tax-deadline', () => ({
   completeTaxDeadline: vi.fn().mockResolvedValue({ completed: 1 }),
 }))
@@ -64,6 +68,7 @@ import { verifyCronSecret } from '@/lib/auth/cron'
 import { skvRequestWithAuth, SkatteverketAuthError } from '@/extensions/general/skatteverket/lib/api-client'
 import { sendKvittensNotification } from '@/extensions/general/skatteverket/lib/kvittens-notification'
 import { completeTaxDeadline } from '@/lib/deadlines/complete-tax-deadline'
+import { recordVatFilingConfirmed } from '@/lib/vat/filing-record-store'
 import { markNeedsReconsent } from '@/extensions/general/skatteverket/lib/token-store'
 import { markGrantRevoked } from '@/extensions/general/skatteverket/lib/connection-store'
 
@@ -72,6 +77,7 @@ const mockVerifyCronSecret = vi.mocked(verifyCronSecret)
 const mockSkvRequest = vi.mocked(skvRequestWithAuth)
 const mockSendKvittensNotification = vi.mocked(sendKvittensNotification)
 const mockCompleteTaxDeadline = vi.mocked(completeTaxDeadline)
+const mockRecordVatFilingConfirmed = vi.mocked(recordVatFilingConfirmed)
 const mockMarkNeedsReconsent = vi.mocked(markNeedsReconsent)
 const mockMarkGrantRevoked = vi.mocked(markGrantRevoked)
 
@@ -166,7 +172,7 @@ describe('VAT kvittenser cron', () => {
     expect(mockCreateClient).not.toHaveBeenCalled()
   })
 
-  it('marks the filing signed, completes the moms deadline, and notifies', async () => {
+  it('marks the filing signed, records it on the moms deadline, and notifies', async () => {
     mockCreateClient.mockReturnValueOnce(stubHappyTables())
     mockSkvRequest.mockResolvedValueOnce({
       ok: true,
@@ -181,13 +187,12 @@ describe('VAT kvittenser cron', () => {
     expect(body.errors).toBe(0)
     expect(body.results[0]).toMatchObject({ companyId: 'comp-1', period: '202606', status: 'signed' })
 
-    expect(mockCompleteTaxDeadline).toHaveBeenCalledWith(
-      expect.anything(),
-      'comp-1',
-      ['moms_monthly', 'moms_quarterly'],
-      '2026-06',
-      'confirmed',
-    )
+    expect(mockRecordVatFilingConfirmed).toHaveBeenCalledWith(expect.anything(), 'comp-1', {
+      periodType: 'monthly',
+      year: 2026,
+      period: 6,
+    })
+    expect(mockCompleteTaxDeadline).not.toHaveBeenCalled()
     expect(mockSendKvittensNotification).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -200,7 +205,7 @@ describe('VAT kvittenser cron', () => {
     expect(errorSpy).not.toHaveBeenCalled()
   })
 
-  it('quarterly picker params produce a YYYY-QN tax period', async () => {
+  it('quarterly picker params record the quarter', async () => {
     mockCreateClient.mockReturnValueOnce(
       stubHappyTables({ ...LOCKED_STATE, periodType: 'quarterly', period: 2 }),
     )
@@ -212,9 +217,32 @@ describe('VAT kvittenser cron', () => {
 
     await GET(makeRequest())
 
-    expect(mockCompleteTaxDeadline).toHaveBeenCalledWith(
-      expect.anything(), 'comp-1', ['moms_monthly', 'moms_quarterly'], '2026-Q2', 'confirmed',
+    expect(mockRecordVatFilingConfirmed).toHaveBeenCalledWith(expect.anything(), 'comp-1', {
+      periodType: 'quarterly',
+      year: 2026,
+      period: 2,
+    })
+  })
+
+  it('a failing filing record is logged and does not stop the notification', async () => {
+    mockCreateClient.mockReturnValueOnce(stubHappyTables())
+    mockSkvRequest.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ kvittensnummer: 'KV-777' }),
+    } as any)
+    mockRecordVatFilingConfirmed.mockRejectedValueOnce(new Error('insert failed'))
+
+    const res = await GET(makeRequest())
+    const body = await res.json()
+
+    expect(body.signed).toBe(1)
+    expect(mockSendKvittensNotification).toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[vat-kvittenser-cron] Failed to record filing on the moms deadline',
+      expect.objectContaining({ companyId: 'comp-1', message: 'insert failed' }),
     )
+    errorSpy.mockClear()
   })
 
   it('yearly picker params complete the moms_yearly deadline with the fiscal-year label', async () => {
@@ -250,6 +278,7 @@ describe('VAT kvittenser cron', () => {
 
     expect(body.signed).toBe(1)
     expect(mockCompleteTaxDeadline).not.toHaveBeenCalled()
+    expect(mockRecordVatFilingConfirmed).not.toHaveBeenCalled()
     expect(mockSendKvittensNotification).toHaveBeenCalled()
   })
 
@@ -263,6 +292,7 @@ describe('VAT kvittenser cron', () => {
     expect(body.stillPending).toBe(1)
     expect(body.signed).toBe(0)
     expect(mockCompleteTaxDeadline).not.toHaveBeenCalled()
+    expect(mockRecordVatFilingConfirmed).not.toHaveBeenCalled()
     expect(mockSendKvittensNotification).not.toHaveBeenCalled()
   })
 
@@ -333,6 +363,7 @@ describe('VAT kvittenser cron', () => {
       error: 'Failed to persist signed state: connection reset',
     })
     expect(mockCompleteTaxDeadline).not.toHaveBeenCalled()
+    expect(mockRecordVatFilingConfirmed).not.toHaveBeenCalled()
     expect(mockSendKvittensNotification).not.toHaveBeenCalled()
     expect(errorSpy).toHaveBeenCalledTimes(1)
   })

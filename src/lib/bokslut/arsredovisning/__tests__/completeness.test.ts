@@ -174,6 +174,30 @@ describe('validateAnnualReportCompleteness', () => {
     expect(result.issues.some((issue) => issue.code === 'AR-K3-DRAFT-ONLY')).toBe(true)
   })
 
+  it('reports a cash-flow omission the law does not allow, and nothing when honoured', () => {
+    const value = input('draft')
+    value.report.accounting_framework = 'k3'
+    value.report.kassaflodesanalys_omission = {
+      rule: 'forbidden',
+      requested: true,
+      confirmed: false,
+      omitted: false,
+    }
+    expect(
+      validateAnnualReportCompleteness(value).issues.map((issue) => issue.code),
+    ).toContain('AR-K3-CASHFLOW-REQUIRED')
+
+    value.report.kassaflodesanalys_omission = {
+      rule: 'allowed',
+      requested: true,
+      confirmed: false,
+      omitted: true,
+    }
+    expect(
+      validateAnnualReportCompleteness(value).issues.map((issue) => issue.code),
+    ).not.toContain('AR-K3-CASHFLOW-REQUIRED')
+  })
+
   it('requires the AGM decision and evidence dates at filing stage', () => {
     const value = input('filing')
     value.report.signatures[0].signed_at = null
