@@ -31,6 +31,7 @@ import {
 } from './invoice-matching'
 import { autoReconcileTransactionForLinkedVoucher } from '@/lib/reconciliation/bank-reconciliation'
 import { clearSettledInvoiceSuggestions } from './clear-settled-invoice-suggestions'
+import { anchorCustomerInvoiceDocument } from '@/lib/core/documents/customer-invoice-underlag'
 import { documentCurrency, ledgerLineSideAmountIn } from '@/lib/bookkeeping/ledger-line-amount'
 import type { Invoice, Customer } from '@/types'
 import {
@@ -816,6 +817,12 @@ export async function linkInvoiceToVoucher(
       /* non-critical */
     }
   }
+
+  // The invoice's archived PDF is the underlag for the linked booking. Under
+  // kontantmetoden nothing else ever anchors it (there is no registration
+  // verifikat), so without this the user re-uploads a file Accounted already
+  // holds. Idempotent and never throws: the link has already committed.
+  await anchorCustomerInvoiceDocument(supabase, companyId, params.invoiceId)
 
   // Close the loop on the bank feed: the invoice→voucher link above only
   // advanced the invoice, so the bank transaction that paid it kept sitting in

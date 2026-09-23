@@ -117,6 +117,8 @@ function makeLossYearData(framework: 'k2' | 'k3'): ArsredovisningData {
       parent_company_org_number: null,
       parent_company_city: null,
       medelantal_anstallda_override: null,
+      omit_kassaflodesanalys: false,
+      kassaflodesanalys_omission_confirmed: false,
       confirmations: {
         long_term_debt_over_five_years: true,
         securities_pledged: true,

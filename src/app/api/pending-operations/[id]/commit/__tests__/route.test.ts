@@ -41,7 +41,8 @@ vi.mock('@/lib/transactions/booking-duplicate-detection', () => ({
 }))
 
 // Mock VAT validation
-vi.mock('@/lib/vat/vies-client', () => ({
+vi.mock('@/lib/vat/vies-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/vat/vies-client')>()),
   validateVatNumber: vi.fn().mockResolvedValue({ valid: true }),
 }))
 

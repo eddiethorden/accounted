@@ -53,6 +53,8 @@ function makeSupabase(opts: {
   agmDate?: string | null
   previousPeriodId?: string | null
   medelantalOverride?: number | null
+  noteOverrides?: Record<string, string>
+  omitCashFlow?: boolean
 }): ChainableMock {
   const from = vi.fn((table: string) => {
     if (table === 'fiscal_periods') {
@@ -126,8 +128,11 @@ function makeSupabase(opts: {
               maybeSingle: () =>
                 Promise.resolve({
                   data:
-                    opts.agmDate || opts.medelantalOverride != null
+                    opts.agmDate || opts.medelantalOverride != null || opts.noteOverrides || opts.omitCashFlow
                       ? {
+                          note_overrides: opts.noteOverrides ?? {},
+                          omit_kassaflodesanalys: opts.omitCashFlow ?? false,
+                          kassaflodesanalys_omission_confirmed: false,
                           agm_date: opts.agmDate ?? null,
                           description: null,
                           important_events: null,
@@ -626,6 +631,55 @@ describe('buildArsredovisningData: K3', () => {
         /finns ännu inte i mallen och behöver kompletteras manuellt/.test(w),
       ),
     ).toBeUndefined()
+  })
+})
+
+describe('buildArsredovisningData: note overrides', () => {
+  it('K3: replaces note 1 with the user text and keeps the generated text for reset', async () => {
+    const supabase = makeSupabase({
+      accountingFramework: 'k3',
+      noteOverrides: { redovisningsprinciper: 'Egen principtext.' },
+    })
+    // @ts-expect-error: chainable mock isn't fully typed as SupabaseClient
+    const data = await buildArsredovisningData(supabase, 'co1', 'fp1')
+    const principles = data.noter.find((n) => n.key === 'redovisningsprinciper')
+    expect(principles?.number).toBe(1)
+    expect(principles?.body).toBe('Egen principtext.')
+    expect(principles?.generated_body).toContain('BFNAR 2012:1')
+    const events = data.noter.find((n) => n.key === 'vasentliga_handelser_efter_balansdagen')
+    expect(events?.generated_body).toBeUndefined()
+    expect(events?.body).toContain('Inga väsentliga händelser')
+  })
+
+  it('K3: ignores unknown keys stored in the column', async () => {
+    const supabase = makeSupabase({
+      accountingFramework: 'k3',
+      noteOverrides: { medelantal_anstallda: 'Tio.' },
+    })
+    // @ts-expect-error: chainable mock isn't fully typed as SupabaseClient
+    const data = await buildArsredovisningData(supabase, 'co1', 'fp1')
+    const note = data.noter.find((n) => n.title === 'Medelantal anställda')
+    expect(note?.body).not.toBe('Tio.')
+  })
+
+  it('K2: overrides are not applied (the K2 notes feed the iXBRL filing)', async () => {
+    const supabase = makeSupabase({
+      accountingFramework: 'k2',
+      noteOverrides: { redovisningsprinciper: 'Egen principtext.' },
+    })
+    // @ts-expect-error: chainable mock isn't fully typed as SupabaseClient
+    const data = await buildArsredovisningData(supabase, 'co1', 'fp1')
+    const principles = data.noter.find((n) => n.title.startsWith('Redovisnings'))
+    expect(principles?.body).toContain('BFNAR 2016:10')
+    expect(principles?.key).toBeUndefined()
+  })
+
+  it('carries the cash-flow omission choice without deciding it (model.ts does)', async () => {
+    const supabase = makeSupabase({ accountingFramework: 'k3', omitCashFlow: true })
+    // @ts-expect-error: chainable mock isn't fully typed as SupabaseClient
+    const data = await buildArsredovisningData(supabase, 'co1', 'fp1')
+    expect(data.disclosures.omit_kassaflodesanalys).toBe(true)
+    expect(data.kassaflodesanalys).toBeDefined()
   })
 })
 

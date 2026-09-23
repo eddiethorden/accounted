@@ -8,6 +8,7 @@ import { sendKvittensNotification } from '@/extensions/general/skatteverket/lib/
 import { resolveReadAuth, currentSkvEnvironment, findCompanyTokenUser } from '@/extensions/general/skatteverket/lib/resolve-auth'
 import { markGrantRevoked } from '@/extensions/general/skatteverket/lib/connection-store'
 import { completeTaxDeadline } from '@/lib/deadlines/complete-tax-deadline'
+import { recordVatFilingConfirmed } from '@/lib/vat/filing-record-store'
 import { hasCapability } from '@/lib/entitlements/has-capability'
 import { CAPABILITY } from '@/lib/entitlements/keys'
 import type { SkatteverketInlamnatResponse } from '@/extensions/general/skatteverket/types'
@@ -189,35 +190,40 @@ export async function GET(request: Request) {
         continue
       }
 
-      // Complete the period's moms deadline. Only possible when the state
-      // carries the picker params (written by the one-click chain; states
-      // persisted by the older step-by-step routes lack them).
-      if (state.periodType && state.year && state.period) {
-        let taxPeriod: string | null = null
-        let deadlineTypes: ('moms_monthly' | 'moms_quarterly' | 'moms_yearly')[] = [
-          'moms_monthly',
-          'moms_quarterly',
-        ]
-        if (state.periodType === 'monthly') {
-          taxPeriod = `${state.year}-${String(state.period).padStart(2, '0')}`
-        } else if (state.periodType === 'quarterly') {
-          taxPeriod = `${state.year}-Q${state.period}`
-        } else if (state.periodType === 'yearly') {
-          // moms_yearly rows carry the generator's fiscal-year label:
-          // `YYYY` for calendar FYs, `YYYY-1/YYYY` for broken ones.
-          const { data: fySettings } = await supabase
-            .from('company_settings')
-            .select('fiscal_year_start_month')
-            .eq('company_id', companyId)
-            .maybeSingle()
-          const startMonth = fySettings?.fiscal_year_start_month ?? 1
-          const yearNum = Number(state.year)
-          taxPeriod = startMonth === 1 ? `${yearNum}` : `${yearNum - 1}/${yearNum}`
-          deadlineTypes = ['moms_yearly']
+      // Record the filing on the period's moms deadline. Only possible when
+      // the state carries the picker params (written by the one-click chain;
+      // states persisted by the older step-by-step routes lack them).
+      if (state.periodType === 'monthly' || state.periodType === 'quarterly') {
+        if (state.year && state.period) {
+          // Creates the deadline row when the company has none for the
+          // period (it predates the generator's window): a bare update would
+          // leave no filing record and the VAT page would reopen the period.
+          try {
+            await recordVatFilingConfirmed(supabase, companyId, {
+              periodType: state.periodType,
+              year: state.year,
+              period: state.period,
+            })
+          } catch (recordError) {
+            console.error('[vat-kvittenser-cron] Failed to record filing on the moms deadline', {
+              companyId,
+              period,
+              message: recordError instanceof Error ? recordError.message : String(recordError),
+            })
+          }
         }
-        if (taxPeriod) {
-          await completeTaxDeadline(supabase, companyId, deadlineTypes, taxPeriod, 'confirmed')
-        }
+      } else if (state.periodType === 'yearly' && state.year && state.period) {
+        // moms_yearly rows carry the generator's fiscal-year label:
+        // `YYYY` for calendar FYs, `YYYY-1/YYYY` for broken ones.
+        const { data: fySettings } = await supabase
+          .from('company_settings')
+          .select('fiscal_year_start_month')
+          .eq('company_id', companyId)
+          .maybeSingle()
+        const startMonth = fySettings?.fiscal_year_start_month ?? 1
+        const yearNum = Number(state.year)
+        const taxPeriod = startMonth === 1 ? `${yearNum}` : `${yearNum - 1}/${yearNum}`
+        await completeTaxDeadline(supabase, companyId, ['moms_yearly'], taxPeriod, 'confirmed')
       }
 
       if (resolved.tokenUserId) {

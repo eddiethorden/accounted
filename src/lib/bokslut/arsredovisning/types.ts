@@ -28,6 +28,24 @@ export interface NoteEntry {
    *  (avskrivningstider from asset register, medelantal from salary),
    *  manual otherwise. */
   body: string
+  /** Stable key on notes whose text the user may replace (note-overrides.ts). */
+  key?: string
+  /** The generated text, present only when the user replaced the body. */
+  generated_body?: string
+}
+
+/** See cash-flow-omission.ts for the legal rule behind these values. */
+export type CashFlowOmissionRule = 'allowed' | 'requires_confirmation' | 'forbidden'
+
+export interface CashFlowOmissionState {
+  /** What the product may do for this company and year. */
+  rule: CashFlowOmissionRule
+  /** The user asked to leave the statement out (persisted choice). */
+  requested: boolean
+  /** The user confirmed the company is not a större företag. */
+  confirmed: boolean
+  /** Final outcome: the statement is left out of this document. */
+  omitted: boolean
 }
 
 /**
@@ -128,6 +146,11 @@ export interface ArsredovisningData {
    *  PDF page. K2 omits this entirely (per BFNAR 2016:10 kassaflöde is not
    *  required for K2 mindre företag). */
   kassaflodesanalys?: KassaflodesAnalysisSummary
+  /** K3-only: the user's choice to leave the kassaflödesanalys out and
+   *  whether the law lets this company do so. Set by
+   *  buildCanonicalAnnualReport once the size classification is known;
+   *  when `omitted` is true, `kassaflodesanalys` is absent. */
+  kassaflodesanalys_omission?: CashFlowOmissionState
   /** K3-only: separate "Förändring av eget kapital" statement. K2 keeps the
    *  egen_kapital_changes inside förvaltningsberättelsen; K3 lifts it out
    *  into its own statement per ÅRL 6:5 + BFNAR 2012:1 ch.6. */
@@ -160,6 +183,11 @@ export interface ArsredovisningData {
      *  the employees table"; the note and the iXBRL fact already reflect
      *  whichever won. */
     medelantal_anstallda_override: number | null
+    /** Persisted choice to leave the K3 kassaflödesanalys out, and the
+     *  user's confirmation that the company is not a större företag. Only
+     *  honoured when the law permits (cash-flow-omission.ts). */
+    omit_kassaflodesanalys: boolean
+    kassaflodesanalys_omission_confirmed: boolean
     confirmations: {
       long_term_debt_over_five_years: boolean
       securities_pledged: boolean
