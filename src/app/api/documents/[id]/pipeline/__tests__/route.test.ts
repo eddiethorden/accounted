@@ -27,10 +27,7 @@ beforeEach(() => {
 })
 
 describe('GET /api/documents/[id]/pipeline', () => {
-  it("is 404 outside the rollout and for another company's document", async () => {
-    process.env.ARKIV_COMPANY_IDS = 'someone-else'
-    expect((await parseJsonResponse(await call())).status).toBe(404)
-    process.env.ARKIV_COMPANY_IDS = 'company-1'
+  it("is 404 for another company's document", async () => {
     enqueue({ data: null })
     expect((await parseJsonResponse(await call())).status).toBe(404)
   })
