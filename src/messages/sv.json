@@ -659,12 +659,12 @@
     "subtitle": "Förklaringar av skatte- och bokföringstermer på ren svenska.",
     "search_placeholder": "Sök efter term...",
     "filter_all": "Alla",
+    "category_filter_label": "Filtrera på kategori",
     "no_results": "Inga termer hittades för \"{query}\"",
     "no_results_title": "Inga träffar",
     "templates_title": "Dokument & Mallar",
     "templates_subtitle": "Lagstadgade mallar för din bokföring: ladda ner, fyll i och spara",
     "external_resources_title": "Externa resurser",
-    "support_title": "Behöver du mer hjälp?",
     "support_subtitle": "Hittar du inte svaret? Kontakta oss så hjälper vi dig.",
     "category_skatt": "Skatt",
     "category_moms": "Moms",
@@ -798,10 +798,8 @@
     "bulkbar_selected": "{count, plural, one {markerad} other {markerade}}",
     "bulk_excluded_note": "{count, plural, one {1 kräver enskild granskning} other {# kräver enskild granskning}}",
     "badge_medium_risk": "Medel risk",
-    "badge_low_risk": "Låg risk",
     "show_conversation": "Visa konversationen",
     "tab_history": "Historik",
-    "details_btn": "Visa detaljer",
     "empty_history_title": "Ingen historik ännu",
     "history_reason": "orsak: \"{reason}\""
   },
@@ -5427,13 +5425,6 @@
     "invoices_section_title": "Fakturor",
     "new_invoice": "Ny faktura",
     "no_invoices": "Inga fakturor registrerade för denna leverantör",
-    "col_arrival": "Ankomst",
-    "col_invoice_number": "Fakturanr",
-    "col_date": "Datum",
-    "col_due": "Förfaller",
-    "col_amount": "Belopp",
-    "col_remaining": "Kvar",
-    "col_status": "Status",
     "remaining_inline": "Kvar: {amount}",
     "status_registered": "Registrerad",
     "status_approved": "Godkänd",
@@ -6487,6 +6478,10 @@
     "managed_via": "Hanteras via {domain}",
     "locked_note": "Pausat: kräver betald plan"
   },
+  "browser_session_guard": {
+    "message": "Din webbläsare skickar inte med inloggningen, så sidor kan se tomma ut. Ingen data är borta. Logga in igen så rättar det sig.",
+    "sign_in_again": "Logga in igen"
+  },
   "system_notice": {
     "high_load": "Just nu är det hög belastning i systemet. Vissa sidor kan svara långsamt eller tillfälligt ge fel. Vi jobbar på det.",
     "dismiss": "Stäng"
@@ -6900,7 +6895,6 @@
     "count_footer": "{count, plural, one {1 artikel} other {# artiklar}}"
   },
   "article_detail": {
-    "back": "Tillbaka till artiklar",
     "edit": "Redigera",
     "deactivate": "Inaktivera",
     "activate": "Aktivera",
@@ -7007,7 +7001,6 @@
     "type_swedish_business": "Svenskt företag eller organisation",
     "type_eu_business": "EU-företag",
     "type_non_eu_business": "Utanför EU",
-    "verified": "Verifierad",
     "col_customer_number": "Kundnr",
     "col_name": "Namn",
     "col_type": "Typ",
@@ -7046,6 +7039,8 @@
     "empty_title": "Inga ordrar ännu",
     "empty_description": "Anslut din webshop så hämtas ordrarna hit varje natt, med kunduppgifter, betalsätt och moms.",
     "empty_action": "Anslut webshop",
+    "empty_filtered_title": "Inga ordrar i den här vyn",
+    "empty_filtered_description": "Byt vy eller butik för att se fler.",
     "load_failed": "Ordrarna kunde inte hämtas. Kontrollera din anslutning och försök igen.",
     "retry": "Försök igen",
     "invalid_account": "Ange ett fyrsiffrigt kontonummer, t.ex. 1930.",
@@ -7337,11 +7332,11 @@
   },
   "att_gora_v2": {
     "title": "Att göra",
-    "help": "Allt som väntar i bolaget, i den ordning det behöver göras. Vänster: uppgifterna. Mitten: raderna bakom den valda uppgiften. Höger: deadline, lagrum, beroenden och assistentens läge. Siffrorna är samma som i sidomenyn."
+    "help": "Allt som väntar i bolaget, grupperat efter vad du gör: Bokför, Betala, Granska & komplettera och Bevaka. Fortsätt visar det du har påbörjat, som utkast och lönekörningar. Kopplingarna fyller listan åt dig: agenten bockar av den, banken hämtar transaktionerna själv och Skatteverket stämmer av skattekontot och tar emot momsen."
   },
   "rules": {
       "title": "Regler",
-      "help": "En regel är en mening: när en transaktion ser ut så här, gör så här. Reglerna kommer från dina godkännanden och rättelser. En regel börjar med att föreslå; efter fem träffar utan rättelse kan den bokföra själv när autopiloten är på. En pausad regel matchar inget.",
+      "help": "En regel är en mening: när en transaktion ser ut så här, gör så här. Reglerna kommer från dina godkännanden och rättelser. En regel börjar som förslag. Bekräftad konterar den varje träff och lägger den i Att göra. Efter fem träffar utan rättelse kan den bokföra själv när autopiloten är på. En rättelse räknas i kolumnen Rättad. En pausad regel matchar inget.",
       "search": "Sök regler…",
       "count": "{count} regler",
       "ladder_label": "Läge",
@@ -7361,7 +7356,6 @@
       "ladder_propose_help": "Regeln konterar varje träff och lägger den i Att göra som klar att godkänna.",
       "ladder_auto_help": "Efter fem träffar utan rättelse bokför regeln själv, när autopiloten är på. Varje träff syns i Aktivitet.",
       "ladder_paused_help": "Regeln matchar inget tills du återupptar den.",
-      "ladder_note": "En regel börjar som förslag. Bekräftad konterar den varje träff och lägger den i Att göra. Efter fem träffar utan rättelse kan den bokföra själv när autopiloten är på. En rättelse räknas i kolumnen Rättad.",
       "th_rule": "Regel",
       "th_origin": "Skapad från",
       "th_hits": "Träffar",
@@ -7445,8 +7439,7 @@
     "add_woocommerce": "WooCommerce",
       "title": "Konton",
       "help": "Alla konton med pengar: bankkonton och skattekontot. Raden visar när kontot senast lästes, till vilket datum det är avstämt och hur många rader som väntar. Avstämningen görs per konto, månad för månad.",
-      "loading": "Hämtar…",
-      "load_failed": "Kontona kunde inte hämtas.",
+        "load_failed": "Kontona kunde inte hämtas.",
       "empty": "Inga konton kopplade än.",
       "connect_bank": "Koppla bank",
       "th_account": "Konto",
@@ -7542,7 +7535,6 @@
     "kopplingar_skv_off": "ej anslutet",
     "kopplingar_skv_on": "anslutet",
     "kopplingar_skv_aria": "Anslut Skatteverket",
-    "kopplingar_note": "Agenten bockar av listan åt dig, banken hämtar transaktionerna själv och Skatteverket stämmer av skattekontot och tar emot momsen.",
     "ai_fix_first_other": "Välj en annan agent",
     "ai_do_with": "Gör i {client}",
     "ai_review_description": "Prompten innehåller företagets namn och id så att {client} arbetar i rätt bolag.",
@@ -8553,6 +8545,9 @@
     "stripe_description": "Koppla företagets Stripe-konto så hämtas betalningar, avgifter och utbetalningar löpande och bokförs mot Stripe-saldot.",
     "stripe_not_enabled_title": "Stripe-tillägget är inte aktiverat",
     "stripe_not_enabled_description": "Aktivera tillägget Stripe för att koppla ditt Stripe-konto och synka transaktioner automatiskt.",
+    "psd2_not_enabled_title": "Bankintegration (PSD2) är inte aktiverad",
+    "psd2_not_enabled_description": "Aktivera tillägget Enable Banking för att koppla ditt bankkonto, eller importera transaktioner manuellt via bankfil.",
+    "psd2_not_enabled_cta": "Importera bankfil istället",
     "badge_beta": "Beta",
     "woocommerce_title": "WooCommerce",
     "woocommerce_description": "Koppla din WooCommerce-butik så hämtas betalda ordrar och återbetalningar till transaktionsinkorgen.",
@@ -8968,7 +8963,6 @@
     "v2_back_overview": "Tillbaka till översikten",
     "v2_show_manual": "{count, plural, =1 {Visa 1 konto} other {Visa # konton}}",
     "v2_hide_manual": "Dölj",
-    "v2_note": "Ett kopplat konto hämtar bankens sida självt. Annars bifogar du kontoutdraget under kontot när du stämmer av.",
     "v2_col_external_bank": "Banken",
     "v2_col_external_skv": "Skatteverket",
     "v2_col_external_manual": "Enligt underlag",
@@ -8979,7 +8973,7 @@
     "v2_row_balance_at": "Saldo per {date}",
     "v2_row_unexplained": "Oförklarat",
     "title": "Avstämning",
-    "help_text": "Varje konto med en sanning utanför bokföringen: banken, skattekontot och övriga balanskonton mot reskontra, beräkning eller ditt underlag. Koppla raderna, förklara differensen och signera när kontot stämmer.",
+    "help_text": "Varje konto med en sanning utanför bokföringen: banken, skattekontot och övriga balanskonton mot reskontra, beräkning eller ditt underlag. Koppla raderna, förklara differensen och signera när kontot stämmer. Ett kopplat konto hämtar bankens sida självt; annars bifogar du kontoutdraget under kontot.",
     "rail_heading": "Konton",
     "rail_synced": "hämtat {date}",
     "rail_never_synced": "aldrig hämtat",
@@ -9176,8 +9170,7 @@
     "payment_title": "Betalningsuppgifter",
     "payment_description": "Dragningen {date} är {charge}.",
     "payment_bankgiro_label": "Bankgiro (Skatteverket)",
-    "payment_shortfall_label": "Saknas på kontot",
-    "pgnote": "Synkas automatiskt varje natt. Genomförda händelser bokförs mot 1630 Skattekonto, oftast automatiskt, och avvikelser flaggas här. Kronofogden: {amount}."
+    "payment_shortfall_label": "Saknas på kontot"
   },
   "expense_claims": {
     "title": "Utlägg",
@@ -9454,7 +9447,6 @@
     "invoiced_hint": "{qty} fakturerat"
   },
   "sales_order_detail": {
-    "back": "Tillbaka till kundorder",
     "title": "Kundorder {number}",
     "title_unnumbered": "Kundorder",
     "section_details": "Uppgifter",
@@ -10256,7 +10248,6 @@
     "record_fact_chip": "faktum om bolaget",
     "col_quantity": "Antal",
     "col_vat_rate": "Moms",
-    "action_search": "Sök",
     "action_upload": "Ladda upp",
     "type_unknown": "Okänd typ",
     "linked_say_what": "Säg vad det är",

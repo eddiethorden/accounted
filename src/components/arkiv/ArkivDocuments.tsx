@@ -167,7 +167,6 @@ export function ArkivDocuments({ fixedType, refreshKey = 0, searchable = true }:
                     <Link href={row.href} className={`${QUIET_LINK_CLASS} text-[13px] text-foreground`} title={row.file_name}>
                       {row.title}
                     </Link>
-                    {row.title !== row.file_name && !row.file_name.startsWith(row.title) ? <div className="truncate text-[11px] text-muted-foreground">{row.file_name}</div> : null}
                   </td>
                   <td className={`${TD_CLASS} truncate text-muted-foreground`}>{typeLabel(row.doc_type)}</td>
                   <td className={`${TD_CLASS} truncate text-muted-foreground`} title={row.counterparty ?? undefined}>

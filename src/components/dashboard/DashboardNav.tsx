@@ -68,6 +68,7 @@ import { EXTENSION_REQUIRED_CAPABILITY, type CapabilityKey } from '@/lib/entitle
 import type { EntityType } from '@/types'
 import { isEntityType, usesPersonnummerAsOrgNumber } from '@/lib/company/entity-type'
 import { SidebarV2 } from './SidebarV2'
+import { scrubAuthCookies } from '@/lib/auth/browser-session-cookies'
 import { NAV_V2_COMPANY, NAV_V2_TOP, type NavGateFlags, type NavV2Item } from './nav-v2'
 
 void _ENABLED_EXTENSION_IDS
@@ -409,6 +410,10 @@ export default function DashboardNav({ companyName: _companyName, entityType, pa
     // An unsent support draft belongs to this user; never leave it in the tab.
     clearSupportDraft()
     await supabase.auth.signOut()
+    // signOut only expires the Path=/ host-only auth cookie; a duplicate
+    // written under another Path or Domain would survive and keep the
+    // browser signed out of its own reads after the next login (PH 99).
+    scrubAuthCookies(document, window.location)
     router.push(isSandbox ? '/sandbox' : '/login')
   }
 

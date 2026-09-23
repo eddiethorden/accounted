@@ -14,7 +14,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ToastAction } from '@/components/ui/toast'
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog'
 import { DestructiveConfirmDialog, useDestructiveConfirm } from '@/components/ui/destructive-confirm-dialog'
-import { DataList, DataListEmpty } from '@/components/ui/data-list'
+import { DataListEmpty } from '@/components/ui/data-list'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
@@ -4371,18 +4371,19 @@ export default function TransactionsPage() {
 
       {/* Content based on mode */}
       {isLoading ? (
-        <DataList className="stagger-enter">
+        // Same shape as loading.tsx and the list it resolves into: borderless
+        // one-line rows, not a boxed card with two-line rows.
+        <div aria-busy>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3">
-              <Skeleton className="h-5 w-5" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-3 w-24" />
+            <div key={i} className="flex items-center justify-between gap-4 border-b border-border py-3">
+              <Skeleton className="h-4 w-48" />
+              <div className="flex items-center gap-6">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
               </div>
-              <Skeleton className="h-5 w-20" />
             </div>
           ))}
-        </DataList>
+        </div>
       ) : mode === 'review' ? (
         <SuggestionReviewList
           items={suggestionItems}

@@ -14,6 +14,7 @@ import LazyCommandPalette from '@/components/common/LazyCommandPalette'
 import { SupportDialogHost } from '@/components/support/SupportDialogHost'
 import { SettingsHotkey } from '@/components/settings/SettingsHotkey'
 import { SessionTimeoutController } from '@/components/auth/SessionTimeoutController'
+import { BrowserSessionGuard } from '@/components/auth/BrowserSessionGuard'
 import { SandboxBanner } from '@/components/dashboard/SandboxBanner'
 import { SystemNoticeBanner } from '@/components/dashboard/SystemNoticeBanner'
 import { parseSystemNoticeUntil } from '@/components/dashboard/system-notice'
@@ -223,6 +224,7 @@ export default async function DashboardLayout({
         }}
       >
         <SessionTimeoutController />
+        <BrowserSessionGuard />
         <AgentSheetProvider>
           <CompanyTabSync />
           <div className="min-h-dvh bg-frame md:flex md:flex-col">
@@ -385,6 +387,7 @@ export default async function DashboardLayout({
     return (
       <CompanyProvider value={companyContextValue}>
         <SessionTimeoutController />
+        <BrowserSessionGuard />
         <AgentSheetProvider>
           <CompanyTabSync />
           <div className="min-h-dvh bg-frame md:flex md:flex-col">
@@ -537,6 +540,7 @@ export default async function DashboardLayout({
         settings={settingsError ? undefined : settings}
       >
       <SessionTimeoutController />
+      <BrowserSessionGuard />
       <DashboardRouteShell
         onboarding={
           <div className="relative min-h-dvh bg-background">
