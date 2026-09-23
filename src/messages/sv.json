@@ -10259,20 +10259,6 @@
     "all_done": "Allt klart",
     "uses": "{count, plural, one {Körd en gång} other {Körd # gånger}}",
     "uses_line": "{count, plural, one {Körd en gång} other {Körd # gånger}} senaste halvåret, senast {date}.",
-    "suggest": {
-      "bookkeep": {
-        "line": "{count, plural, one {En transaktion väntar} other {# transaktioner väntar}} på att bokföras.",
-        "cta": "Låt {client} bokföra {count, plural, one {den} other {dem}}"
-      },
-      "kvittojakten": {
-        "line": "{count, plural, one {Ett underlag saknas} other {# underlag saknas}} eller väntar i inkorgen.",
-        "cta": "Låt {client} leta upp {count, plural, one {det} other {dem}}"
-      },
-      "reconcile-month": {
-        "line": "Det är dags att stämma av bankkontot.",
-        "cta": "Låt {client} stämma av"
-      }
-    },
     "sheet_todo": "{count, plural, one { sak på Att göra väntar} other { saker på Att göra väntar}} på den här skillen.",
     "run_hint": "Prompten kopieras och {client} öppnas i en ny flik.",
     "run_hint_prefilled": "{client} öppnas i en ny flik med prompten ifylld.",
@@ -10297,7 +10283,6 @@
     "step_3": "Godkänn där. Kom sedan tillbaka hit, så tänds dina skills.",
     "cancel": "Avbryt",
     "close": "Stäng",
-    "say_label": "Säg till din AI",
     "prompt": "{say} Ladda skillen \"{skill}\" från Accounted (load_skill) och följ den.",
     "own_say": "Kör min skill {name} i Accounted.",
     "open_hint": "Öppna",

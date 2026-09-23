@@ -132,12 +132,6 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
       <div className={styles.sheetMain}>
         {steps.length > 0 && <ol className={styles.steps}>{steps.map((step, i) => <li key={i} data-ph-mask={own ? '' : undefined}>{step}</li>)}</ol>}
         <div className={styles.sheetFoot}>
-          {!own?.draft && (
-            <div className={styles.promptbox}>
-              <span>{t('say_label')}</span>
-              <p data-ph-mask={own ? '' : undefined}>{`”${say}”`}</p>
-            </div>
-          )}
           {own?.draft ? (
             <div className="flex flex-col gap-2">
               <span className={styles.goWrap}>

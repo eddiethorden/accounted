@@ -10259,20 +10259,6 @@
     "all_done": "All done",
     "uses": "{count, plural, one {Run once} other {Run # times}}",
     "uses_line": "{count, plural, one {Run once} other {Run # times}} in the last six months, most recently {date}.",
-    "suggest": {
-      "bookkeep": {
-        "line": "{count, plural, one {One transaction is} other {# transactions are}} waiting to be booked.",
-        "cta": "Let {client} book {count, plural, one {it} other {them}}"
-      },
-      "kvittojakten": {
-        "line": "{count, plural, one {One document is} other {# documents are}} missing or waiting in the inbox.",
-        "cta": "Let {client} find {count, plural, one {it} other {them}}"
-      },
-      "reconcile-month": {
-        "line": "It is time to reconcile the bank account.",
-        "cta": "Let {client} reconcile"
-      }
-    },
     "sheet_todo": "{count, plural, one { item on your to-do list is} other { items on your to-do list are}} waiting for this skill.",
     "run_hint": "Copies the prompt and opens {client} in a new tab.",
     "run_hint_prefilled": "Opens {client} in a new tab with the prompt filled in.",
@@ -10297,7 +10283,6 @@
     "step_3": "Approve it there. Then come back here and your skills light up.",
     "cancel": "Cancel",
     "close": "Close",
-    "say_label": "Tell your AI",
     "prompt": "{say} Load the skill \"{skill}\" from Accounted (load_skill) and follow it.",
     "own_say": "Run my skill {name} in Accounted.",
     "open_hint": "Open",

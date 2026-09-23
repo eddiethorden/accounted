@@ -9,14 +9,14 @@ import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
 import type { CatalogSkill } from '@/lib/agent-skills/catalog'
 import type { WorklistCategory } from '@/lib/worklist/types'
-import { FREE_SKILLS, REGISTRY_SKILLS, hasTodoSignal, registrySkillSlug, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
+import { FREE_SKILLS, REGISTRY_SKILLS, hasTodoSignal, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import { AI_CLIENTS, aiConnectAction, aiPrefilledChatLink, openAiConnector, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
 import { createAiStatusPoller, type AiStatusPoller } from '@/lib/onboarding/ai-status-poll'
 import { PageHeader } from '@/components/ui/page-header'
 import { HelpPopover } from '@/components/ui/help-popover'
 import { Button } from '@/components/ui/button'
-import { SkillSheet, copyPromptAndOpen, type SheetTarget } from './SkillSheet'
+import { SkillSheet, type SheetTarget } from './SkillSheet'
 import { SkillCreator, type CreatorMode, type KeyRect } from './SkillCreator'
 import { SkillMarks } from './SkillMarks'
 import { Spark, centerIn, prefersReducedMotion, wait } from './spark'
@@ -60,7 +60,7 @@ function simulatedClient(): AiClient | null {
 
 /**
  * Dev only: `?todo=1` fakes waiting Att göra work (and a few runs) so the
- * suggestion line, counts and run counters can be seen without writing data.
+ * counts and run counters can be seen without writing data.
  */
 function simulatedTodo(): boolean {
   return process.env.NODE_ENV === 'development' && new URLSearchParams(window.location.search).get('todo') === '1'
@@ -145,8 +145,6 @@ function Registry({ companyId }: { companyId: string }) {
   const allDone = (id: RegistrySkillId) => !!worklist.data && hasTodoSignal(id) && !doNow.has(id)
   const uses = (slug: string) => usage.data?.[slug]?.count ?? 0
   // the one thing worth doing now: the skill with the most waiting
-  const suggestion = [...doNow.entries()].sort((a, b) => b[1] - a[1])[0] as [RegistrySkillId, number] | undefined
-  const [suggestCopied, setSuggestCopied] = useState<'idle' | 'copied' | 'failed'>('idle')
   const own: OwnRow[] = (catalog.data ?? [])
     .filter((skill) => skill.tier === 'own' && skill.shareStatus !== 'withdrawn' && skill.installations[0])
     .map((skill) => ({ slug: skill.slug, name: skill.name, summary: skill.summary, installationId: skill.installations[0].installation_id, draft: skill.draft }))
@@ -327,11 +325,6 @@ function Registry({ companyId }: { companyId: string }) {
     else if (IN_APP_CREATOR) setCreator({ kind: 'create' })
     else openAiConnector(aiPrefilledChatLink(client, t('create_prompt')))
   }
-  function runSuggestion(id: RegistrySkillId) {
-    if (!isConnected) { setSheet({ kind: 'registry', id, locked: true }); return }
-    const prompt = t('prompt', { say: t(`skills.${id}.say`), skill: registrySkillSlug(id, client) })
-    void copyPromptAndOpen(prompt, client, true).then((ok) => setSuggestCopied(ok ? 'copied' : 'failed'))
-  }
   function openRow(row: Row) {
     setSheet(row.own
       ? { kind: 'own', slug: row.own.slug, name: row.own.name, installationId: row.own.installationId, draft: row.own.draft }
@@ -392,17 +385,6 @@ function Registry({ companyId }: { companyId: string }) {
       <section className={styles.hero}>
         <div className={styles.intro}>
           <h2>{t('hero_title')}</h2>
-          {suggestion && (
-            <div className={styles.suggest}>
-              <span className={styles.suggestDot} aria-hidden />
-              <p>{t(`suggest.${suggestion[0]}.line`, { count: suggestion[1] })}</p>
-              <button type="button" onClick={() => runSuggestion(suggestion[0])}>
-                {t(`suggest.${suggestion[0]}.cta`, { client: clientName, count: suggestion[1] })}
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-              </button>
-              {suggestCopied === 'copied' && <span role="status" className={styles.suggestNote}>{t('prefilled_open', { client: clientName })}</span>}
-            </div>
-          )}
         </div>
         <div className={styles.cards}>
           {top.map((skill, i) => (
