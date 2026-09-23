@@ -4773,12 +4773,29 @@ const ASSETS: Record<string, StructuredErrorEntry> = {
     message_en:
       'Acquisition date, cost and category cannot be changed once the asset has been disposed or depreciation has been posted. Reverse (storno) first, or use the disposal flow.',
   },
+  ASSET_OPENING_CHANGED: {
+    httpStatus: 409,
+    message_sv:
+      'Tillgångens ingående avskrivning har ändrats. Beräkna avskrivningsförslaget på nytt innan du bokför.',
+    message_en:
+      'The asset opening depreciation has changed. Recalculate the depreciation proposal before posting.',
+  },
   ASSET_DELETE_BLOCKED: {
     httpStatus: 409,
     message_sv:
       'Tillgången kan inte tas bort eftersom den har nått bokföringen: avskrivningar är bokförda eller tillgången är avyttrad. Registerraden är då räkenskapsinformation (BFL 7 kap.). Använd avyttring, eller återför verifikatet med storno först.',
     message_en:
       'The asset cannot be deleted because it has reached the books: depreciation is posted or the asset is disposed. The register row is then accounting information (BFL ch. 7). Dispose it, or reverse the voucher with storno first.',
+  },
+  INVALID_OPENING_DEPRECIATION: {
+    httpStatus: 400,
+    // The thrower (AssetOpeningDepreciationInvalidError) names the failed rule
+    // in Swedish; message_sv is the fallback that lists every rule.
+    thrown_message_sv: true,
+    message_sv:
+      'Redan avskrivet belopp är ogiltigt: det måste vara mellan 0 och anskaffningsvärdet minus restvärdet, ha ett datum som inte är senare än i dag eller före anskaffningsdatumet, och kan inte kombineras med komponentuppdelning.',
+    message_en:
+      'The opening accumulated depreciation is invalid: it must be between 0 and the acquisition cost less the residual value, carry a date that is not after today or before the acquisition date, and cannot be combined with a component breakdown.',
   },
   K3_REQUIRED_FOR_COMPONENTS: {
     httpStatus: 422,

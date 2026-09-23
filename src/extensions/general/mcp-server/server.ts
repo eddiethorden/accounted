@@ -3829,6 +3829,14 @@ const ASSET_WRITE_PROPERTIES = {
       required: ['name', 'cost', 'useful_life_months'],
     },
   },
+  opening_accumulated_depreciation: {
+    type: 'number',
+    description: 'Accumulated depreciation for this asset from the previous asset register, SEK, 0 to acquisition_cost - salvage_value. No voucher or automatic reconciliation: manually reconcile register totals with the imported ledger before depreciation or disposal. Manual ledger postings do not lock opening edits; depreciation posted through Accounted\'s asset register or disposal does. Component opening balances are unsupported; keep the component breakdown.',
+  },
+  opening_depreciation_date: {
+    type: ['string', 'null'],
+    description: 'yyyy-MM-dd the opening amount is stated per; required when the amount is above 0, between acquisition_date and today (Europe/Stockholm). Zero amount clears the date.',
+  },
   notes: { type: 'string' },
 } as const
 
@@ -22002,10 +22010,19 @@ export const tools: McpTool[] = [
       if (gate) throw new AssetGateError(gate)
       const accounts = await resolveCreateAccounts(supabase, companyId, body)
       const cost = roundOre(body.acquisition_cost)
+      // Normalize the opening fields once so the staged params and the
+      // preview the approver sees carry the same values.
+      const openingAmount = roundOre(body.opening_accumulated_depreciation ?? 0)
+      const openingDate = openingAmount > 0 ? body.opening_depreciation_date ?? null : null
+      const params = {
+        ...body,
+        opening_accumulated_depreciation: openingAmount,
+        opening_depreciation_date: openingDate,
+      }
       return stagePendingOperation(
         supabase, companyId, userId, 'create_asset',
         `Ny anläggningstillgång: ${body.name}, ${cost} SEK`,
-        body as Record<string, unknown>,
+        params as Record<string, unknown>,
         {
           name: body.name,
           category: body.category,
@@ -22016,7 +22033,9 @@ export const tools: McpTool[] = [
           depreciation_method: body.depreciation_method ?? 'linear',
           accounts,
           k3_component_count: body.k3_components?.length ?? 0,
-          will: 'add the asset to the anläggningsregister; no voucher is posted (the purchase is already booked)',
+          opening_accumulated_depreciation: openingAmount,
+          opening_depreciation_date: openingDate,
+          will: 'add the asset to the anläggningsregister; no voucher is posted (the purchase and any opening accumulated depreciation are already booked)',
         },
         actor,
         undefined,
