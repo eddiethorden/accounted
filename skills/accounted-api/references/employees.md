@@ -1922,6 +1922,7 @@ Returns the shift premium rules the salary engine applies to worked days (OB-til
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
 | `companyId` | path | `string` | yes |  |
+| `include_inactive` | query | `"true" \| "false"` | no | true also returns inactive rules. Default: active only. |
 
 Response `200`:
 ```ts

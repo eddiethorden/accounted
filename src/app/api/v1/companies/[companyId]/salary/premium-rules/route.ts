@@ -79,6 +79,13 @@ const EXAMPLE_RULE = {
   updated_at: '2026-09-11T08:00:00Z',
 }
 
+const ListQuery = z.object({
+  include_inactive: z
+    .enum(['true', 'false'])
+    .optional()
+    .describe('true also returns inactive rules. Default: active only.'),
+})
+
 registerEndpoint({
   operation: 'salary.premium-rules.list',
   method: 'GET',
@@ -103,6 +110,7 @@ registerEndpoint({
   idempotent: true,
   reversible: false,
   dryRunSupported: false,
+  request: { query: ListQuery },
   response: { success: listEnvelope(PremiumRule) },
 })
 
