@@ -100,6 +100,33 @@ export function documentTitle(input: { docType: string | null; fileName: string;
   }
 }
 
+/**
+ * The Underlag reader's fields (extracted_data on the row: the inbox reads
+ * every company's receipts and supplier invoices) in the payload shape the
+ * title and the date read, so a shelf company's receipt is "Kvitto
+ * Systembolaget, 2 388,80 kr" and not "IMG_7483".
+ */
+export function underlagPayload(extracted: Record<string, unknown> | null | undefined): Payload {
+  if (!extracted || typeof extracted !== 'object') return {}
+  const field = (v: string | number): Payload[string] => ({ value: v, normalized: v, page: null, quote: null, confidence: 1 }) as Payload[string]
+  const supplier = (extracted.supplier as { name?: string | null } | undefined)?.name ?? null
+  const invoice = (extracted.invoice as { invoiceNumber?: string | null; invoiceDate?: string | null; currency?: string | null } | undefined) ?? {}
+  const total = (extracted.totals as { total?: number | null } | undefined)?.total ?? null
+  const p: Payload = {}
+  if (supplier && supplier.trim()) {
+    p.merchant_name = field(supplier.trim())
+    p.supplier_name = field(supplier.trim())
+  }
+  if (invoice.invoiceNumber) p.invoice_number = field(invoice.invoiceNumber)
+  if (invoice.invoiceDate) {
+    p.receipt_date = field(invoice.invoiceDate)
+    p.invoice_date = field(invoice.invoiceDate)
+  }
+  if (typeof total === 'number') p.total_amount = field(total)
+  if (invoice.currency) p.currency = field(invoice.currency)
+  return p
+}
+
 /** The date printed on the document: when it was issued, signed, decided or held; null when the record has none. */
 export function documentDate(docType: string | null, payload: Payload | null): string | null {
   const p = payload ?? {}

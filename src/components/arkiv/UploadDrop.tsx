@@ -151,7 +151,10 @@ export function UploadDrop({ onLanded, className }: { onLanded?: (view: Pipeline
               ref={input}
               type="file"
               multiple
-              accept="application/pdf,image/*,.docx,.xlsx,.txt,.html"
+              // No image/heic here on purpose: when HEIC is absent from accept, iOS
+              // Safari transcodes photo-library picks to JPEG (the inbox does the
+              // same). A HEIC dropped from a Mac is still taken and decoded server-side.
+              accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,.docx,.xlsx,.txt,.html"
               className="sr-only"
               onChange={(e) => void upload(Array.from(e.target.files ?? []))}
             />
