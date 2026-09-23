@@ -1107,16 +1107,14 @@ export default function ExpenseClaimsPage() {
                   )}
                 </td>
                 {/* One-line rows (convention 4): the original-currency amount
-                    rides in the tooltip instead of a second line. */}
-                <td
-                  className={`${TD_CLASS} whitespace-nowrap text-right tabular-nums`}
-                  title={
-                    c.currency !== 'SEK' && c.amount_in_currency != null
-                      ? formatCurrency(c.amount_in_currency, c.currency)
-                      : undefined
-                  }
-                >
+                    sits inline after the SEK amount instead of a second line. */}
+                <td className={`${TD_CLASS} whitespace-nowrap text-right tabular-nums`}>
                   {formatCurrency(c.amount_sek)}
+                  {c.currency !== 'SEK' && c.amount_in_currency != null && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      {formatCurrency(c.amount_in_currency, c.currency)}
+                    </span>
+                  )}
                 </td>
                 <td className={`${TD_CLASS} w-16 text-right`} onClick={(e) => e.stopPropagation()}>
                   {c.status === 'registered' && canWrite && (

@@ -369,7 +369,7 @@ export default function SupplierDetailPage() {
           ) : (
             /* One line per invoice, the customer-detail shape: the side
                column is too narrow for a seven-column table, and arrival
-               number, invoice date and remaining live on the invoice itself.
+               number and invoice date live on the invoice itself.
                Chips mark exceptions: paid and approved render as muted text. */
             <div className="divide-y divide-border">
               {invoices.map((inv) => {
@@ -388,6 +388,15 @@ export default function SupplierDetailPage() {
                     <span className="ml-auto shrink-0 tabular-nums">
                       {amountWithCurrency(inv.total, inv.currency)}
                     </span>
+                    {/* A partial payment keeps its outstanding balance visible. */}
+                    {Number(inv.remaining_amount) > 0 &&
+                      Number(inv.remaining_amount) !== Number(inv.total) && (
+                        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                          {t('remaining_inline', {
+                            amount: amountWithCurrency(inv.remaining_amount, inv.currency),
+                          })}
+                        </span>
+                      )}
                     {exceptionVariant ? (
                       <Badge variant={exceptionVariant} className="shrink-0 font-normal">
                         {label}

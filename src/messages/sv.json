@@ -5399,6 +5399,7 @@
     "invoices_section_title": "Fakturor",
     "new_invoice": "Ny faktura",
     "no_invoices": "Inga fakturor registrerade för denna leverantör",
+    "remaining_inline": "Kvar: {amount}",
     "status_registered": "Registrerad",
     "status_approved": "Godkänd",
     "status_paid": "Betald",

@@ -5399,6 +5399,7 @@
     "invoices_section_title": "Invoices",
     "new_invoice": "New invoice",
     "no_invoices": "No invoices registered for this supplier",
+    "remaining_inline": "Remaining: {amount}",
     "status_registered": "Registered",
     "status_approved": "Approved",
     "status_paid": "Paid",

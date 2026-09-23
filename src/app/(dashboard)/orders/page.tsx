@@ -269,11 +269,14 @@ export default function OrdersPage() {
         </div>
       ) : visibleRows.length === 0 && (tab !== 'all' || storeScope) ? (
         // Filtered to nothing: the orders exist, so no connect-your-shop CTA.
-        <EmptyState
-          icon={ShoppingCart}
-          title={t('empty_filtered_title')}
-          description={t('empty_filtered_description')}
-        />
+        // A live region so a filter change that empties the list is announced.
+        <div role="status" aria-live="polite">
+          <EmptyState
+            icon={ShoppingCart}
+            title={t('empty_filtered_title')}
+            description={t('empty_filtered_description')}
+          />
+        </div>
       ) : visibleRows.length === 0 ? (
         <EmptyState
           icon={ShoppingCart}
