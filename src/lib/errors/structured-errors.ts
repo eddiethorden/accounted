@@ -3533,6 +3533,11 @@ const SALARY: Record<string, StructuredErrorEntry> = {
     message_sv: 'Timmarna för perioden hämtas från kalendern: ändra de arbetade dagarna i stället.',
     message_en: 'Hours for this period come from the calendar of worked days: change those days instead.',
   },
+  SALARY_RUN_HOURLY_RATE_MISSING: {
+    httpStatus: 400,
+    message_sv: 'Den anställda saknar timlön: ange timlönen på den anställda innan du sätter arbetade timmar.',
+    message_en: 'The employee has no hourly rate: set it on the employee before setting hours worked.',
+  },
   ABSENCE_RANGE_TOO_LARGE: {
     httpStatus: 400,
     message_sv: 'Frånvarointervallet är för stort. Max 92 dagar per anrop.',

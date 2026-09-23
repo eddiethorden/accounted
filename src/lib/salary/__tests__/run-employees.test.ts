@@ -408,6 +408,69 @@ describe('setRunEmployeeSalary', () => {
     expect(fromCalls).toEqual(['salary_runs', 'salary_run_employees', 'salary_worked_days'])
   })
 
+  it('refuses hours_worked on any calendar row, even one summing to zero hours', async () => {
+    mock.enqueue({ data: { id: RUN_ID, status: 'draft', period_year: 2026, period_month: 6 } })
+    mock.enqueue({ data: { ...SRE_ROW, salary_type: 'hourly', hours_worked: null } })
+    mock.enqueue({ data: [{ hours: 0 }] })
+
+    const result = await setRunEmployeeSalary(supabase, {
+      companyId: COMPANY_ID,
+      salaryRunId: RUN_ID,
+      employeeId: EMPLOYEE_ID,
+      hoursWorked: 160,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe('SALARY_RUN_HOURS_FROM_CALENDAR')
+      expect(result.details).toMatchObject({ calendar_hours: 0 })
+    }
+    expect(mock.findCall('salary_run_employees', 'update')).toBeUndefined()
+  })
+
+  it('checks calendar days in the run avvikelseperiod, not the pay month', async () => {
+    mock.enqueue({
+      data: {
+        id: RUN_ID,
+        status: 'draft',
+        period_year: 2026,
+        period_month: 6,
+        deviation_period_start: '2026-05-01',
+        deviation_period_end: '2026-05-31',
+      },
+    })
+    mock.enqueue({ data: { ...SRE_ROW, salary_type: 'hourly', hours_worked: null } })
+    mock.enqueue({ data: [{ hours: 8 }] })
+
+    const result = await setRunEmployeeSalary(supabase, {
+      companyId: COMPANY_ID,
+      salaryRunId: RUN_ID,
+      employeeId: EMPLOYEE_ID,
+      hoursWorked: 160,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.details).toMatchObject({ period_start: '2026-05-01', period_end: '2026-05-31' })
+    }
+  })
+
+  it('refuses hours_worked when the employee has no hourly rate, before any write', async () => {
+    mock.enqueue({ data: { id: RUN_ID, status: 'draft', period_year: 2026, period_month: 6 } })
+    mock.enqueue({ data: { ...SRE_ROW, salary_type: 'hourly', hours_worked: null } })
+    mock.enqueue({ data: [] })
+    mock.enqueue({ data: { hourly_rate: null } })
+
+    const result = await setRunEmployeeSalary(supabase, {
+      companyId: COMPANY_ID,
+      salaryRunId: RUN_ID,
+      employeeId: EMPLOYEE_ID,
+      hoursWorked: 160,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('SALARY_RUN_HOURLY_RATE_MISSING')
+    expect(mock.findCall('salary_run_employees', 'update')).toBeUndefined()
+    expect(mock.findCall('salary_line_items', 'update')).toBeUndefined()
+  })
+
   it('sets hours_worked on an hourly row and reprices the Timlön display line', async () => {
     mock.enqueue({ data: { id: RUN_ID, status: 'draft', period_year: 2026, period_month: 6 } })
     mock.enqueue({ data: { ...SRE_ROW, salary_type: 'hourly', monthly_salary: 0, hours_worked: null } })

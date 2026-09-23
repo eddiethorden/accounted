@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getLineItemAccount } from '@/lib/salary/account-mapping'
 import { roundOre } from '@/lib/money'
 import { degreeAdjustedMonthlySalary } from '@/lib/salary/work-schedule'
+import { runDeviationWindow } from '@/lib/salary/deviation-period'
 import { SALARY_OVERRIDE_MAX } from '@/lib/api/schemas'
 import type { SalaryLineItemType } from '@/types'
 
@@ -39,14 +40,23 @@ export interface SalaryRunEmployeeRow {
   updated_at: string
 }
 
+interface DraftRunGate {
+  id: string
+  status: string
+  period_year: number
+  period_month: number
+  deviation_period_start?: string | null
+  deviation_period_end?: string | null
+}
+
 async function assertRunDraftForRoster(
   supabase: SupabaseClient,
   companyId: string,
   salaryRunId: string,
-): Promise<RunEmployeeResult<{ id: string; status: string; period_year: number; period_month: number }>> {
+): Promise<RunEmployeeResult<DraftRunGate>> {
   const { data: run, error } = await supabase
     .from('salary_runs')
-    .select('id, status, period_year, period_month')
+    .select('id, status, period_year, period_month, deviation_period_start, deviation_period_end')
     .eq('id', salaryRunId)
     .eq('company_id', companyId)
     .maybeSingle()
@@ -64,7 +74,7 @@ async function assertRunDraftForRoster(
       details: { current_status: (run as { status: string }).status },
     }
   }
-  return { ok: true, data: run as { id: string; status: string; period_year: number; period_month: number } }
+  return { ok: true, data: run as DraftRunGate }
 }
 
 export async function addEmployeeToRun(
@@ -309,32 +319,29 @@ export async function setRunEmployeeSalary(
 
   if (hasHours) {
     // Calendar days win at calculation time (run-calculation derives
-    // hours_worked from salary_worked_days when any exist in the period), so
-    // a per-run override would be silently discarded. Refuse instead of
-    // staging a change that cannot take effect.
-    const periodStart = `${gate.data.period_year}-${String(gate.data.period_month).padStart(2, '0')}-01`
-    const periodEnd = new Date(Date.UTC(gate.data.period_year, gate.data.period_month, 0))
-      .toISOString()
-      .slice(0, 10)
+    // hours_worked from salary_worked_days in the run's avvikelseperiod), so
+    // a per-run override would be silently discarded. Refuse on any calendar
+    // row, even a zero-hour one: once the period is kept in the calendar the
+    // calendar is the source of truth, and the next row entered there would
+    // replace this override without warning.
+    const window = runDeviationWindow(gate.data)
     const { data: workedDays, error: workedError } = await supabase
       .from('salary_worked_days')
       .select('hours')
       .eq('company_id', args.companyId)
       .eq('employee_id', args.employeeId)
-      .gte('work_date', periodStart)
-      .lte('work_date', periodEnd)
+      .gte('work_date', window.start)
+      .lte('work_date', window.end)
     if (workedError) {
       return { ok: false, code: 'INTERNAL_ERROR', details: { message: workedError.message } }
     }
-    const calendarHours = ((workedDays ?? []) as Array<{ hours: number | string }>).reduce(
-      (sum, d) => roundOre(sum + Number(d.hours)),
-      0,
-    )
-    if (calendarHours > 0) {
+    const calendarRows = (workedDays ?? []) as Array<{ hours: number | string }>
+    if (calendarRows.length > 0) {
+      const calendarHours = calendarRows.reduce((sum, d) => roundOre(sum + Number(d.hours)), 0)
       return {
         ok: false,
         code: 'SALARY_RUN_HOURS_FROM_CALENDAR',
-        details: { calendar_hours: calendarHours, period_start: periodStart, period_end: periodEnd },
+        details: { calendar_hours: calendarHours, period_start: window.start, period_end: window.end },
       }
     }
 
@@ -348,6 +355,11 @@ export async function setRunEmployeeSalary(
       return { ok: false, code: 'INTERNAL_ERROR', details: { message: empError.message } }
     }
     hourlyRate = (employee as { hourly_rate: number | null } | null)?.hourly_rate ?? null
+    // Without a rate the calculation refuses the row anyway; accepting the
+    // hours here would write a zero Timlön line and report success.
+    if (hourlyRate === null || !Number.isFinite(Number(hourlyRate))) {
+      return { ok: false, code: 'SALARY_RUN_HOURLY_RATE_MISSING', details: { employee_id: args.employeeId } }
+    }
   }
 
   const data: SetRunSalaryData = {

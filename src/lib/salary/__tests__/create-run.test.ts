@@ -271,7 +271,9 @@ describe('duplicate period (23505)', () => {
     expect(typed.existingStatus).toBe('review')
     expect(typed.message).toBe('Salary run already exists for this period (id run-existing, status review)')
     // Corrected originals coexist with their correction: the lookup skips them.
-    expect(filters).toEqual([
+    // Only the tail is the re-select; earlier filters belong to the
+    // avvikelseperiod overlap check that runs before the insert.
+    expect(filters.slice(-5)).toEqual([
       ['eq', 'company_id', 'company-1'],
       ['eq', 'period_year', 2026],
       ['eq', 'period_month', 6],
