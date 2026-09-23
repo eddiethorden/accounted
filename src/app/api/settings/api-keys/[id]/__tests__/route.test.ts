@@ -206,6 +206,14 @@ describe('PATCH /api/settings/api-keys/[id]', () => {
       listUserCompaniesForPickerMock.mockResolvedValue(memberships)
     })
 
+    it('returns 400 for an empty list rather than widening the key to unrestricted', async () => {
+      setupFrom({ data: { id: 'key-1' } })
+      const res = await PATCH(patch({ company_ids: [] }), params)
+      expect(res.status).toBe(400)
+      expect(serviceSupabase.from).not.toHaveBeenCalled()
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
+    })
+
     it('returns 400 for a non-uuid company id', async () => {
       setupFrom({ data: { id: 'key-1' } })
       const res = await PATCH(patch({ company_ids: ['nope'] }), params)

@@ -409,10 +409,10 @@ describe('validateApiKey', () => {
       expect(result).toMatchObject({ allowedCompanyIds: ['company-456', 'company-789'] })
     })
 
-    it('reads an absent, null, empty or malformed value as no allowlist', async () => {
+    it('reads an absent or null value as no allowlist', async () => {
       // Absent = a DB that has not run the migration: the key keeps reaching
       // every membership, exactly as before the column existed.
-      for (const raw of [undefined, null, [], 'company-456', { 0: 'x' }, [42]]) {
+      for (const raw of [undefined, null]) {
         setupMockRpc({
           data: [{
             user_id: 'user-123',
@@ -425,6 +425,25 @@ describe('validateApiKey', () => {
         })
         const result = await validateApiKey('gnubok_sk_test-key-value')
         expect(result).toMatchObject({ allowedCompanyIds: null })
+      }
+    })
+
+    it('refuses the key when the allowlist is present but empty or malformed', async () => {
+      // Fail closed: reading these as null would turn a restricted key into
+      // one that reaches every company the user belongs to.
+      for (const raw of [[], 'company-456', { 0: 'x' }, [42], ['']]) {
+        setupMockRpc({
+          data: [{
+            user_id: 'user-123',
+            company_id: 'company-456',
+            scopes: ['transactions:read'],
+            rate_limited: false,
+            allowed_company_ids: raw,
+          }],
+          error: null,
+        })
+        const result = await validateApiKey('gnubok_sk_test-key-value')
+        expect(result).toEqual({ error: 'Invalid API key', status: 401 })
       }
     })
   })

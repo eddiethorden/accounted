@@ -108,6 +108,20 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
     )
   }
 
+  // A consent that ticked a strict subset of the user's companies carries
+  // that subset as companyIds; the key is then restricted to exactly those
+  // (api_key_companies rows below). Only an absent list means unrestricted:
+  // a list that is present but empty or unreadable fails closed, before the
+  // code is consumed and before any key exists.
+  const parsedAllowlist = parseCompanyAllowlist(payload.companyIds)
+  if (!parsedAllowlist.ok) {
+    return NextResponse.json(
+      { error: 'invalid_grant', error_description: 'Authorization code carried an invalid company allowlist' },
+      { status: 400 }
+    )
+  }
+  const allowlist = parsedAllowlist.allowlist
+
   const codeHash = hashAuthCode(code)
   const supabase = createServiceClientNoCookies()
 
@@ -136,13 +150,10 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
   // resolve the active company here instead; null leaves the key unbound and
   // validateApiKey binds it on the first call after a company exists.
   //
-  // A consent that ticked a strict subset of the user's companies carries
-  // that subset as companyIds; the key is then restricted to exactly those
-  // (api_key_companies rows below) and its default company must be one of
-  // them. /authorize guarantees that; it is re-checked here because the code
-  // is a boundary we treat as hostile, and a default outside the allowlist
-  // would be a key that reaches more than the user consented to.
-  const allowlist = parseCompanyAllowlist(payload.companyIds)
+  // A restricted key's default company must be one of its allowed
+  // companies. /authorize guarantees that; it is re-checked here because the
+  // code is a boundary we treat as hostile, and a default outside the
+  // allowlist would be a key that reaches more than the user consented to.
   const consentedCompanyId =
     typeof payload.companyId === 'string' && payload.companyId.length > 0
       ? payload.companyId
@@ -268,15 +279,22 @@ async function handleAuthorizationCodeGrant(params: URLSearchParams) {
 }
 
 /**
- * The company allowlist carried in the auth code, or null when the consent
- * was unrestricted. Only UUID-shaped strings survive and duplicates collapse;
- * an array that empties out after that is treated as unrestricted rather than
- * as "no company at all", which is what /authorize would have refused.
+ * The company allowlist carried in the auth code.
+ *
+ * Absent (undefined or null) means the consent was unrestricted: `ok` with
+ * null. Anything else is an allowlist the consent DID set, so it must narrow
+ * the key: only UUID-shaped strings survive and duplicates collapse, and a
+ * value that is not an array, or an array that empties out after that, is
+ * `invalid`. Reading it as null would mint an unrestricted key from a
+ * consent that ticked a subset, so the caller fails the exchange instead.
  */
-function parseCompanyAllowlist(raw: unknown): string[] | null {
-  if (!Array.isArray(raw)) return null
+function parseCompanyAllowlist(
+  raw: unknown,
+): { ok: true; allowlist: string[] | null } | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true, allowlist: null }
+  if (!Array.isArray(raw)) return { ok: false }
   const ids = Array.from(new Set(raw.filter(isUuid)))
-  return ids.length > 0 ? ids : null
+  return ids.length > 0 ? { ok: true, allowlist: ids } : { ok: false }
 }
 
 async function handleRefreshTokenGrant(params: URLSearchParams) {

@@ -18,7 +18,10 @@ import { listUserCompaniesForPicker, resolveCompanySelection } from '@/lib/compa
  * Optional per-key company allowlist on create. Absent or empty means the
  * key reaches every company the caller belongs to (today's behaviour).
  */
-const companyIdsSchema = z.array(z.string().uuid()).max(200)
+// At least one id: an explicit empty list is refused rather than read as
+// unrestricted. Omit company_ids (or send null) for a key that reaches every
+// company.
+const companyIdsSchema = z.array(z.string().uuid()).min(1).max(200)
 
 /**
  * GET /api/settings/api-keys: list the company's API keys (key value never

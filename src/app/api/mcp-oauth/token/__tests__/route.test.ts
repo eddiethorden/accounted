@@ -511,8 +511,8 @@ describe('POST /api/mcp-oauth/token', () => {
       expect(created.p_company_id).toBe(A)
     })
 
-    it('treats an allowlist with no uuid-shaped entries as unrestricted rather than as no company', async () => {
-      codeWith(A, ['nope', 42])
+    it('passes null when the code predates the allowlist field (companyIds absent)', async () => {
+      codeWith(A, undefined)
       const { supabase, enqueueMany } = createQueuedMockSupabase()
       mocks.supabaseFactory.mockReturnValue(supabase)
       enqueueMany(exchangeResults({ role: 'owner' }))
@@ -520,6 +520,40 @@ describe('POST /api/mcp-oauth/token', () => {
       const res = await POST(formRequest(codeExchange))
       expect(res.status).toBe(200)
       expect(createKeyArgs(supabase).p_company_ids).toBeNull()
+    })
+
+    it('drops non-uuid entries and keeps the valid ones (narrows, never widens)', async () => {
+      codeWith(A, ['nope', A, 42, A])
+      const { supabase, enqueueMany } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany(exchangeResults({ role: 'owner' }))
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(200)
+      expect(createKeyArgs(supabase).p_company_ids).toEqual([A])
+    })
+
+    it.each([
+      ['no uuid-shaped entries', ['nope', 42]],
+      ['an empty list', []],
+      ['a non-array value', A],
+    ])('fails closed with invalid_grant and mints no key for an allowlist with %s', async (_label, companyIds) => {
+      // A present allowlist that parses to nothing must never be read as
+      // "unrestricted": that would mint a key reaching every company from a
+      // consent that ticked a subset.
+      codeWith(A, companyIds)
+      const { supabase, enqueueMany, findCall } = createQueuedMockSupabase()
+      mocks.supabaseFactory.mockReturnValue(supabase)
+      enqueueMany(exchangeResults({ role: 'owner' }))
+
+      const res = await POST(formRequest(codeExchange))
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toBe('invalid_grant')
+      expect(body.access_token).toBeUndefined()
+      expect(body.refresh_token).toBeUndefined()
+      expect(supabase.rpc).not.toHaveBeenCalled()
+      expect(findCall('oauth_used_codes', 'insert')).toBeUndefined()
     })
   })
 

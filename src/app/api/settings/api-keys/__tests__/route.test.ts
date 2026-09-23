@@ -462,6 +462,22 @@ describe('POST /api/settings/api-keys', () => {
       expect(serviceSupabase.rpc).not.toHaveBeenCalled()
     })
 
+    it('returns 400 VALIDATION_ERROR for an empty list rather than minting an unrestricted key', async () => {
+      setupCreate()
+      const res = await POST(
+        createMockRequest('/api/settings/api-keys', {
+          method: 'POST',
+          body: { name: 'k', scopes: ['reports:read'], company_ids: [] },
+        }),
+        noParams,
+      )
+      const { status, body } = await parseJsonResponse<{ error: { code: string; details: { field: string } } }>(res)
+      expect(status).toBe(400)
+      expect(body.error.code).toBe('VALIDATION_ERROR')
+      expect(body.error.details.field).toBe('company_ids')
+      expect(serviceSupabase.rpc).not.toHaveBeenCalled()
+    })
+
     it('returns 403 FORBIDDEN when an id is not one of the caller\'s memberships', async () => {
       setupCreate()
       const res = await POST(

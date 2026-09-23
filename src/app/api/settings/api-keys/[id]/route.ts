@@ -18,14 +18,15 @@ import { listUserCompaniesForPicker, resolveCompanySelection } from '@/lib/compa
  * Postgres error. The DB CHECK (> 0) is the real guarantee; this is the
  * friendly message in front of it.
  *
- * `company_ids`: the per-key company allowlist, replaced as a set. null or
- * an empty array makes the key unrestricted (every company the owner belongs
- * to, including future memberships).
+ * `company_ids`: the per-key company allowlist, replaced as a set. null
+ * makes the key unrestricted (every company the owner belongs to, including
+ * future memberships). An empty array is refused rather than read as
+ * unrestricted: only an explicit null widens a key.
  */
 const patchSchema = z
   .object({
     unattended_commit_limit: z.number().positive().max(1_000_000_000).nullable().optional(),
-    company_ids: z.array(z.string().uuid()).max(200).nullable().optional(),
+    company_ids: z.array(z.string().uuid()).min(1).max(200).nullable().optional(),
   })
   .refine(
     (body) => body.unattended_commit_limit !== undefined || body.company_ids !== undefined,
