@@ -25,6 +25,7 @@ export interface ArkivDocumentRow {
   /** The date the document carries; the upload date stands in when it has none. */
   document_date: string | null
   doc_type: string | null
+  page_count: number | null
   counterparty: string | null
   amount: number | null
   currency: string | null
@@ -87,7 +88,7 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
 
   let query = ctx.supabase
     .from('document_attachments')
-    .select('id, created_at, file_name, doc_type, admission_state, journal_entry_id, extracted_data')
+    .select('id, created_at, file_name, doc_type, admission_state, journal_entry_id, extracted_data, page_count')
     .eq('company_id', ctx.companyId)
     .in('admission_state', ['admitted', 'held'])
     .or(NOT_STRUCTURED_MIME_FILTER)
@@ -97,7 +98,7 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
   if (searchIds) query = query.in('id', searchIds)
   const { data, error } = await query
   if (error) return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 })
-  const docs = (data ?? []) as Array<{ id: string; created_at: string; file_name: string; doc_type: string | null; admission_state: string; journal_entry_id: string | null; extracted_data: Record<string, unknown> | null }>
+  const docs = (data ?? []) as Array<{ id: string; created_at: string; file_name: string; doc_type: string | null; admission_state: string; journal_entry_id: string | null; extracted_data: Record<string, unknown> | null; page_count: number | null }>
   if (docs.length === 0) return NextResponse.json({ data: [] })
   const ids = docs.map((d) => d.id)
 
@@ -188,6 +189,7 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
       title: documentTitle({ docType: d.doc_type, fileName: d.file_name, payload, agreementTitle: agreement?.title ?? null }),
       document_date: documentDate(d.doc_type, payload),
       doc_type: d.doc_type,
+      page_count: d.page_count ?? null,
       counterparty,
       amount,
       currency: agreement?.currency ?? (settled('currency', 'rent_currency') as string | null) ?? (amount != null ? 'SEK' : null),
