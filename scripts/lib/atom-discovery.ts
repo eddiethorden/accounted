@@ -21,6 +21,15 @@ import { discoverCommunitySkills } from './community-skills'
 
 export type Tier = 'horizontal' | 'vertical' | 'modifier' | 'community'
 
+/**
+ * Who a knowledge file is written for. `agent` (the default) ships to the
+ * registry and is loadable over MCP. `developer` is material for people building
+ * the product (file formats, network plumbing, vendor pricing): it stays in the
+ * repo and the public mirror but never reaches an agent's context. Declared per
+ * reference file as `audience: developer` in YAML frontmatter.
+ */
+export type Audience = 'agent' | 'developer'
+
 export interface DiscoveredAtom {
   mcp_exposed?: boolean
   reviewed_at?: string | null
@@ -57,6 +66,8 @@ export interface DiscoveredAtom {
    * gnubok_load_skill(<child id>) call after the parent SKILL.md is loaded.
    */
   parent_atom_id: string | null
+  /** Always `agent` for top-level skills; reference files may declare `developer`. */
+  audience: Audience
   /** Version declared in frontmatter, or 1. The generator may override this. */
   frontmatter_version: number
   schema_version: number
@@ -252,12 +263,13 @@ async function readAtom(
   const parentId = `${tier}/${slug}`
   const childTier: Tier = fm.tier ?? tier
   const refs = await readReferenceFiles(dir)
+  const agentRefs = refs.filter((r) => r.audience === 'agent')
 
   // Bridge the SKILL.md router (which points at dead `references/*.md` paths at
   // runtime) to the loadable child ids the model can actually call. Appended to
   // the parent body so it ships in the seeded DB body, visible only once the
   // skill itself is loaded.
-  const body = refs.length > 0 ? content + buildReferencesFooter(parentId, refs) : content
+  const body = refs.length > 0 ? content + buildReferencesFooter(parentId, agentRefs, refs.length - agentRefs.length) : content
 
   const parent: DiscoveredAtom = {
     id: parentId,
@@ -273,6 +285,7 @@ async function readAtom(
     body_path: relative(rootDir, skillPath),
     body,
     parent_atom_id: null,
+    audience: 'agent',
     frontmatter_version: fm.version ?? 1,
     schema_version: 1,
   }
@@ -291,6 +304,7 @@ async function readAtom(
     body_path: relative(rootDir, r.absPath),
     body: r.body,
     parent_atom_id: parentId,
+    audience: r.audience,
     frontmatter_version: 1,
     schema_version: 1,
   }))
@@ -314,6 +328,7 @@ interface ReferenceFile {
   body: string
   /** First ATX heading (or first line), used as a human-readable label. */
   descriptor: string
+  audience: Audience
 }
 
 async function readReferenceFiles(skillDir: string): Promise<ReferenceFile[]> {
@@ -329,12 +344,14 @@ async function readReferenceFiles(skillDir: string): Promise<ReferenceFile[]> {
   for (const absPath of files) {
     const body = normalizeLineEndings(await readFile(absPath, 'utf8'))
     const relFromRefs = relative(refsDir, absPath).split(sep).join('/')
+    const audience = parseAudience(body, absPath)
     out.push({
       absPath,
       relPath: `references/${relFromRefs}`,
       slug: relFromRefs.replace(/\.md$/i, '').replace(/\//g, '-'),
       body,
       descriptor: firstHeadingOrLine(body),
+      audience,
     })
   }
   return out
@@ -351,6 +368,14 @@ async function walkMarkdown(dir: string): Promise<string[]> {
   return out
 }
 
+function parseAudience(body: string, path: string): Audience {
+  const fm = extractFrontmatter(body)
+  const value = fm ? parseScalar(fm.raw, 'audience') : undefined
+  if (value === undefined || value === 'agent') return 'agent'
+  if (value === 'developer') return 'developer'
+  throw new Error(`${path}: audience must be "agent" or "developer", got "${value}"`)
+}
+
 function firstHeadingOrLine(md: string): string {
   const lines = md.split('\n')
   for (const line of lines) {
@@ -364,7 +389,7 @@ function firstHeadingOrLine(md: string): string {
   return ''
 }
 
-function buildReferencesFooter(parentId: string, refs: ReferenceFile[]): string {
+function buildReferencesFooter(parentId: string, refs: ReferenceFile[], developerOnly: number): string {
   const lines = [
     '',
     '---',
@@ -377,6 +402,9 @@ function buildReferencesFooter(parentId: string, refs: ReferenceFile[]): string 
   for (const r of refs) {
     const label = r.descriptor ? `: ${r.descriptor}` : ''
     lines.push(`- \`${r.relPath}\` → \`gnubok_load_skill("${parentId}/${r.slug}")\`${label}`)
+  }
+  if (developerOnly > 0) {
+    lines.push('', 'Any other reference file named above is developer material (file formats, integration plumbing) and is not loadable here. Answer from this skill and the references listed, or say what you cannot settle.')
   }
   return '\n' + lines.join('\n') + '\n'
 }

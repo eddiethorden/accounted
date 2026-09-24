@@ -1,7 +1,7 @@
 {
   "horizontal/swedish-accounting-compliance": {
-    "hash": "f63d1bbcda84007716ebcfb805f6399cc51875d4139097281c56b76942e62544",
-    "version": 5
+    "hash": "9530bd9a48beb6100bb5a9629fe5ae63812c6de919e8c40499c2527d48358da0",
+    "version": 6
   },
   "horizontal/swedish-accounting-compliance/bas-kontoplan": {
     "hash": "0d1b05466568344be0afd4b360d582db23331ae4f1b4b05681cc92c50d099bdb",
@@ -14,10 +14,6 @@
   "horizontal/swedish-accounting-compliance/changes-2025-2026": {
     "hash": "ffc4c5d618bb8840f43fd48c8d4a3e464768e84abdaeb49da016e0051b260964",
     "version": 3
-  },
-  "horizontal/swedish-accounting-compliance/sie4": {
-    "hash": "0b73718716d3aab442c25bb0d0fa8057087481fe86f6792e28403dd03fb5af11",
-    "version": 1
   },
   "horizontal/swedish-accounting-compliance/skatteverket": {
     "hash": "9605f2b56989119b3cac2081a84cc7dbf7bc73e10e40d8648b917b4cff06bacf",
@@ -40,8 +36,8 @@
     "version": 3
   },
   "horizontal/swedish-e-invoicing": {
-    "hash": "59fb8f4ab9de7c907cf054f37ae6b651504987375f440831e199710b2a938223",
-    "version": 7
+    "hash": "70ba0756b7d6c987adef179a8558a6794f54e2513fb8b0a2026d8ab05311536b",
+    "version": 8
   },
   "horizontal/swedish-e-invoicing/consumer-and-b2c": {
     "hash": "ebcb2c7e888497b61a5b25616314ae620f40d220c93c07a48aa4a49d00ac2068",
@@ -51,24 +47,8 @@
     "hash": "cca73256fac8b3cd4ae614a2d512206ae30764676da88df3dc903e29a189a7d4",
     "version": 3
   },
-  "horizontal/swedish-e-invoicing/implementation-guide": {
-    "hash": "a52c02278e98d7418b2866cf0dd2211629e4b1381d0c5d28ba3df4df83ee4415",
-    "version": 3
-  },
   "horizontal/swedish-e-invoicing/legal-and-regulatory": {
     "hash": "a5efa085631187766375a43b8a740497c4132466c0ec2873d798dcc823db8937",
-    "version": 3
-  },
-  "horizontal/swedish-e-invoicing/market-provider-pricing": {
-    "hash": "064d021818b80b70dd5e14189bd81056956a16e0cc97945bcddd72b48ef6066c",
-    "version": 4
-  },
-  "horizontal/swedish-e-invoicing/peppol-bis-billing": {
-    "hash": "2407acacabb60836e1ebfff45f7d443dda92c3c432df83fd447cec6d5375c89f",
-    "version": 2
-  },
-  "horizontal/swedish-e-invoicing/peppol-network": {
-    "hash": "efb8a84884c84a48bdc68049467d43f40503970bba7659231f7d964f51b5c2a1",
     "version": 3
   },
   "horizontal/swedish-e-invoicing/swedish-cius-and-specifics": {
@@ -148,23 +128,15 @@
     "version": 1
   },
   "horizontal/swedish-project-accounting": {
-    "hash": "273e3dcce1d4582264694231668fb4c555379cf5f40e19ebc65b34d8bd284c51",
-    "version": 3
+    "hash": "9d6928aa259c90c1c6f86b63aeac8476a4ab70b925458c5810de78bb45dda074",
+    "version": 4
   },
   "horizontal/swedish-project-accounting/accounts-and-entries": {
     "hash": "16dba1ef3553d06dcd34bbb7d95c34f4af1738222fb08145f2ed511d176b1b89",
     "version": 1
   },
-  "horizontal/swedish-project-accounting/implementation-patterns": {
-    "hash": "db59db720c4df2eaacbdcd0b3f36e02172f3763ac6949865123ac29db7966c3b",
-    "version": 1
-  },
   "horizontal/swedish-project-accounting/k2-k3-revenue-recognition": {
     "hash": "6065ee97e019543b89dc42ee422ea3139d6dd84097b882c353423bfb3b25094e",
-    "version": 1
-  },
-  "horizontal/swedish-project-accounting/sie4-project-dimensions": {
-    "hash": "b92b0c58ee793c15abb46ed81f2fbd47abdbecbc3f0ffe986d19e7331c373e94",
     "version": 1
   },
   "horizontal/swedish-project-accounting/tax-and-grants": {
@@ -172,20 +144,12 @@
     "version": 1
   },
   "horizontal/swedish-sie-import-export": {
-    "hash": "bc03f212f6621005d5b22df6679c670163693644224719e63d42fc8ebf319a21",
-    "version": 4
+    "hash": "5c0111c1fb064ae63dd370b94c0d1f0b69c52f4c6b0e5976c17d8d2d77211a24",
+    "version": 5
   },
   "horizontal/swedish-sie-import-export/bas-sru": {
     "hash": "fcc4b02f2428e82f9ee2cd3b939fbb180c0597895f3d372bfb361ce97af199f3",
     "version": 3
-  },
-  "horizontal/swedish-sie-import-export/encoding": {
-    "hash": "eaa520fe47638fd521d27d0f9d6315d5c15f47eed2b4df408c9e9addba10c7d8",
-    "version": 1
-  },
-  "horizontal/swedish-sie-import-export/record-types": {
-    "hash": "1a83c6c67eea2476bef8c13e1d96e4817b9313b2566ca4a1c91456975087e84e",
-    "version": 1
   },
   "horizontal/swedish-sie-import-export/validation-rules": {
     "hash": "dbb7086c97f69af23f90b02130937951829bbd8065e87d8a5d49dd57123feaea",

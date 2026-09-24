@@ -1,3 +1,7 @@
+---
+audience: developer
+---
+
 # SIE4 Character Encoding Reference
 
 ## The spec vs. reality

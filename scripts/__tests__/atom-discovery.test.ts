@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { discoverAtoms, type DiscoveredAtom } from '../lib/atom-discovery'
 
 // Runs against the real .claude/skills tree (deterministic, committed content).
@@ -57,6 +60,39 @@ describe('discoverAtoms: reference children', () => {
     expect(children.length).toBeGreaterThan(0)
     for (const c of children) {
       expect(topLevelIds.has(c.parent_atom_id!), `${c.id} → ${c.parent_atom_id}`).toBe(true)
+    }
+  })
+})
+
+describe('discoverAtoms: reference audience', () => {
+  it('marks developer references and keeps them out of the parent footer', async () => {
+    const all = await load()
+    const encoding = all.find((a) => a.id === 'horizontal/swedish-sie-import-export/encoding')!
+    expect(encoding.audience).toBe('developer')
+    const parent = all.find((a) => a.id === 'horizontal/swedish-sie-import-export')!
+    expect(parent.audience).toBe('agent')
+    expect(parent.body).not.toContain('gnubok_load_skill("horizontal/swedish-sie-import-export/encoding")')
+    expect(parent.body).toContain('gnubok_load_skill("horizontal/swedish-sie-import-export/validation-rules")')
+    expect(parent.body).toContain('developer material')
+  })
+
+  it('defaults to agent and leaves footers of fully agent skills unchanged', async () => {
+    const all = await load()
+    const vat = all.find((a) => a.id === 'horizontal/swedish-vat')!
+    expect(all.find((a) => a.id === 'horizontal/swedish-vat/vat-compliance-reference')!.audience).toBe('agent')
+    expect(vat.body).not.toContain('developer material')
+  })
+
+  it('rejects an unknown audience value', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'atoms-'))
+    try {
+      const dir = join(root, '.claude', 'skills', 'swedish-test')
+      await mkdir(join(dir, 'references'), { recursive: true })
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: swedish-test\ndescription: Test skill.\n---\n\n# Test\n')
+      await writeFile(join(dir, 'references', 'x.md'), '---\naudience: reviewers\n---\n\n# X\n')
+      await expect(discoverAtoms(root)).rejects.toThrow('audience must be "agent" or "developer"')
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })
