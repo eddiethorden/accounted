@@ -18,7 +18,7 @@ import { Field, Row, SubView } from './AgentDetail'
 import { FlowOrb } from './FlowOrb'
 import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
-import { itemHue, placeHref, seedOf, type ItemKind, type Place } from './hues'
+import { catalogHref, itemHue, seedOf, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, readAgents, readCatalog, readOptions, rulesSegment, type CommunityMeta } from './data'
 import styles from './skills.module.css'
@@ -97,9 +97,8 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
 
   const hue = itemHue(item.kind, item.key)
   // Back to where the item lives: its industry or company form, or the general list.
-  const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId as Place
-    : (item.community?.industries[0] as Place | undefined) ?? 'general'
-  const back = placeHref(backHref, home)
+  const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : item.community?.industries[0] ?? null
+  const back = catalogHref(backHref, item.kind, home)
   const flowsWith = (atomId: string) => REGISTRY_SKILLS.filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
   const holders = item.atomId ? flowsWith(item.atomId) : []
   const reviewed = item.reviewedAt ? formatDateLong(item.reviewedAt, locale) : null
