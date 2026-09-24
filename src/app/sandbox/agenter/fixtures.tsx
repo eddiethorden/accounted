@@ -119,7 +119,9 @@ const OWN_BODY = [
   '4. Visa listan och fråga om betalfil ska skapas.',
 ].join('\n')
 
-const CATALOG = [
+const OWN_BODIES = new Map<string, string>()
+
+const CATALOG: Array<Record<string, unknown> & { slug: string; name: string }> = [
   { slug: 'own/00000000-0000-4000-8000-000000000001', name: 'Påminnelse om leverantörsfakturor', summary: 'Listar obetalda leverantörsfakturor som förfaller inom en vecka.', tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: '00000000-0000-4000-8000-000000000001', scope: 'company' }] },
 ]
 
@@ -135,6 +137,14 @@ function installFixtures() {
     if (url.pathname === '/api/agents/knowledge' && init?.method === 'PATCH') { applyChoice(JSON.parse(String(init.body))); return json({ ok: true }) }
     // Votes and "fungerar" answers are kept by the page itself in the demo.
     if (url.pathname === '/api/agents/community/feedback') return json({ ok: true })
+    // "Skriv själv" in the demo: the item is kept in the page, so it shows under Egna and opens.
+    if (url.pathname === '/api/skills' && init?.method === 'POST') {
+      const input = JSON.parse(String(init.body)) as { kind: string; item_kind?: 'workflow' | 'rules' | 'analysis'; name: string; description: string; body: string }
+      const id = crypto.randomUUID()
+      CATALOG.push({ slug: `own/${id}`, name: input.name, summary: input.description, tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: id, scope: 'company' }], itemKind: input.item_kind ?? 'workflow' } as (typeof CATALOG)[number])
+      OWN_BODIES.set(`own/${id}`, input.body)
+      return new Response(JSON.stringify({ data: { id } }), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
     if (init?.method && init.method !== 'GET') return json({ id: 'demo' })
     switch (url.pathname) {
       case '/api/ai/connections': return json(['claude'])
@@ -146,6 +156,7 @@ function installFixtures() {
         const slug = url.searchParams.get('slug')
         if (!slug) return json(CATALOG)
         if (slug === 'own/00000000-0000-4000-8000-000000000001') return json({ body: OWN_BODY })
+        if (OWN_BODIES.has(slug)) return json({ body: OWN_BODIES.get(slug) })
         const real = PACK_TEXTS.get(slug)
         if (real) return json({ body: real })
         const pack = OPTIONS.find((o) => o.id === slug)

@@ -97,7 +97,6 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   const name = curated ? t(`skills.${curated}.name`) : own?.name ?? ''
   const task = t('kind_one_workflow')
   const hue = itemHue('workflow', agentId, curated)
-  const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
   const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data?.own_knowledge[agentId] ?? []
   const connections: AgentConnectionState[] = overview?.connections ?? []
@@ -199,7 +198,6 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
               <Field label={t('field_name')}>
                 <div className={styles.fieldBox} data-ph-mask={own ? '' : undefined}>{name}</div>
-                <span className={styles.fieldHint}>{desc}</span>
               </Field>
 
               <Field label={t('section_instructions')} copy={<CopyIcon text={body.data} label={t('copy_instructions')} />} note={own ? t('instructions_own') : [t('instructions_source'), overview?.workflow.version ? t('instructions_version', { version: overview.workflow.version }) : null].filter(Boolean).join(' · ')}>

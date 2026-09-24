@@ -126,6 +126,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         aiReady={isConnected}
         canWrite={canWrite}
         onCreate={createAgent}
+        onSaved={() => void catalog.mutate()}
         gate={rowsLocked ? <section className={styles.gateBanner}>
                     {state === 'locked' && (
                       <div className={styles.gate}>
