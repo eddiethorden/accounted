@@ -72,7 +72,6 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const waitingFor = isConnected ? null : pending
   const state: PageState = connected === null ? 'loading' : isConnected ? 'open' : waitingFor ? 'waiting' : 'locked'
   const client = pickConnectedAiClient(connected ?? [], waitingFor ?? undefined) ?? waitingFor ?? 'claude'
-  const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
   const agents = useSWR(['/api/agents', companyId, client], ([url, , c]) => readAgents(`${url}?client=${c}`))
 
   const companyIndustry = agents.data?.agents[0]?.company.find((c) => c.tier === 'vertical')?.id ?? null
@@ -123,7 +122,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         usage={usage.data}
         own={own}
         companyIndustry={companyIndustry}
-        clientName={clientName}
+        client={client}
+        aiReady={isConnected}
         canWrite={canWrite}
         onCreate={createAgent}
         gate={rowsLocked ? <section className={styles.gateBanner}>

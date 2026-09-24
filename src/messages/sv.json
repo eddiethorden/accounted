@@ -10521,7 +10521,9 @@
     "knowledge_group_modifier": "Bolagsform och upplägg",
     "knowledge_group_community": "Community",
     "knowledge_picker_done": "Klar",
-    "featured_uses": "Använder",
+    "badge_in_ai": "{conn} i {client}",
+    "badge_connected": "{conn} ansluten",
+    "badge_missing": "{conn} saknas: koppla",
     "category_names": {
       "bygg-hantverk": "Bygg & hantverk",
       "e-handel": "E-handel",

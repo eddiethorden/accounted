@@ -8,6 +8,6 @@ import type { ItemKind } from './hues'
  */
 export function ItemSymbol({ kind, hue, size, open = false }: { kind: ItemKind; hue: number; seedKey?: string; size: number; open?: boolean }) {
   return kind === 'workflow'
-    ? <FlowSymbol hue={hue} size={size} lively={open} />
+    ? <FlowSymbol hue={hue} size={size} />
     : <Folder hue={hue} size={size} open={open} drift={open} />
 }

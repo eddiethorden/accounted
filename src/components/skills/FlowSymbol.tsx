@@ -1,39 +1,28 @@
-'use client'
-
-import { useEffect, useState } from 'react'
+import styles from './skills.module.css'
 
 /**
- * The picture of a flow: three steps joined by a path, the last one ticked,
- * with a dot travelling from the first step to the last. It says "this runs
- * step by step and ends done", which the orb did not. Drawn in the flow's
- * colour; `lively` makes the dot travel faster, for the flow's own page.
- * Reduced motion shows the steps without the travelling dot.
+ * The picture of a flow: three raised steps joined by a path, the last one
+ * ticked. At rest it stands still, tilted like the folder; when its card (or
+ * stage, or banner) is hovered it straightens, a light travels the path
+ * behind the steps and each step lifts in turn. Plain CSS, in the flow's
+ * colour; reduced motion keeps it still.
  */
-const PATH = 'M18 14 C 46 14, 46 14, 46 32 C 46 50, 46 50, 18 50'
-
-export function FlowSymbol({ hue, size = 64, lively = false }: { hue: number; size?: number; lively?: boolean }) {
-  const [moving, setMoving] = useState(false)
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const update = () => setMoving(!query.matches)
-    update()
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
-  const ink = `hsl(${hue} 58% 42%)`
-  const soft = `hsl(${hue} 60% 90%)`
+export function FlowSymbol({ hue, size = 64, live = false }: { hue: number; size?: number; live?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
-      <path d={PATH} stroke={`hsl(${hue} 45% 75%)`} strokeWidth={2.5} strokeLinecap="round" strokeDasharray="1 5" />
-      <circle cx={18} cy={14} r={7.5} fill={soft} stroke={ink} strokeWidth={2.5} />
-      <circle cx={46} cy={32} r={7.5} fill={soft} stroke={ink} strokeWidth={2.5} />
-      <circle cx={18} cy={50} r={8.5} fill={ink} />
-      <path d="M14.2 50.2 l2.6 2.6 l5.2 -5.4" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
-      {moving && (
-        <circle r={3.4} fill={ink}>
-          <animateMotion dur={lively ? '2.2s' : '3.2s'} repeatCount="indefinite" path={PATH} keyPoints="0;1;1" keyTimes="0;0.8;1" calcMode="linear" />
-        </circle>
-      )}
-    </svg>
+    <span className={styles.flowSym} data-live={live ? '' : undefined} style={{ width: size, height: size, ['--fh' as string]: hue }} aria-hidden>
+      <span className={styles.flowBox} style={{ transform: `scale(${size / 64})` }}>
+        <span className={styles.flowTilt}>
+          <svg className={styles.flowPath} width="64" height="64" viewBox="0 0 64 64" fill="none">
+            <path d="M18 14 C 46 14, 46 14, 46 32 C 46 50, 46 50, 18 50" strokeWidth="3" strokeLinecap="round" strokeDasharray="1 5.5" />
+          </svg>
+          <span className={styles.flowDot} />
+          <span className={`${styles.flowStep} ${styles.fs1}`} />
+          <span className={`${styles.flowStep} ${styles.fs2}`} />
+          <span className={`${styles.flowStep} ${styles.fs3}`}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2 l2.3 2.3 l4.7 -4.9" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </span>
+        </span>
+      </span>
+    </span>
   )
 }
