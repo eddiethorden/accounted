@@ -3,7 +3,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
-import { FlowOrb } from './FlowOrb'
+import { FlowSymbol } from './FlowSymbol'
 import { Folder } from './Folder'
 import styles from './skills.module.css'
 
@@ -40,7 +40,7 @@ export function KindsIntro({ companyId }: { companyId: string }) {
   return (
     <section className={`${styles.kindsIntro} ${styles.fadeIn}`} aria-label={t('intro_label')}>
       <div className={styles.kindsIntroPart}>
-        <span className={styles.kindsIntroPic}><FlowOrb hue={210} seedKey="intro" size={44} /></span>
+        <span className={styles.kindsIntroPic}><FlowSymbol hue={210} size={44} /></span>
         <div><b>{t('kind_one_workflow')}</b><p>{t('intro_workflow')}</p></div>
       </div>
       <span className={styles.kindsIntroPlus} aria-hidden>+</span>
