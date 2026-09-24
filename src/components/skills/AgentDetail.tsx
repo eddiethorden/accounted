@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
@@ -12,7 +12,7 @@ import { useBranding } from '@/lib/branding/brand-context'
 import { useCashAccounts } from '@/lib/reference-data/hooks'
 import { bankLogoUrl } from '@/lib/reconciliation/bank-logos'
 import { AGENTS, CONNECTION_SETTINGS, isAgentId, isCheckable, type AgentConnection } from '@/lib/agent-skills/agents'
-import type { AgentConnectionState, KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
+import type { AgentConnectionState, AgentsOverview, KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeAction, KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { registrySkillSlug, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
@@ -21,7 +21,8 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { AgentOrb, huesFor } from './AgentOrb'
+import { AgentSphere } from './AgentSphere'
+import { AgentArt, seedOf } from './AgentArt'
 import { GmailMark } from './SkillMarks'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
@@ -91,7 +92,6 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
     )
   }
 
-  const hues = curated ? AGENTS[curated].orb : huesFor(agentId)
   const name = curated ? t(`skills.${curated}.agent`) : own?.name ?? ''
   const task = curated ? t(`skills.${curated}.name`) : null
   const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
@@ -110,11 +110,19 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   }) : undefined
   const canEdit = canWrite && !own?.draft
 
+  /**
+   * The change shows at once (optimistic), then the server's answer replaces it;
+   * a failed save rolls back. No flicker of the old list while the request runs.
+   */
   async function changeKnowledge(action: KnowledgeAction, atomId?: string): Promise<boolean> {
+    const current = agents.data
+    const optimistic = current ? withKnowledgeChange(current, agentId, curated ? AGENTS[curated].knowledge : [], options.data ?? [], action, atomId) : undefined
     try {
-      const response = await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(atomId ? { action, agent_id: agentId, atom_id: atomId } : { action, agent_id: agentId }) })
-      if (!response.ok) return false
-      await agents.mutate()
+      await agents.mutate(async () => {
+        const response = await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(atomId ? { action, agent_id: agentId, atom_id: atomId } : { action, agent_id: agentId }) })
+        if (!response.ok) throw new Error('Knowledge change failed')
+        return current
+      }, { optimisticData: optimistic, rollbackOnError: true, populateCache: false, revalidate: true })
       return true
     } catch {
       return false
@@ -160,11 +168,14 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
       <PageHeader title={t('title')} />
       <Link href={backHref} className={styles.back}><ArrowLeft className="h-4 w-4" aria-hidden />{t('back_to_agents')}</Link>
       <div className={styles.agrid2}>
-        <section className={styles.stage} style={{ '--h1': hues[0], '--h2': hues[1], '--h3': hues[2] } as CSSProperties} aria-label={name}>
+        <section className={styles.stage} aria-label={name}>
+          <AgentArt agentKey={agentId} motif={curated ?? undefined} />
           <div className={styles.stageTile}>
-            <AgentOrb hues={hues} presence={status?.presence} size="lg" />
-            <b data-ph-mask={own ? '' : undefined}>{name}</b>
-            {task && <small>{task}</small>}
+            <AgentSphere size={72} presence={status?.presence ?? 'ready'} seed={seedOf(agentId) % 100} />
+            <span className={styles.stageWho}>
+              <b data-ph-mask={own ? '' : undefined}>{name}</b>
+              {task && <small>{task}</small>}
+            </span>
           </div>
           <div className={styles.stageFoot}>
             <Button size="lg" className="gap-2" onClick={run}>
@@ -176,6 +187,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
         </section>
 
         <section className={styles.apanel}>
+          <div key={view} className={styles.viewIn}>
           {view === 'main' && (
             <>
               <div className={styles.apHead}>
@@ -229,6 +241,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           {view === 'apps' && curated && (
             <AppsPanel used={connections} onBack={() => setView('main')} />
           )}
+          </div>
         </section>
       </div>
     </div>
@@ -240,7 +253,7 @@ function Row({ label, children, onAdd, addLabel }: { label: string; children: Re
     <div className={styles.aprow}>
       <span className={styles.l}>{label}</span>
       <div className={styles.chips}>{children}</div>
-      {onAdd ? <Button variant="outline" size="icon-sm" aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button> : <span />}
+      <span className={styles.rowAction}>{onAdd && <Button variant="outline" size="icon-sm" aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button>}</span>
     </div>
   )
 }
@@ -466,4 +479,29 @@ function DeleteOwn({ canWrite, onDelete }: { canWrite: boolean; onDelete: () => 
       />
     </div>
   )
+}
+
+/** The overview as it will be after a knowledge change, for the optimistic update. */
+function withKnowledgeChange(
+  overview: AgentsOverview,
+  agentId: string,
+  defaults: readonly string[],
+  options: KnowledgeOption[],
+  action: KnowledgeAction,
+  atomId?: string,
+) {
+  const apply = (list: KnowledgeMeta[]): KnowledgeMeta[] => {
+    if (action === 'reset') {
+      return defaults.flatMap((id) => {
+        const o = options.find((x) => x.id === id)
+        return o ? [{ id, tier: o.tier, source: 'default' as const, title: o.title, summary: o.summary, version: o.version, reviewed_at: o.reviewed_at }] : []
+      })
+    }
+    if (action === 'remove') return list.filter((k) => k.id !== atomId)
+    const o = options.find((x) => x.id === atomId)
+    if (!o || list.some((k) => k.id === atomId)) return list
+    return [...list, { id: o.id, tier: o.tier, source: defaults.includes(o.id) ? 'default' as const : 'added' as const, title: o.title, summary: o.summary, version: o.version, reviewed_at: o.reviewed_at }]
+  }
+  if (agentId.startsWith('own/')) return { ...overview, own_knowledge: { ...overview.own_knowledge, [agentId]: apply(overview.own_knowledge[agentId] ?? []) } }
+  return { ...overview, agents: overview.agents.map((a) => a.id === agentId ? { ...a, knowledge: apply(a.knowledge), removed: action === 'reset' ? [] : action === 'remove' && defaults.includes(atomId!) ? [...a.removed, atomId!] : a.removed.filter((r) => r !== atomId) } : a) }
 }

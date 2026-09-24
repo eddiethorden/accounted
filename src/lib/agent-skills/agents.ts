@@ -16,8 +16,9 @@ import type { RegistrySkillId } from './registry'
  *    Accounted connections the page can check; `mail` and `browser` live in the
  *    customer's own AI client (Gmail connector, Claude in Chrome) and are only named.
  *
- * Each agent is named for its job (Kvittoagent, Momsagent) and shown as an orb
- * of three hues, as agents are in Oasis: a presence, not a person.
+ * Each agent is named for its job (Kvittoagent, Momsagent). Its picture is the
+ * onboarding's particle sphere; its page draws the agent's motif in halftone
+ * (components/skills/AgentSphere.tsx, AgentArt.tsx).
  *
  * Browser-safe: the Agenter page imports this file. Every id must resolve to an
  * agent-audience atom (pinned by __tests__/agents.test.ts).
@@ -25,8 +26,6 @@ import type { RegistrySkillId } from './registry'
 export type AgentConnection = 'bank' | 'skatteverket' | 'peppol' | 'mail' | 'browser'
 
 export interface AgentDefinition {
-  /** Three hues for the agent's orb, its face in the list and on its page (the name is a UI string). */
-  orb: readonly [number, number, number]
   knowledge: readonly string[]
   references: readonly string[]
   connections: readonly AgentConnection[]
@@ -41,7 +40,6 @@ const YEAR_END = 'horizontal/swedish-year-end-closing'
 
 export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
   bookkeep: {
-    orb: [205, 175, 255],
     knowledge: [COMPLIANCE, VAT],
     references: [`${COMPLIANCE}/bas-kontoplan`, `${VAT}/vat-compliance-reference`, 'horizontal/swedish-asset-accounting/accounts-and-registry'],
     connections: ['bank', 'mail'],
@@ -49,7 +47,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   kvittojakten: {
-    orb: [35, 145, 315],
     knowledge: [COMPLIANCE, INVOICE],
     references: [`${COMPLIANCE}/bfl-bfnar`, `${INVOICE}/invoice-rules`],
     connections: ['mail', 'browser'],
@@ -57,7 +54,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'reconcile-month': {
-    orb: [165, 200, 130],
     knowledge: [COMPLIANCE],
     references: [`${COMPLIANCE}/bas-kontoplan`, `${COMPLIANCE}/skatteverket`],
     connections: ['bank', 'skatteverket'],
@@ -65,7 +61,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'month-end-close': {
-    orb: [250, 285, 205],
     knowledge: [COMPLIANCE, VAT],
     references: [`${COMPLIANCE}/bfl-bfnar`, `${VAT}/vat-compliance-reference`],
     connections: ['bank', 'skatteverket'],
@@ -73,7 +68,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'quarterly-vat-review': {
-    orb: [20, 45, 335],
     knowledge: [VAT, COMPLIANCE],
     references: [`${VAT}/vat-compliance-reference`, `${COMPLIANCE}/skatteverket`],
     connections: ['skatteverket'],
@@ -81,7 +75,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'payroll-monthly': {
-    orb: [140, 95, 190],
     knowledge: ['horizontal/swedish-payroll'],
     references: ['agi-filing', 'tax-tables', 'social-charges', 'vacation-pay', 'sick-pay', 'benefits', 'bas-7xxx'].map((r) => `horizontal/swedish-payroll/${r}`),
     connections: ['skatteverket', 'bank'],
@@ -89,7 +82,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'invoicing-rules': {
-    orb: [195, 320, 255],
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`, 'horizontal/swedish-e-invoicing/swedish-cius-and-specifics', 'horizontal/swedish-e-invoicing/consumer-and-b2c'],
     connections: ['peppol', 'mail'],
@@ -97,7 +89,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'kreditfaktura-process': {
-    orb: [355, 30, 275],
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`],
     connections: ['peppol'],
@@ -105,7 +96,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'year-end-close': {
-    orb: [45, 20, 215],
     knowledge: [YEAR_END, 'horizontal/swedish-asset-accounting', 'horizontal/swedish-financial-reporting'],
     references: [
       `${YEAR_END}/closing-process`, `${YEAR_END}/journal-entries`, `${YEAR_END}/k2-vs-k3`, `${YEAR_END}/tax-calculations`,
@@ -116,7 +106,6 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'tax-planning': {
-    orb: [275, 320, 230],
     knowledge: ['horizontal/swedish-tax-planning', YEAR_END],
     references: ['312-regler', 'periodiseringsfond', 'overavskrivningar', 'strategy-and-interactions'].map((r) => `horizontal/swedish-tax-planning/${r}`)
       .concat('horizontal/swedish-payroll/social-charges'),
