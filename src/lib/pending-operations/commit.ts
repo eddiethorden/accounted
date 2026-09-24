@@ -130,6 +130,10 @@ import {
   type LinkSupplierInvoiceToVoucherResult,
 } from '@/lib/invoices/supplier-voucher-matching'
 import { clearSettledInvoiceSuggestions } from '@/lib/invoices/clear-settled-invoice-suggestions'
+import {
+  findCashMethodUnbookedAllocations,
+  type BatchAllocationRef,
+} from '@/lib/invoices/batch-cash-method-guard'
 import { recordInvoicePaymentRow, removeInvoicePaymentRow } from '@/lib/invoices/invoice-payment-row'
 import { paidAtFromDate } from '@/lib/invoices/paid-at'
 import {
@@ -7146,6 +7150,28 @@ async function commitMatchBatchAllocate(
       errorCode: 'BATCH_TX_EXPLAINED_CHECK_FAILED',
       status: 409,
       data: { reason: 'detector_failed', force_rejected: true },
+    }
+  }
+
+  // Kontantmetoden: the RPC only clears 1510/2440, so an invoice with no
+  // booking yet would never get its revenue/cost + moms on the ledger. Same
+  // guard as the dashboard route (lib/invoices/batch-cash-method-guard.ts);
+  // the refusal auto-rejects the op and names the invoices.
+  const cashCheck = await findCashMethodUnbookedAllocations(
+    supabase,
+    companyId,
+    allocations as BatchAllocationRef[],
+  )
+  if (!cashCheck.ok) {
+    return { error: 'Kontantmetodskontrollen kunde inte köras. Försök igen.', status: 500 }
+  }
+  if (cashCheck.unbooked.length > 0) {
+    const entry = getErrorEntry('BATCH_CASH_METHOD_UNBOOKED_INVOICE')
+    return {
+      error: entry?.message_sv ?? 'Kontantmetoden: obokförda fakturor kan inte samlingsmatchas.',
+      errorCode: 'BATCH_CASH_METHOD_UNBOOKED_INVOICE',
+      status: 400,
+      data: { invoices: cashCheck.unbooked } as unknown as Record<string, unknown>,
     }
   }
 

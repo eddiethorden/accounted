@@ -368,6 +368,7 @@ import {
   type AlreadyExplainedOutcome,
   type DuplicateCandidateOutcome,
 } from '@/lib/invoices/already-explained-guard'
+import { findCashMethodUnbookedAllocations } from '@/lib/invoices/batch-cash-method-guard'
 import {
   buildBatchAllocationPreview,
   type BatchAllocationPreviewInvoice,
@@ -12056,6 +12057,22 @@ export const tools: McpTool[] = [
       }
       if (explained.status === 'unverifiable') {
         throw registryError('BATCH_TX_EXPLAINED_CHECK_FAILED')
+      }
+
+      // Kontantmetoden: the RPC only clears 1510/2440, so a never-booked
+      // invoice would lose its revenue/cost + moms. Refuse at stage time with
+      // the per-invoice route spelled out (the commit executor re-checks).
+      const cashCheck = await findCashMethodUnbookedAllocations(supabase, companyId, allocations)
+      if (!cashCheck.ok) {
+        throw new Error('Kontantmetodskontrollen kunde inte köras. Försök igen.')
+      }
+      if (cashCheck.unbooked.length > 0) {
+        const numbers = cashCheck.unbooked.map((u) => u.invoice_number ?? u.id).join(', ')
+        const err = registryError('BATCH_CASH_METHOD_UNBOOKED_INVOICE')
+        err.message +=
+          ` Obokförda fakturor: ${numbers}. En faktura som ensam motsvarar beloppet: gnubok_match_transaction_to_invoice.` +
+          ' Flera fakturor: markera varje faktura som betald (kundfakturor: gnubok_mark_invoice_as_paid), sedan gnubok_reconcile_match för att koppla transaktionen till verifikaten.'
+        throw err
       }
 
       const txDesc = transaction.merchant_name || transaction.description || transactionId

@@ -4317,6 +4317,13 @@ const MATCH_BATCH: Record<string, StructuredErrorEntry> = {
     message_en:
       'A single transaction cannot allocate to both customer and supplier invoices in one batch.',
   },
+  BATCH_CASH_METHOD_UNBOOKED_INVOICE: {
+    httpStatus: 400,
+    message_sv:
+      'Företaget använder kontantmetoden och minst en av fakturorna är inte bokförd än: intäkt eller kostnad och moms ska bokföras vid betalningen. En samlingsmatchning kvittar bara mot kundfordringar eller leverantörsskulder och skulle hoppa över det. Matcha fakturan direkt mot transaktionen om den ensam motsvarar beloppet, annars markera varje faktura som betald och koppla sedan transaktionen till verifikaten.',
+    message_en:
+      'The company uses the cash method and at least one of the invoices is not booked yet: revenue or cost and VAT must be booked at payment. A batch match only clears receivables or payables and would skip that. Match the invoice directly to the transaction if it alone covers the amount; otherwise mark each invoice as paid and then link the transaction to those vouchers.',
+  },
   BATCH_DIRECTION_MISMATCH: {
     httpStatus: 400,
     message_sv:
