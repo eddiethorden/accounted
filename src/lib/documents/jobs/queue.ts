@@ -92,6 +92,10 @@ async function runClaimed(
     return { kind: job.kind, result }
   } catch (err) {
     const reason = (err instanceof Error ? err.message : String(err)).slice(0, 500)
+    if (PERIOD_LOCKED_RE.test(reason)) {
+      await settleJob(supabase, job, { status: 'done', result: 'skipped: period_locked', last_error: reason })
+      return { kind: job.kind, result: 'skipped: period_locked' }
+    }
     await settleJob(supabase, job, { status: 'failed', last_error: reason, run_after: new Date(now() + backoffMs(job.attempts)).toISOString() })
     log.warn('document job failed', { job: job.id, kind: job.kind, doc: job.document_id, attempt: job.attempts, reason })
     return { kind: job.kind, error: reason }
@@ -117,6 +121,16 @@ export async function runDocumentJobFor(
 
 /** 2, 4, 8, 16, 32 minutes, capped at an hour. */
 const backoffMs = (attempts: number) => Math.min(60, 2 ** attempts) * 60_000
+
+/**
+ * The period-lock trigger on document_attachments (migration 017) refuses
+ * every write to a document that sits on an entry in a locked or closed
+ * period, Arkiv's type and read stamps included. Retrying buys nothing and
+ * five attempts with backoff ate the worker's minute (prod 2026-09-24: eight
+ * such failures an hour ahead of a person's uploads). The job is settled as
+ * skipped; the document stays untyped until the lock or the trigger changes.
+ */
+const PERIOD_LOCKED_RE = /locked\/closed fiscal period|Bokföringen är låst/i
 
 async function settleJob(supabase: SupabaseClient, job: ClaimedJob, patch: Record<string, unknown>): Promise<void> {
   const { error } = await supabase
