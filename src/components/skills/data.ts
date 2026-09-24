@@ -3,10 +3,10 @@ import type { WorklistCategory } from '@/lib/worklist/types'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
-import { AGENTS, isCheckable } from '@/lib/agent-skills/agents'
+import { isCheckable } from '@/lib/agent-skills/agents'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
-import type { Presence } from './AgentOrb'
+import type { Presence } from './AgentSphere'
 
 /** Reads shared by the Agenter list and an agent's page. */
 export type SkillSummary = Omit<CatalogSkill, 'body'>
@@ -104,9 +104,4 @@ export function agentSegment(agentId: string): string {
 }
 export function agentIdFromSegment(segment: string): string {
   return segment.startsWith('own-') ? `own/${segment.slice(4)}` : segment
-}
-
-/** Every curated agent's orb hues. */
-export function orbFor(id: RegistrySkillId) {
-  return AGENTS[id].orb
 }

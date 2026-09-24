@@ -8,7 +8,6 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
 import { FREE_SKILLS, REGISTRY_SKILLS, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
-import { AGENTS } from '@/lib/agent-skills/agents'
 import { AI_CLIENTS, aiConnectAction, aiPrefilledChatLink, openAiConnector, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
 import { createAiStatusPoller, type AiStatusPoller } from '@/lib/onboarding/ai-status-poll'
 import { formatDateLong } from '@/lib/utils'
@@ -18,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { SkillMarks } from './SkillMarks'
 import { AgentCard } from './AgentCard'
-import { huesFor } from './AgentOrb'
 import { agentSegment, agentStatus, fetchConnections, readAgents, readCatalog, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -115,7 +113,9 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
     else openAiConnector(aiPrefilledChatLink(client, t('create_prompt')))
   }
 
-  const statusFor = (id: RegistrySkillId) => agentStatus({
+  // A status shows once everything it depends on has loaded, so it never flashes "Redo" and then changes.
+  const statusReady = state !== 'loading' && !!agents.data && !!worklist.data && !!usage.data
+  const statusFor = (id: RegistrySkillId) => !statusReady ? undefined : agentStatus({
     id,
     aiKnown: state === 'locked' || state === 'waiting' ? false : state === 'open' ? true : null,
     overview: agents.data,
@@ -130,7 +130,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       href={`${hrefBase}/${agentSegment(id)}`}
       title={t(`skills.${id}.agent`)}
       desc={t(`skills.${id}.short`)}
-      hues={AGENTS[id].orb}
+      sphereKey={id}
       status={statusFor(id)}
       marks={<SkillMarks id={id} />}
     />
@@ -179,7 +179,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           ))}
         </div>
 
-        <div className={styles.veilwrap} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`}>
+        <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`}>
           {tab === 'accounted' && (
             <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
               {ordered.map((id) => <li key={id}>{card(id)}</li>)}
@@ -198,7 +198,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
                     href={`${hrefBase}/${agentSegment(skill.slug)}`}
                     title={skill.name}
                     desc={skill.summary}
-                    hues={huesFor(skill.slug)}
+                    sphereKey={skill.slug}
                     masked
                     badge={skill.draft ? <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span> : undefined}
                   />
@@ -215,7 +215,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           ) : (
             <ul className={styles.agrid}>
               {community.map((skill) => (
-                <li key={skill.slug}><AgentCard href={`${hrefBase}/${agentSegment(skill.slug)}`} title={skill.name} desc={skill.summary} hues={huesFor(skill.slug)} /></li>
+                <li key={skill.slug}><AgentCard href={`${hrefBase}/${agentSegment(skill.slug)}`} title={skill.name} desc={skill.summary} sphereKey={skill.slug} /></li>
               ))}
             </ul>
           ))}
