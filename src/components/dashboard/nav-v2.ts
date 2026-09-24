@@ -21,6 +21,8 @@ export interface NavGateFlags {
   requiresExpenses?: boolean
   // Arkiv: shown only for companies in the ARKIV_COMPANY_IDS rollout (computed by the layout).
   requiresArkiv?: boolean
+  /** The Agenter page (/skills); hidden in production while it is finished (lib/agent-skills/flag.ts). */
+  requiresAgents?: boolean
   requiredCapability?: CapabilityKey
   entityOnly?: EntityType
   byraOnly?: boolean
@@ -57,7 +59,7 @@ export const NAV_V2_TOP: NavV2Item[] = [
     icon: Sparkles,
     sub: [{ href: '/agent-knowledge', labelKey: 'agent_knowledge' }],
   },
-  { href: '/skills', labelKey: 'skills', icon: BookOpen, newBadge: true },
+  { href: '/skills', labelKey: 'skills', icon: BookOpen, newBadge: true, requiresAgents: true },
 ]
 
 export const NAV_V2_COMPANY: NavV2Item[] = [

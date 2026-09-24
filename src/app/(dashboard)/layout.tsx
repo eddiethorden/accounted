@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { cookies, headers } from 'next/headers'
 import DashboardNav from '@/components/dashboard/DashboardNav'
 import { isArkivSectionEnabled } from '@/lib/arkiv/flag'
+import { isAgentsPageEnabled } from '@/lib/agent-skills/flag'
 import { DashboardRouteShell } from '@/components/dashboard/DashboardRouteShell'
 import { MainContainer } from '@/components/dashboard/MainContainer'
 import CompanyTabSync from '@/components/dashboard/CompanyTabSync'
@@ -593,6 +594,7 @@ export default async function DashboardLayout({
             hasMileage={hasMileage}
             hasExpenseClaims={hasExpenseClaims}
             arkivEnabled={isArkivSectionEnabled(companyId)}
+            agentsEnabled={isAgentsPageEnabled(companyId)}
             isSandbox={isSandbox}
             extensionNavItems={getExtensionNavItems()}
             userName={userProfile?.full_name ?? null}
