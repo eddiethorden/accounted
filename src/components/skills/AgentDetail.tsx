@@ -19,8 +19,8 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { AgentBot, agentHue } from './AgentBot'
-import { seedOf } from './AgentSphere'
+import { Folder } from './Folder'
+import { itemHue, seedOf } from './hues'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
 import { SlidingTabs } from './SlidingTabs'
@@ -94,7 +94,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
   const name = curated ? t(`skills.${curated}.agent`) : own?.name ?? ''
   const task = curated ? t(`skills.${curated}.name`) : null
-  const hue = agentHue(agentId, curated)
+  const hue = itemHue('workflow', agentId, curated)
   const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
   const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data?.own_knowledge[agentId] ?? []
@@ -172,7 +172,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
         <section className={styles.stage} aria-label={name}>
           <StrataField seed={seedOf(agentId)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
-            <AgentBot agentKey={agentId} curated={curated} presence={status?.presence} size={88} />
+            <Folder hue={hue} size={104} open drift />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
@@ -191,7 +191,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           <div key={view} className={styles.viewIn}>
           {view === 'main' && (
             <>
-              <div className={styles.apAvatar}><AgentBot agentKey={agentId} curated={curated} size={64} /></div>
+              <div className={styles.apAvatar}><Folder hue={hue} size={60} /></div>
 
               <Field label={t('field_name')}>
                 <div className={styles.fieldBox} data-ph-mask={own ? '' : undefined}>{name}</div>
@@ -263,7 +263,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 }
 
 /** One settings row as in Oasis: label left, one line of content, one square button in a fixed column. */
-function Row({ label, children, onAdd, addLabel, onOpen }: { label: string; children?: ReactNode; onAdd?: () => void; addLabel?: string; onOpen?: () => void }) {
+export function Row({ label, children, onAdd, addLabel, onOpen }: { label: string; children?: ReactNode; onAdd?: () => void; addLabel?: string; onOpen?: () => void }) {
   const inner = (
     <>
       <span className={styles.rowLabel}>{label}</span>
@@ -280,7 +280,7 @@ function Row({ label, children, onAdd, addLabel, onOpen }: { label: string; chil
 }
 
 /** A labelled field, label above its box. */
-function Field({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
+export function Field({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
     <div className={styles.field}>
       <div className={styles.fieldHead}><span className={styles.rowLabel}>{label}</span>{note && <span className={styles.partNote}>{note}</span>}</div>
@@ -290,7 +290,7 @@ function Field({ label, note, children }: { label: string; note?: string; childr
 }
 
 /** A panel sub-view: back to the agent, a title, its content. */
-function SubView({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+export function SubView({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
   const t = useTranslations('skills_registry')
   return (
     <div className="flex flex-col gap-4">

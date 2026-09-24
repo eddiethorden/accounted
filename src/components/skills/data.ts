@@ -6,7 +6,7 @@ import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { isCheckable } from '@/lib/agent-skills/agents'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
-import type { Presence } from './AgentSphere'
+import type { ItemKind, Presence } from './hues'
 
 /** Reads shared by the Agenter list and an agent's page. */
 export type SkillSummary = Omit<CatalogSkill, 'body'>
@@ -104,4 +104,37 @@ export function agentSegment(agentId: string): string {
 }
 export function agentIdFromSegment(segment: string): string {
   return segment.startsWith('own-') ? `own/${segment.slice(4)}` : segment
+}
+
+/**
+ * What the community says about a shared item: who shared it, votes and
+ * "fungerar / fungerar inte". Sent only once the catalog carries it; until
+ * then community cards and pages show no rating controls at all.
+ */
+export interface CommunityMeta {
+  kind: ItemKind
+  author: string
+  /** How many items the author has shared that passed review. */
+  author_shared: number
+  votes: number
+  voted: boolean
+  works: number
+  not_works: number
+  feedback: 'works' | 'not_works' | null
+  reviewed_at: string | null
+}
+export function communityMeta(skill: SkillSummary): CommunityMeta | null {
+  return (skill as SkillSummary & { community?: CommunityMeta }).community ?? null
+}
+/** A catalog item's type: community items say it, everything else in the catalog is a flow. */
+export function kindOf(skill: SkillSummary): ItemKind {
+  return communityMeta(skill)?.kind ?? 'workflow'
+}
+
+/** The URL segments of the item pages that are not flows: a rule pack, or a shared community item. */
+export function rulesSegment(atomId: string): string {
+  return `regler.${atomId.replace('/', '.')}`
+}
+export function communitySegment(slug: string): string {
+  return `community.${slug.replaceAll('/', '.')}`
 }

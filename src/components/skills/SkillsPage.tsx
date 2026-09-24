@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { ArrowRight, Loader2, Plus } from 'lucide-react'
 import useSWR from 'swr'
@@ -14,21 +15,27 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { HelpPopover } from '@/components/ui/help-popover'
 import { Button } from '@/components/ui/button'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { SourceMarks } from './ConnectionMark'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
+import { CommunityFoot, KindView } from './KindViews'
+import { itemHue, KINDS, kindFromParam, kindHref, type ItemKind } from './hues'
 import { SlidingTabs } from './SlidingTabs'
-import { agentSegment, agentStatus, fetchConnections, readAgents, readCatalog, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
+import { agentSegment, agentStatus, communityMeta, communitySegment, fetchConnections, kindOf, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
 type Tab = 'accounted' | 'own' | 'community'
+
 type PageState = 'loading' | 'locked' | 'waiting' | 'open'
 
 /**
- * Agenter: the company's agents as cards, as in Oasis. A card opens the
- * agent's own page (/skills/<id>), where its instructions, knowledge and
- * connections live. `hrefBase` lets the sandbox demo link to its own pages.
+ * Agentinstruktioner: what the company gives the AI it brings, in four kinds
+ * (flows, rules, analyses, connections), each from Accounted, the community
+ * or the company itself. A flow opens its own page (/skills/<id>) with its
+ * instructions, knowledge and connections. `hrefBase` lets the sandbox demo
+ * link to its own pages.
  */
 export function SkillsPage({ hrefBase = '/skills' }: { hrefBase?: string }) {
   const { company } = useCompany()
@@ -41,14 +48,20 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const { canWrite } = useCanWrite()
   const { appName } = useBranding()
   const pageRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+  const pathname = usePathname()
+  const kind = kindFromParam(useSearchParams().get('typ'))
+  const setKind = (next: ItemKind) => router.replace(kindHref(pathname, next), { scroll: false })
   const catalog = useSWR(['/api/skills', companyId], ([url]) => readCatalog(url))
+  const options = useSWR(kind === 'rules' ? ['/api/agents/knowledge', companyId] : null, ([url]) => readOptions(url))
   const worklist = useSWR(['/api/worklist/counts', companyId], ([url]) => readWorklist(url))
   const usage = useSWR(['/api/skills/usage', companyId], ([url]) => readUsage(url))
   const doNow = skillsToDoNow(worklist.data ?? {})
   const own = (catalog.data ?? []).filter((skill): skill is SkillSummary & { installations: [{ installation_id: string }] } =>
     skill.tier === 'own' && skill.shareStatus !== 'withdrawn' && !!skill.installations[0])
   // Reviewed community agents and knowledge: published atoms of the community tier.
-  const community = (catalog.data ?? []).filter((skill) => skill.tier === 'community')
+  const community = (catalog.data ?? []).filter((skill) => skill.tier === 'community' && kindOf(skill) === 'workflow')
+    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
 
   // ── connection: asked on load and whenever the user comes back to the tab ──
   const [connected, setConnected] = useState<AiClient[] | null>(null)
@@ -132,9 +145,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       href={`${hrefBase}/${agentSegment(id)}`}
       title={t(`skills.${id}.agent`)}
       desc={t(`skills.${id}.short`)}
-      sphereKey={id}
+      hue={itemHue('workflow', id, id)}
       status={statusFor(id)}
-      curated={id}
       marks={<SourceMarks connections={AGENTS[id].connections} />}
     />
   )
@@ -148,8 +160,24 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
 
   return (
     <div ref={pageRef} className={styles.page} data-state={state}>
-      <PageHeader title={t('title')} help={<HelpPopover><p>{t('help')}</p></HelpPopover>} />
+      <PageHeader
+        title={t('title')}
+        help={<HelpPopover><p>{t('help')}</p></HelpPopover>}
+        action={<SegmentedControl aria-label={t('kinds_label')} value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))} />}
+      />
 
+      {kind !== 'workflow' ? (
+        <KindView
+          key={kind}
+          kind={kind}
+          hrefBase={hrefBase}
+          catalog={catalog.data ?? []}
+          options={options.data ?? []}
+          overview={agents.data}
+          clientName={clientName}
+          remembered={agents.data?.remembered ?? 0}
+        />
+      ) : (<>
       <section className={styles.hero}>
         <div className={styles.intro}><h2>{t('hero_title')}</h2></div>
         <ul className={styles.agrid}>
@@ -203,7 +231,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
                     href={`${hrefBase}/${agentSegment(skill.slug)}`}
                     title={skill.name}
                     desc={skill.summary}
-                    sphereKey={skill.slug}
+                    hue={itemHue('workflow', skill.slug)}
                     masked
                     badge={skill.draft ? <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span> : undefined}
                   />
@@ -220,7 +248,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           ) : (
             <ul className={styles.agrid}>
               {community.map((skill) => (
-                <li key={skill.slug}><AgentCard href={`${hrefBase}/${agentSegment(skill.slug)}`} title={skill.name} desc={skill.summary} sphereKey={skill.slug} /></li>
+                <li key={skill.slug}><AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} hue={itemHue('workflow', skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} /></li>
               ))}
             </ul>
           ))}
@@ -273,6 +301,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           )}
         </div>
       </section>
+      </>)}
 
       <SkillCreator
         mode={creator}
