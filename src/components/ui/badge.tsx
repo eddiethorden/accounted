@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 
 // Chips are pills (concept .chip): 99px radius, 11.5px, quiet padding.
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-[3px] text-[11.5px] font-medium leading-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-full border px-2.5 py-[3px] text-[11px] font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
   {
     variants: {
       variant: {
