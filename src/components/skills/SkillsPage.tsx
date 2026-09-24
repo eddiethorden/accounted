@@ -157,6 +157,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       symbolKey={id}
       hue={itemHue('workflow', id, id)}
       status={statusFor(id)}
+      carries={agents.data?.agents.find((a) => a.id === id)?.knowledge.map((k) => knowledgeName(k.id, k.title))}
       marks={<SourceMarks connections={AGENTS[id].connections} />}
     />
   )

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
+import { FolderClosed } from 'lucide-react'
 import type { ItemKind, Presence } from './hues'
 import { ItemSymbol } from './ItemSymbol'
 import styles from './skills.module.css'
@@ -14,7 +15,7 @@ import styles from './skills.module.css'
  * rated. Without `href` the card is not a link (a connection that lives in
  * the user's AI has no page).
  */
-export function AgentCard({ href, title, desc, kind, symbolKey, hue, status, marks, badge, foot, masked }: {
+export function AgentCard({ href, title, desc, kind, symbolKey, hue, status, marks, carries, badge, foot, masked }: {
   href?: string
   title: string
   desc: string
@@ -24,6 +25,8 @@ export function AgentCard({ href, title, desc, kind, symbolKey, hue, status, mar
   hue: number
   status?: { presence: Presence; text: string }
   marks?: ReactNode
+  /** The knowledge a flow brings along, so the link between the two shows on the card itself. */
+  carries?: string[]
   badge?: ReactNode
   /** Replaces the status line, e.g. a community item's author and rating. */
   foot?: ReactNode
@@ -37,6 +40,12 @@ export function AgentCard({ href, title, desc, kind, symbolKey, hue, status, mar
         <span className={styles.acText}>
           <span className={styles.acTitle} data-ph-mask={masked ? '' : undefined}>{title}{badge}</span>
           <span className={styles.acDesc} data-ph-mask={masked ? '' : undefined}>{desc}</span>
+          {carries && carries.length > 0 && (
+            <span className={styles.carries} title={carries.join(' · ')}>
+              <FolderClosed className="h-3.5 w-3.5" aria-hidden />
+              <span className={styles.carriesText}>{carries.slice(0, 2).join(' · ')}{carries.length > 2 ? ` +${carries.length - 2}` : ''}</span>
+            </span>
+          )}
           {marks && <span className={styles.acMarks}>{marks}</span>}
         </span>
         <span className={styles.acTile}><ItemSymbol kind={kind} hue={hue} seedKey={symbolKey} size={66} /></span>
