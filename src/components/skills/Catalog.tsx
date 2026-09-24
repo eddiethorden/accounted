@@ -55,6 +55,8 @@ interface Item {
   categories: string[]
   popularity: number
   usedByFlows?: number
+  /** A longer description for the featured slot. */
+  lede?: string
   /** What a flow works with, as the small marks on its card. */
   connections?: readonly AgentConnection[]
 }
@@ -114,7 +116,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   })
   const flows: Item[] = REGISTRY_SKILLS.map((s) => ({
     key: s.id, kind: 'workflow', title: t(`skills.${s.id}.name`), desc: t(`skills.${s.id}.short`), href: `${hrefBase}/${agentSegment(s.id)}`,
-    source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0, connections: AGENTS[s.id].connections,
+    source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0, connections: AGENTS[s.id].connections, lede: t(`skills.${s.id}.desc`),
   }))
   const packs: Item[] = options.filter((o) => o.tier !== 'community').map((o) => ({
     key: o.id, kind: 'rules', title: knowledgeName(o.id, o.title), desc: knowledgeDesc(o.id, o.summary), href: `${hrefBase}/${rulesSegment(o.id)}`,
@@ -141,8 +143,9 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const listed = sorted(pool.filter((i) => (!category || i.categories.includes(category)) && (!query || `${i.title} ${i.desc}`.toLocaleLowerCase('sv').includes(query))))
   const top = sorted(ofKind).slice(0, TOP)
 
-  // The featured slot: the company's own industry pack when there is one, otherwise the most used of this kind.
-  const featured = (kind === 'rules' && companyIndustry ? packs.find((p) => p.key === companyIndustry) : undefined) ?? top[0]
+  // The featured slot: Kvittojakten for flows, the company's own industry pack for knowledge, otherwise the most used.
+  const featured = (kind === 'workflow' ? flows.find((f) => f.key === 'kvittojakten') : undefined)
+    ?? (kind === 'rules' && companyIndustry ? packs.find((p) => p.key === companyIndustry) : undefined) ?? top[0]
 
   return (
     <div className={styles.catalog}>
@@ -290,7 +293,7 @@ function Featured({ item, industry }: { item: Item; industry: boolean }) {
       <div className={styles.featuredText}>
         <span>{industry ? t('featured_industry') : item.source === 'community' && item.meta ? t('featured_community', { who: `@${item.meta.author}` }) : t('featured_accounted')}</span>
         <h2>{item.title}</h2>
-        <p>{item.desc}</p>
+        <p>{item.lede ?? item.desc}</p>
         <div><Button asChild size="sm"><Link href={item.href}>{t('open_hint')}</Link></Button></div>
       </div>
       <span className={styles.featuredArt}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={120} open /></span>
