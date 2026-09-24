@@ -117,7 +117,22 @@ const OWN_BODY = [
   '4. Visa listan och fråga om betalfil ska skapas.',
 ].join('\n')
 
+// Example community items (names, handles and counts are made up for the demo), one or more per kind.
+const shared = (slug: string, name: string, summary: string, kind: 'workflow' | 'rules' | 'analysis' | 'connection', author: string, authorShared: number, votes: number, works: number, notWorks: number) => ({
+  slug: `community/${slug}`, name, summary, tags: ['community'], tier: 'community', source: 'community', active: false, installations: [],
+  community: { kind, author, author_shared: authorShared, votes, voted: false, works, not_works: notWorks, feedback: null, reviewed_at: '2026-09-18T10:00:00Z' },
+})
+
 const CATALOG = [
+  shared('stang-dagskassan', 'Stäng dagskassan', 'Z-rapporten till ett verifikat, med kort, Swish och kontant var för sig.', 'workflow', 'kafe-norr', 4, 48, 31, 2),
+  shared('styrelserapport', 'Månadsrapport till styrelsen', 'Resultat, likviditet och avvikelser mot budget på en sida.', 'workflow', 'byra-lind', 7, 22, 14, 1),
+  shared('dricks-kort', 'Dricks via kort till personalen', 'Hur dricks som kommer in via kortinlösen hanteras fram till lönen, med källor.', 'rules', 'bistro-ost', 2, 17, 9, 1),
+  shared('konsult-vidarefakturering', 'Vidarefakturering av utlägg', 'När ett utlägg för kundens räkning ska med moms och när det inte ska det, med källor.', 'rules', 'byra-lind', 7, 11, 6, 0),
+  shared('ravaruprocent', 'Råvaruprocent per månad', 'Varuinköp mot försäljning, och vad som är normalt för en restaurang.', 'analysis', 'lunchkrogen', 3, 64, 40, 3),
+  shared('kassaflode-13', 'Kassaflöde 13 veckor framåt', 'Kända in- och utbetalningar vecka för vecka, med varning när saldot blir lågt.', 'analysis', 'byra-lind', 7, 41, 25, 2),
+  shared('personalkostnad', 'Personalkostnad per omsättningskrona', 'Löner och avgifter mot omsättning, månad för månad.', 'analysis', 'kafe-norr', 4, 29, 18, 4),
+  shared('zettle', 'Zettle via din AI', 'Lägg till Zettle-kopplingen i Claude, så kan dagskassan läsas direkt.', 'connection', 'kafe-norr', 4, 19, 12, 1),
+  shared('shopify', 'Shopify-order som underlag', 'Ordrar och utbetalningar från Shopify som underlag till bokföringen.', 'connection', 'butiken', 1, 12, 7, 2),
   { slug: 'own/00000000-0000-4000-8000-000000000001', name: 'Påminnelse om leverantörsfakturor', summary: 'Listar obetalda leverantörsfakturor som förfaller inom en vecka.', tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: '00000000-0000-4000-8000-000000000001', scope: 'company' }] },
 ]
 
@@ -131,6 +146,8 @@ function installFixtures() {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.origin)
     if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) return real(input, init)
     if (url.pathname === '/api/agents/knowledge' && init?.method === 'PATCH') { applyChoice(JSON.parse(String(init.body))); return json({ ok: true }) }
+    // Votes and "fungerar" answers are kept by the page itself in the demo.
+    if (url.pathname === '/api/agents/community/feedback') return json({ ok: true })
     if (init?.method && init.method !== 'GET') return json({ id: 'demo' })
     switch (url.pathname) {
       case '/api/ai/connections': return json(['claude'])

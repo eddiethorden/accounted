@@ -469,16 +469,6 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 .share .check input { margin-top: 3px; }
 .shareStatus { display: inline-flex; align-items: center; gap: 8px; width: fit-content; font-size: 13px; }
 
-/* ── Agenter: the agent's particle sphere (its picture) ── */
-.sphere { position: relative; flex: none; display: inline-block; color: hsl(var(--foreground)); }
-.sphere canvas { display: block; }
-.presence { position: absolute; right: 2px; bottom: 2px; width: 11px; height: 11px; border-radius: 9999px; background: hsl(var(--muted-foreground) / 0.5); box-shadow: 0 0 0 2px hsl(var(--background)); }
-
-.presence[data-presence='ready'] { background: hsl(var(--success)); }
-.presence[data-presence='busy'] { background: hsl(var(--success)); animation: presence-breathe 2.4s var(--ease-out) infinite; }
-.presence[data-presence='blocked'] { background: hsl(var(--warning)); }
-@keyframes presence-breathe { 0%, 100% { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 2px hsl(var(--success) / 0.35); } 50% { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 5px hsl(var(--success) / 0); } }
-@media (prefers-reduced-motion: reduce) { .presence[data-presence='busy'] { animation: none; } }
 .who { display: flex; flex-direction: column; min-width: 0; }
 .whoName { font-size: 15px; font-weight: 500; line-height: 20px; color: hsl(var(--foreground)); }
 .whoRole { font-size: 12.5px; line-height: 17px; color: hsl(var(--muted-foreground)); }
@@ -586,8 +576,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .statusSlot { min-height: 17px; }
 @media (prefers-reduced-motion: reduce) { .viewIn, .apage, .fadeIn { animation: none; } }
 
-.bot { position: relative; flex: none; display: inline-grid; place-items: center; }
-
 /* ── the agent panel, laid out as Oasis does: fields, then rows on one grid ── */
 .apAvatar { display: flex; justify-content: center; padding: 4px 0 8px; }
 .field { display: flex; flex-direction: column; gap: 8px; }
@@ -638,3 +626,54 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .arowAction > button { min-width: 96px; }
 .arow .share { border: 0; padding: 0; background: none; }
 .dangerBtn { color: hsl(var(--destructive)); }
+
+/* ── the folder: an agent instruction's picture (Folder.tsx) ── */
+.folder { position: relative; display: inline-block; flex: none; }
+.folderBack { position: absolute; inset: 10% 0 0 0; border-radius: 8px; background: hsl(var(--fh) 48% 38%); }
+.folderBack::before { content: ""; position: absolute; left: 0; top: -12%; width: 42%; height: 16%; border-radius: 6px 12px 0 0; background: inherit; }
+.folderPaper {
+  position: absolute; left: 14%; right: 14%; top: 18%; bottom: 12%; border-radius: 4px;
+  background-color: hsl(var(--card));
+  background-image: repeating-linear-gradient(180deg, transparent 0 7px, hsl(var(--fh) 35% 70% / 0.55) 7px 8.5px);
+  background-size: 64% calc(100% - 16px); background-position: 20% 10px; background-repeat: no-repeat;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+  transition: transform 300ms var(--ease-out);
+}
+.fp1 { transform: translateY(2%) rotate(-3deg); }
+.fp2 { transform: translateY(-4%); }
+.fp3 { transform: translateY(2%) rotate(4deg); }
+.folderFront {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 70%; border-radius: 8px;
+  background: linear-gradient(180deg, hsl(var(--fh) 64% 60%), hsl(var(--fh) 58% 48%));
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.25);
+  transform-origin: 50% 100%;
+  transition: transform 300ms var(--ease-out);
+}
+.acard:hover .folderFront, .folder[data-open] .folderFront { transform: skewX(14deg) scaleY(0.66); }
+.acard:hover .fp1, .folder[data-open] .fp1 { transform: translate(-14%, -20%) rotate(-11deg); }
+.acard:hover .fp2, .folder[data-open] .fp2 { transform: translateY(-30%); }
+.acard:hover .fp3, .folder[data-open] .fp3 { transform: translate(14%, -18%) rotate(10deg); }
+@keyframes paper-drift { 50% { translate: 0 -5%; } }
+.folder[data-drift] .folderPaper { animation: paper-drift 4s ease-in-out infinite; }
+.folder[data-drift] .fp2 { animation-delay: -1.3s; }
+.folder[data-drift] .fp3 { animation-delay: -2.6s; }
+@media (prefers-reduced-motion: reduce) { .folderPaper, .folderFront { transition: none; animation: none !important; } }
+.acardStatic { cursor: default; }
+
+/* ── Regler, Analyser, Kopplingar ── */
+.kindPanel { display: flex; flex-direction: column; gap: 28px; }
+.level { display: flex; flex-direction: column; gap: 12px; }
+.levelHead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.levelHead h3 { font-size: 15px; font-weight: 500; }
+.levelHead span { font-size: 13px; color: hsl(var(--muted-foreground)); }
+.metaLine { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: hsl(var(--muted-foreground)); min-width: 0; }
+.voteMini { display: inline-flex; align-items: center; gap: 2px; color: hsl(var(--foreground)); font-variant-numeric: tabular-nums; }
+.voteCount { font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground)); }
+.voteBtn { background: hsl(var(--background)); }
+.voteBtn[aria-pressed='true'] { border-color: hsl(var(--foreground)); }
+.worksPair { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.giveCard { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); transition: border-color 150ms var(--ease-out), background-color 150ms var(--ease-out); }
+.giveCard[data-held] { border-color: hsl(var(--success) / 0.5); background: hsl(var(--success) / 0.05); }
+.giveText { display: flex; flex-direction: column; min-width: 0; }
+.giveText b { font-size: 14px; font-weight: 500; }
+.giveText span { font-size: 12px; color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
