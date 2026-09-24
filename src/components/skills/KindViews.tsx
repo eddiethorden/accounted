@@ -1,105 +1,60 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronUp } from 'lucide-react'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { AgentCard } from './AgentCard'
-import { SegmentedControl } from '@/components/ui/segmented-control'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
-type Source = 'accounted' | 'community' | 'own'
+/** A rail entry's name without the SNI or other trailing parenthesis, so the list stays one short line each. */
+export function railName(title: string): string {
+  return title.replace(/\s*\([^)]*\)\s*$/, '')
+}
 
-const SOURCES: Source[] = ['accounted', 'community', 'own']
-const LEVELS = ['horizontal', 'modifier', 'vertical'] as const
-
-/**
- * Kunskap and Analyser: the same page as the flows, with the same three
- * sources in tabs. Kunskap is the reviewed packs, grouped general to
- * specific; a pack never runs on its own, it is given to flows.
- */
-export function KindView({ kind, hrefBase, catalog, options, overview, clientName, remembered }: {
-  kind: Exclude<ItemKind, 'workflow'>
-  hrefBase: string
-  catalog: SkillSummary[]
-  options: KnowledgeOption[]
-  overview: AgentsOverview | null | undefined
-  clientName: string
-  remembered: number
-}) {
+/** One of a place's three parts: arbetsflöden, kunskap or analyser, with a count and an invitation when empty. */
+export function Section({ kind, count, children, empty }: { kind: ItemKind; count: number; children: ReactNode; empty?: ReactNode }) {
   const t = useTranslations('skills_registry')
-  const knowledgeName = useKnowledgeName()
-  const knowledgeDesc = useKnowledgeDesc()
-  const [source, setSource] = useState<Source>('accounted')
-  // Most voted first: what others found useful is what a newcomer should see.
-  const community = catalog.filter((s) => s.tier === 'community' && kindOf(s) === kind)
-    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
-  const usedBy = (atomId: string) => overview?.agents.filter((a) => a.knowledge.some((k) => k.id === atomId)).length ?? 0
-
-  const count = (s: Source) => s === 'community' ? community.length : 0
-  const packs = options.filter((o) => o.tier !== 'community')
-
   return (
-    <section className={styles.lower} aria-label={t(`kind_${kind}`)}>
-      <SegmentedControl
-        aria-label={t('sources_label')}
-        className={styles.sourceSwitch}
-        value={source}
-        onChange={setSource}
-        options={SOURCES.map((key) => ({ value: key, label: t(`tab_${key}`), count: count(key) }))}
-      />
-      <div key={source} className={`${styles.kindPanel} ${styles.fadeIn}`} id={`${kind}-panel`} role="tabpanel" aria-label={t(`tab_${source}`)}>
-        {source === 'community' && (community.length === 0
-          ? <Empty title={t('community_empty_title')} body={t(`community_empty_${kind}`)} />
-          : <ul className={styles.agrid}>{community.map((skill) => (
-            <li key={skill.slug}>
-              <AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind={kind} symbolKey={skill.slug} hue={itemHue(kind, skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} />
-            </li>
-          ))}</ul>)}
-
-        {kind === 'rules' && source === 'accounted' && LEVELS.map((level) => {
-          const items = packs.filter((o) => o.tier === level)
-          if (items.length === 0) return null
-          return (
-            <div key={level} className={styles.level}>
-              <div className={styles.levelHead}><h3>{t(`level_${level}`)}</h3><span>{t(`level_${level}_hint`)}</span></div>
-              <ul className={styles.agrid}>{items.map((o) => (
-                <li key={o.id}>
-                  <AgentCard
-                    href={`${hrefBase}/${rulesSegment(o.id)}`}
-                    title={knowledgeName(o.id, o.title)}
-                    desc={knowledgeDesc(o.id, o.summary)}
-                    kind="rules"
-                    symbolKey={o.id}
-                    hue={itemHue('rules', o.id)}
-                    foot={<span className={styles.metaLine}>{[o.version ? t('version_short', { version: o.version }) : null, usedBy(o.id) > 0 ? t('used_by', { count: usedBy(o.id) }) : null].filter(Boolean).join(' · ')}</span>}
-                  />
-                </li>
-              ))}</ul>
-            </div>
-          )
-        })}
-        {kind === 'rules' && source === 'own' && <Empty title={t('rules_own_title')} body={remembered > 0 ? t('rules_own_body_count', { count: remembered }) : t('rules_own_body')} />}
-
-        {kind === 'analysis' && source === 'accounted' && <Empty title={t('analysis_accounted_title')} body={t('analysis_accounted_body')} />}
-        {kind === 'analysis' && source === 'own' && <Empty title={t('analysis_own_title')} body={t('analysis_own_body', { client: clientName })} />}
-
-      </div>
+    <section className={styles.placeSection} aria-label={t(`kind_${kind}`)}>
+      <div className={styles.levelHead}><h3>{t(`kind_${kind}`)}</h3><span>{count}</span></div>
+      {count === 0 ? <p className={styles.placeEmpty}>{empty ?? t('place_empty')}</p> : <ul className={styles.agrid}>{children}</ul>}
     </section>
   )
 }
 
-function Empty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
+/** A knowledge pack as a card, with how many flows carry it. */
+export function PackCard({ option, hrefBase, overview }: { option: KnowledgeOption; hrefBase: string; overview: AgentsOverview | null | undefined }) {
+  const t = useTranslations('skills_registry')
+  const knowledgeName = useKnowledgeName()
+  const knowledgeDesc = useKnowledgeDesc()
+  const usedBy = overview?.agents.filter((a) => a.knowledge.some((k) => k.id === option.id)).length ?? 0
   return (
-    <div className={styles.empty}>
-      <h3>{title}</h3>
-      <p>{body}</p>
-      {action}
-    </div>
+    <li>
+      <AgentCard
+        href={`${hrefBase}/${rulesSegment(option.id)}`}
+        title={knowledgeName(option.id, option.title)}
+        desc={knowledgeDesc(option.id, option.summary)}
+        kind="rules"
+        symbolKey={option.id}
+        hue={itemHue('rules', option.id)}
+        foot={<span className={styles.metaLine}>{[option.version ? t('version_short', { version: option.version }) : null, usedBy > 0 ? t('used_by', { count: usedBy }) : null].filter(Boolean).join(' · ')}</span>}
+      />
+    </li>
+  )
+}
+
+/** A shared item as a card, with its author and rating. */
+export function SharedCard({ skill, hrefBase }: { skill: SkillSummary; hrefBase: string }) {
+  const kind = kindOf(skill)
+  return (
+    <li>
+      <AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind={kind} symbolKey={skill.slug} hue={itemHue(kind, skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} />
+    </li>
   )
 }
 

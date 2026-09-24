@@ -40,13 +40,22 @@ export function itemHue(kind: ItemKind, key: string, curated?: RegistrySkillId |
   return (KIND_HUES[kind] + ((seedOf(key) % 5) - 2) * 5 + 360) % 360
 }
 
-/** The four kinds, in the order of the top bar's switch; `?typ=` carries the chosen one. */
-export const KINDS: ItemKind[] = ['workflow', 'rules', 'analysis']
-const KIND_PARAM: Record<ItemKind, string> = { workflow: 'arbetsfloden', rules: 'kunskap', analysis: 'analyser' }
-export function kindFromParam(value: string | null): ItemKind {
-  return KINDS.find((k) => KIND_PARAM[k] === value) ?? 'workflow'
+/**
+ * Where the page is: everything general, one industry or company-form pack
+ * (its registry id), the company's own items, or everything the community
+ * shared. `?plats=` carries it so the back link from an item returns there.
+ */
+export type Place = 'general' | 'own' | 'community' | `vertical/${string}` | `modifier/${string}`
+
+export function placeFromParam(value: string | null): Place {
+  if (!value || value === 'allmant') return 'general'
+  if (value === 'egna') return 'own'
+  if (value === 'community') return 'community'
+  const id = value.replace('.', '/')
+  return id.startsWith('vertical/') || id.startsWith('modifier/') ? id as Place : 'general'
 }
-/** The list with a kind chosen: the back link from an item returns to its own kind. */
-export function kindHref(base: string, kind: ItemKind): string {
-  return kind === 'workflow' ? base : `${base}?typ=${KIND_PARAM[kind]}`
+export function placeHref(base: string, place: Place): string {
+  if (place === 'general') return base
+  const param = place === 'own' ? 'egna' : place === 'community' ? 'community' : place.replace('/', '.')
+  return `${base}?plats=${param}`
 }

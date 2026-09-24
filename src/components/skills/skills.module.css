@@ -722,3 +722,29 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 
 /* the source switch sits in the content, left-aligned, the same control as the top bar's */
 .sourceSwitch { align-self: flex-start; }
+
+/* ── the rail: Allmänt, each industry and company form, Egna, Community ── */
+.placeLayout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }
+.rail { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 2px; max-height: calc(100dvh - 120px); overflow-y: auto; }
+.railItem { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 13.5px; line-height: 18px; color: hsl(var(--muted-foreground)); text-align: left; cursor: pointer; transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out); }
+.railItem:hover { background: hsl(var(--secondary) / 0.6); color: hsl(var(--foreground)); }
+.railItem[aria-current='page'] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); font-weight: 500; }
+.railItem:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.railLabel { min-width: 0; }
+.railLabel small { display: block; font-size: 11px; font-weight: 400; color: hsl(var(--muted-foreground)); }
+.railCount { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground)); }
+.railGroup { margin: 16px 10px 4px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.railSep { height: 1px; margin: 12px 10px; background: hsl(var(--border)); }
+.placeBody { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.placeHead { display: flex; flex-direction: column; gap: 4px; }
+.placeHead h2 { font-family: var(--font-display); font-size: 24px; line-height: 30px; font-weight: 400; }
+.placeHead p { font-size: 13px; color: hsl(var(--muted-foreground)); }
+.placeSection { display: flex; flex-direction: column; gap: 12px; }
+.placeEmpty { padding: 14px 16px; border: 1px dashed hsl(var(--border)); border-radius: 12px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+@media (max-width: 960px) {
+  .placeLayout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .rail { position: static; flex-direction: row; overflow-x: auto; max-height: none; padding-bottom: 4px; }
+  .railGroup, .railSep { display: none; }
+  .railItem { width: auto; flex: none; white-space: nowrap; }
+  .railLabel small { display: none; }
+}
