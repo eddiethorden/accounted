@@ -10306,7 +10306,7 @@
     "viewer_note": "Du har läsbehörighet i företaget och kan inte skapa eller ta bort agenter.",
     "skills": {
       "bookkeep": {
-        "role": "Bokförare",
+        "agent": "Bokföringsagent",
         "name": "Bokför transaktioner",
         "short": "Föreslår konto och moms. Du godkänner.",
         "desc": "Går igenom obokade banktransaktioner, föreslår konto och moms och väntar på ditt godkännande.",
@@ -10320,7 +10320,7 @@
         "say": "Bokför mina obokade transaktioner."
       },
       "kvittojakten": {
-        "role": "Kvittojägare",
+        "agent": "Kvittoagent",
         "name": "Kvittojakten",
         "short": "Hittar kvitton som saknas.",
         "desc": "Letar upp kvitton och fakturor som saknas i din mejl och kopplar dem till rätt verifikat.",
@@ -10335,7 +10335,7 @@
         "note": "Har du Claude i Chrome? Då hämtar Kvittojakten även fakturor från portaler som AWS, Google Ads och OpenAI, och kan ställa in att de skickas till Accounted automatiskt."
       },
       "reconcile-month": {
-        "role": "Avstämning",
+        "agent": "Avstämningsagent",
         "name": "Stäm av månaden",
         "short": "Jämför bank och bokföring.",
         "desc": "Jämför bank och bokföring konto för konto och visar vad som skiljer.",
@@ -10348,7 +10348,7 @@
         "say": "Stäm av förra månaden åt mig."
       },
       "month-end-close": {
-        "role": "Månadsavslut",
+        "agent": "Månadsavslutsagent",
         "name": "Månadsavslut",
         "short": "Bokför klart och låser månaden.",
         "desc": "Bokför klart, stämmer av, kontrollerar verifikatserien och låser perioden.",
@@ -10361,7 +10361,7 @@
         "say": "Gör månadsavslutet för förra månaden."
       },
       "quarterly-vat-review": {
-        "role": "Moms",
+        "agent": "Momsagent",
         "name": "Momsdeklaration",
         "short": "Går igenom momsen ruta för ruta.",
         "desc": "Går igenom momsen ruta för ruta och förbereder deklarationen.",
@@ -10374,7 +10374,7 @@
         "say": "Förbered momsdeklarationen."
       },
       "payroll-monthly": {
-        "role": "Lön",
+        "agent": "Löneagent",
         "name": "Lön och AGI",
         "short": "Lön, avgifter och AGI.",
         "desc": "Beräknar lön, arbetsgivaravgifter och semesterskuld och tar fram AGI.",
@@ -10387,7 +10387,7 @@
         "say": "Kör månadens lön."
       },
       "invoicing-rules": {
-        "role": "Fakturering",
+        "agent": "Faktureringsagent",
         "name": "Fakturera rätt",
         "short": "Kontrollerar fakturan innan den skickas.",
         "desc": "Kontrollerar obligatoriska uppgifter, moms och ROT/RUT innan fakturan skickas.",
@@ -10400,7 +10400,7 @@
         "say": "Hjälp mig skapa en faktura."
       },
       "kreditfaktura-process": {
-        "role": "Kreditering",
+        "agent": "Krediteringsagent",
         "name": "Kreditfaktura",
         "short": "Rättar en skickad faktura rätt väg.",
         "desc": "Väljer rätt väg när en skickad faktura ska rättas eller krediteras.",
@@ -10413,7 +10413,7 @@
         "say": "En faktura blev fel. Hjälp mig kreditera den."
       },
       "year-end-close": {
-        "role": "Bokslut",
+        "agent": "Bokslutsagent",
         "name": "Årsbokslut",
         "short": "Stänger året när allt är klart.",
         "desc": "Bokslutstransaktioner, kontroll av att allt är klart och stängning av året.",
@@ -10426,7 +10426,7 @@
         "say": "Gör årsbokslutet."
       },
       "tax-planning": {
-        "role": "Skatteplanering",
+        "agent": "Skatteagent",
         "name": "Skatteplanering",
         "short": "Räknar på alternativen inför årsskiftet.",
         "desc": "Periodiseringsfond, lön eller utdelning: räknar på alternativen inför årsskiftet.",
@@ -10489,8 +10489,20 @@
     "status_needs": "Behöver {conn}",
     "status_last": "Senast igång {date}",
     "status_ready": "Redo",
-    "run_agent": "Be {name} börja i {client}",
+    "run_agent": "Starta i {client}",
     "knowledge_add": "Lägg till kunskap",
+    "back_to_agents": "Tillbaka till agenter",
+    "knowledge_search": "Sök kunskap",
+    "apps_search": "Sök koppling",
+    "apps_used": "Den här agenten använder",
+    "apps_all": "Alla kopplingar",
+    "apps_note": "Fler kopplingar kommer. E-post och webbläsare kopplar du i din AI, Accounted ser dem inte.",
+    "knowledge_by": "av Accounted",
+    "knowledge_by_community": "från community, granskad av Accounted",
+    "not_found": "Agenten finns inte längre.",
+    "apps_add": "Lägg till koppling",
+    "connect_ai": "Koppla {client} först",
+    "knowledge_community_empty": "Här hamnar kunskap som andra delat, när Accounted har granskat den.",
     "knowledge_add_one": "Lägg till",
     "knowledge_remove": "Ta bort {name}",
     "knowledge_reset": "Återställ till standard",

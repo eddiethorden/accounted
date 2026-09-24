@@ -10306,7 +10306,7 @@
     "viewer_note": "You have read access in this company and cannot create or delete agents.",
     "skills": {
       "bookkeep": {
-        "role": "Bookkeeper",
+        "agent": "Bookkeeping agent",
         "name": "Book transactions",
         "short": "Proposes account and VAT. You approve.",
         "desc": "Works through unbooked bank transactions, proposes account and VAT and waits for your approval.",
@@ -10320,7 +10320,7 @@
         "say": "Book my unbooked transactions."
       },
       "kvittojakten": {
-        "role": "Receipt hunter",
+        "agent": "Receipt-hunting agent",
         "name": "Kvittojakten",
         "short": "Finds missing receipts.",
         "desc": "Finds the receipts and invoices missing from your books in your mail and links them to the right voucher.",
@@ -10335,7 +10335,7 @@
         "note": "Using Claude in Chrome? Kvittojakten then also fetches invoices from portals like AWS, Google Ads and OpenAI, and can set them up to arrive in Accounted automatically."
       },
       "reconcile-month": {
-        "role": "Reconciliation",
+        "agent": "Reconciliation agent",
         "name": "Reconcile the month",
         "short": "Compares bank and books.",
         "desc": "Compares bank and books account by account and shows what differs.",
@@ -10348,7 +10348,7 @@
         "say": "Reconcile last month for me."
       },
       "month-end-close": {
-        "role": "Month-end close",
+        "agent": "Month-end agent",
         "name": "Month-end close",
         "short": "Finishes the books and locks the month.",
         "desc": "Finishes booking, reconciles, checks the voucher series and locks the period.",
@@ -10361,7 +10361,7 @@
         "say": "Close last month."
       },
       "quarterly-vat-review": {
-        "role": "VAT",
+        "agent": "VAT agent",
         "name": "VAT return",
         "short": "Reviews VAT box by box.",
         "desc": "Reviews VAT box by box and prepares the return.",
@@ -10374,7 +10374,7 @@
         "say": "Prepare the VAT return."
       },
       "payroll-monthly": {
-        "role": "Payroll",
+        "agent": "Payroll agent",
         "name": "Payroll and AGI",
         "short": "Salary, fees and AGI.",
         "desc": "Computes salary, employer contributions and vacation liability, and produces the AGI.",
@@ -10387,7 +10387,7 @@
         "say": "Run this month's payroll."
       },
       "invoicing-rules": {
-        "role": "Invoicing",
+        "agent": "Invoicing agent",
         "name": "Invoice correctly",
         "short": "Checks the invoice before it is sent.",
         "desc": "Checks mandatory details, VAT and ROT/RUT before the invoice is sent.",
@@ -10400,7 +10400,7 @@
         "say": "Help me create an invoice."
       },
       "kreditfaktura-process": {
-        "role": "Credit notes",
+        "agent": "Credit note agent",
         "name": "Credit note",
         "short": "Corrects a sent invoice the right way.",
         "desc": "Picks the right path when a sent invoice must be corrected or credited.",
@@ -10413,7 +10413,7 @@
         "say": "An invoice was wrong. Help me credit it."
       },
       "year-end-close": {
-        "role": "Year-end",
+        "agent": "Year-end agent",
         "name": "Year-end close",
         "short": "Closes the year when everything is ready.",
         "desc": "Closing entries, a check that everything is ready, and closing the year.",
@@ -10426,7 +10426,7 @@
         "say": "Do the year-end close."
       },
       "tax-planning": {
-        "role": "Tax planning",
+        "agent": "Tax planning agent",
         "name": "Tax planning",
         "short": "Works out the options before year end.",
         "desc": "Tax allocation reserve, salary or dividend: works out the options before year end.",
@@ -10489,8 +10489,20 @@
     "status_needs": "Needs {conn}",
     "status_last": "Last worked {date}",
     "status_ready": "Ready",
-    "run_agent": "Ask {name} to start in {client}",
+    "run_agent": "Start in {client}",
     "knowledge_add": "Add knowledge",
+    "back_to_agents": "Back to agents",
+    "knowledge_search": "Search knowledge",
+    "apps_search": "Find a connection",
+    "apps_used": "This agent uses",
+    "apps_all": "All connections",
+    "apps_note": "More connections are coming. Email and browser are connected in your AI; Accounted does not see them.",
+    "knowledge_by": "by Accounted",
+    "knowledge_by_community": "from the community, reviewed by Accounted",
+    "not_found": "This agent no longer exists.",
+    "apps_add": "Add connection",
+    "connect_ai": "Connect {client} first",
+    "knowledge_community_empty": "Knowledge others share lands here once Accounted has reviewed it.",
     "knowledge_add_one": "Add",
     "knowledge_remove": "Remove {name}",
     "knowledge_reset": "Reset to default",

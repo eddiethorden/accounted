@@ -16,9 +16,8 @@ import type { RegistrySkillId } from './registry'
  *    Accounted connections the page can check; `mail` and `browser` live in the
  *    customer's own AI client (Gmail connector, Claude in Chrome) and are only named.
  *
- * Each agent is met as a colleague: a first name, a role and a face (Notionists,
- * CC0, self-hosted like components/agent/avatars.ts; generated with
- * https://api.dicebear.com/9.x/notionists/svg?seed=<file name without agent->&radius=50&backgroundColor=f5f3ed).
+ * Each agent is named for its job (Kvittoagent, Momsagent) and shown as an orb
+ * of three hues, as agents are in Oasis: a presence, not a person.
  *
  * Browser-safe: the Agenter page imports this file. Every id must resolve to an
  * agent-audience atom (pinned by __tests__/agents.test.ts).
@@ -26,8 +25,8 @@ import type { RegistrySkillId } from './registry'
 export type AgentConnection = 'bank' | 'skatteverket' | 'peppol' | 'mail' | 'browser'
 
 export interface AgentDefinition {
-  /** The colleague the user meets: a first name (same in every language) and a face. The role is a UI string. */
-  persona: { name: string; avatar: string }
+  /** Three hues for the agent's orb, its face in the list and on its page (the name is a UI string). */
+  orb: readonly [number, number, number]
   knowledge: readonly string[]
   references: readonly string[]
   connections: readonly AgentConnection[]
@@ -42,7 +41,7 @@ const YEAR_END = 'horizontal/swedish-year-end-closing'
 
 export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
   bookkeep: {
-    persona: { name: 'Vera', avatar: '/agent-avatars/agent-vera-bokforare.svg' },
+    orb: [205, 175, 255],
     knowledge: [COMPLIANCE, VAT],
     references: [`${COMPLIANCE}/bas-kontoplan`, `${VAT}/vat-compliance-reference`, 'horizontal/swedish-asset-accounting/accounts-and-registry'],
     connections: ['bank', 'mail'],
@@ -50,7 +49,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   kvittojakten: {
-    persona: { name: 'Sixten', avatar: '/agent-avatars/agent-sixten-kvitton.svg' },
+    orb: [35, 145, 315],
     knowledge: [COMPLIANCE, INVOICE],
     references: [`${COMPLIANCE}/bfl-bfnar`, `${INVOICE}/invoice-rules`],
     connections: ['mail', 'browser'],
@@ -58,7 +57,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'reconcile-month': {
-    persona: { name: 'Ines', avatar: '/agent-avatars/agent-ines-avstamning.svg' },
+    orb: [165, 200, 130],
     knowledge: [COMPLIANCE],
     references: [`${COMPLIANCE}/bas-kontoplan`, `${COMPLIANCE}/skatteverket`],
     connections: ['bank', 'skatteverket'],
@@ -66,7 +65,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'month-end-close': {
-    persona: { name: 'Oskar', avatar: '/agent-avatars/agent-oskar-manad.svg' },
+    orb: [250, 285, 205],
     knowledge: [COMPLIANCE, VAT],
     references: [`${COMPLIANCE}/bfl-bfnar`, `${VAT}/vat-compliance-reference`],
     connections: ['bank', 'skatteverket'],
@@ -74,7 +73,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'quarterly-vat-review': {
-    persona: { name: 'Mona', avatar: '/agent-avatars/agent-mona-moms.svg' },
+    orb: [20, 45, 335],
     knowledge: [VAT, COMPLIANCE],
     references: [`${VAT}/vat-compliance-reference`, `${COMPLIANCE}/skatteverket`],
     connections: ['skatteverket'],
@@ -82,7 +81,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'payroll-monthly': {
-    persona: { name: 'Leo', avatar: '/agent-avatars/agent-leo-lon.svg' },
+    orb: [140, 95, 190],
     knowledge: ['horizontal/swedish-payroll'],
     references: ['agi-filing', 'tax-tables', 'social-charges', 'vacation-pay', 'sick-pay', 'benefits', 'bas-7xxx'].map((r) => `horizontal/swedish-payroll/${r}`),
     connections: ['skatteverket', 'bank'],
@@ -90,7 +89,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'invoicing-rules': {
-    persona: { name: 'Frida', avatar: '/agent-avatars/agent-frida-faktura.svg' },
+    orb: [195, 320, 255],
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`, 'horizontal/swedish-e-invoicing/swedish-cius-and-specifics', 'horizontal/swedish-e-invoicing/consumer-and-b2c'],
     connections: ['peppol', 'mail'],
@@ -98,7 +97,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'kreditfaktura-process': {
-    persona: { name: 'Nils', avatar: '/agent-avatars/agent-nils-kredit.svg' },
+    orb: [355, 30, 275],
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`],
     connections: ['peppol'],
@@ -106,7 +105,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: false,
   },
   'year-end-close': {
-    persona: { name: 'Astrid', avatar: '/agent-avatars/agent-astrid-bokslut.svg' },
+    orb: [45, 20, 215],
     knowledge: [YEAR_END, 'horizontal/swedish-asset-accounting', 'horizontal/swedish-financial-reporting'],
     references: [
       `${YEAR_END}/closing-process`, `${YEAR_END}/journal-entries`, `${YEAR_END}/k2-vs-k3`, `${YEAR_END}/tax-calculations`,
@@ -117,7 +116,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     agreements: true,
   },
   'tax-planning': {
-    persona: { name: 'Hugo', avatar: '/agent-avatars/agent-hugo-skatt.svg' },
+    orb: [275, 320, 230],
     knowledge: ['horizontal/swedish-tax-planning', YEAR_END],
     references: ['312-regler', 'periodiseringsfond', 'overavskrivningar', 'strategy-and-interactions'].map((r) => `horizontal/swedish-tax-planning/${r}`)
       .concat('horizontal/swedish-payroll/social-charges'),
@@ -140,6 +139,11 @@ export const CONNECTION_SETTINGS: Record<CheckableConnection, string> = {
   bank: '/settings/banking',
   skatteverket: '/settings/tax',
   peppol: '/settings/invoicing',
+}
+
+/** Whether a string names a curated agent. */
+export function isAgentId(value: string): value is RegistrySkillId {
+  return value in AGENTS
 }
 
 /** `agent:<id>` for get_task. */

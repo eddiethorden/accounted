@@ -250,9 +250,8 @@ async function loadCompanyKnowledge(supabase: SupabaseClient, companyId: string,
   }
 }
 
-export function isAgentId(value: string): value is RegistrySkillId {
-  return value in AGENTS
-}
+export { isAgentId } from './agents'
+import { isAgentId } from './agents'
 
 /** Knowledge bodies inlined per run; what does not fit is listed to load on demand. */
 const INLINE_BUDGET = 60_000
