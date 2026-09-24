@@ -35,7 +35,7 @@ export const API_KEY_SCOPES = {
   'compliance:read':    { label: 'Compliance: läs',     description: 'Pre-flight-kontroller: momsstängning, bokslutsberedskap, voucher-gap, IB/UB-kontinuitet; Skatteverket-status (moms + AGI)' },
   'skatteverket:write': { label: 'Skatteverket: skriv', description: 'Lämna momsdeklaration och arbetsgivardeklaration (AGI) till Skatteverket (stagas; signeras med BankID)' },
   'agent:read':         { label: 'Agent: läs',          description: 'Specialiserad bokföringsassistent: profil, laddade specialister/atomer, minnen (briefing + skill-katalog)' },
-  'agent:write':        { label: 'Agent: skriv',        description: 'Spara och ta bort agentens minnen om företaget (remember_fact, forget_fact)' },
+  'agent:write':        { label: 'Agent: skriv',        description: 'Spara och ta bort agentens minnen om företaget (remember_fact, forget_fact) och spara egna skills (create_skill)' },
   'pending_operations:read':    { label: 'Stagade operationer: läs',     description: 'Lista pending_operations (staged writes awaiting approval)' },
   'pending_operations:approve': { label: 'Stagade operationer: godkänn', description: 'Godkänn eller avvisa stagade operationer via API/MCP: agenten ersätter web-UI:s granskning' },
   // Reconciliation (account-keyed: bank accounts + skattekonto). Reads cover
@@ -400,14 +400,16 @@ export const TOOL_SCOPE_MAP: Record<string, ApiKeyScope> = {
   gnubok_reverse_journal_entry:           'bookkeeping:write',
   // Agent surface (Phase 6 MCP parity): briefing tool exposes company-specific
   // profile + memory so it's scoped; gnubok_list_skills / gnubok_load_skill
-  // stay unscoped (discovery + static Markdown bodies + globally-readable atom
-  // registry: no per-company data).
+  // keep public discovery unscoped. The dispatcher gates own/ bodies, and
+  // list_skills adds private company skills only with agent:read.
   gnubok_get_agent_briefing:              'agent:read',
+  gnubok_get_task:                        'agent:read',
   // Agent memory write (previously UNMAPPED → callable by any key). Mapping to
   // agent:write; existing non-revoked keys are grandfathered in the
   // 20260619140000 migration so this does not regress them.
   gnubok_remember_fact:                   'agent:write',
   gnubok_forget_fact:                     'agent:write',
+  gnubok_create_skill:                    'agent:write',
   // Pending operations approval (mirrors the /pending web UI)
   gnubok_list_pending_operations:         'pending_operations:read',
   gnubok_approve_pending_operation:       'pending_operations:approve',
@@ -457,7 +459,7 @@ export const TOOL_SCOPE_MAP: Record<string, ApiKeyScope> = {
   // Deliberately UNSCOPED (available to any authenticated key):
   // gnubok_search_tools, gnubok_list_skills, gnubok_load_skill,
   // gnubok_feedback. Discovery + static skill bodies + feedback channel
-  // carry no per-company data; keeping them open is what lets an agent
+  // remain public; private bodies are gated at dispatch. This lets an agent
   // orient itself before its key's scopes are known.
 }
 

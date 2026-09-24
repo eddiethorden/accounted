@@ -198,6 +198,21 @@ function extractRemediation(error: unknown): StructuredErrorRemediation | null {
   }
 }
 
+/**
+ * PostgREST answers PGRST116 when `.single()` gets anything but one row. Only
+ * the zero-row case is "not found"; more than one row is a query bug and keeps
+ * its generic code. `details` names the count when present ("The result
+ * contains 0 rows"); without it, a lookup by id is the only shape that reaches
+ * here, and an id matches at most one row.
+ */
+function isNoRowFromSingle(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const obj = error as Record<string, unknown>
+  if (obj.code !== 'PGRST116') return false
+  const details = typeof obj.details === 'string' ? obj.details : ''
+  return details === '' || /\b0 rows\b/.test(details)
+}
+
 function extractEnglishMessage(error: unknown): string {
   if (typeof error === 'string') return error
   if (error instanceof Error) return error.message
@@ -222,6 +237,21 @@ export function getStructuredError(
   error: unknown,
   options: StructuredErrorOptions = {}
 ): StructuredError {
+  // A `.single()` lookup that matched no row. 46 MCP tools read one record
+  // that way, and a wrong or other-company id surfaced as UNKNOWN_ERROR with
+  // "Något gick fel. Försök igen.", which tells an agent to retry a call
+  // that can never succeed (get_inbox_item: 56 calls, 4 companies, 30 days).
+  if (isNoRowFromSingle(error)) {
+    const entry = getErrorEntry('NOT_FOUND')
+    return {
+      code: 'NOT_FOUND',
+      message_sv: entry?.message_sv ?? 'Resursen kunde inte hittas.',
+      message_en:
+        'Not found: no record with that id exists in this company. Check the id, and company_id if the record belongs to another company.',
+      retryable: false,
+    }
+  }
+
   const message_en = extractEnglishMessage(error)
   const message_sv = getErrorMessage(error)
 

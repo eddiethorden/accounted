@@ -21,6 +21,7 @@ import { parseEntityType, resolveCompanyEntityType } from '@/lib/company/entity-
 import { eventBus } from '@/lib/events'
 import { bulkBookMatchedInboxItems, categorizeMatchedTransaction } from '@/lib/transactions/categorize-core'
 import { explainVatTreatment, getVatRules, getPermittedVatRates } from '@/lib/invoices/vat-rules'
+import { syncDraftVatHeadersForCustomer } from '@/lib/invoices/sync-draft-vat-headers'
 import {
   COUNTRY_CONSISTENCY_MESSAGES,
   checkCountryConsistency,
@@ -823,6 +824,9 @@ async function commitUpdateCustomer(
     return { error: error.message, status: 500 }
   }
   if (!data) return { error: 'Customer not found', status: 404 }
+
+  // Open drafts to this customer re-derive their VAT header from it.
+  await syncDraftVatHeadersForCustomer(supabase, companyId, customerId)
 
   return {
     data: {

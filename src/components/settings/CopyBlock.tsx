@@ -35,9 +35,9 @@ export function CopyBlock({ text, copyAriaLabel }: { text: string; copyAriaLabel
       </pre>
       <Button
         variant="outline"
-        size="sm"
+        size="icon-sm"
         className={cn(
-          'absolute right-1.5 top-1.5 h-7 w-7 p-0 transition-opacity focus-visible:opacity-100 pointer-coarse:opacity-100',
+          'absolute right-1.5 top-1.5 transition-opacity focus-visible:opacity-100 pointer-coarse:opacity-100',
           state === 'failed' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
         )}
         onClick={handleCopy}

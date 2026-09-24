@@ -8,13 +8,12 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogVeil, useDashShellInert } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/use-toast'
 import { ToastAction } from '@/components/ui/toast'
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog'
 import { DestructiveConfirmDialog, useDestructiveConfirm } from '@/components/ui/destructive-confirm-dialog'
-import { DataList, DataListEmpty } from '@/components/ui/data-list'
+import { DataListEmpty } from '@/components/ui/data-list'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
@@ -4269,7 +4268,7 @@ export default function TransactionsPage() {
         // Konton row (lib/notices predicate), so a line on every visit to the
         // bank list was noise (founder feedback 2026-09-09). The line still
         // renders only while the connection is actually broken.
-        <AttnLine action={{ label: t('skv_reconnect_cta'), href: '/settings/tax' }}>
+        <AttnLine action={{ label: t('skv_reconnect_cta'), href: '/settings/skatteverket' }}>
           {t('skv_reconnect_body')}
         </AttnLine>
       ) : suggestionItems.length > 0 && mode !== 'review' ? (
@@ -4318,8 +4317,8 @@ export default function TransactionsPage() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-foreground"
                 aria-label={t('columns_button')}
                 title={t('columns_button')}
               >
@@ -4371,18 +4370,19 @@ export default function TransactionsPage() {
 
       {/* Content based on mode */}
       {isLoading ? (
-        <DataList className="stagger-enter">
+        // Same shape as loading.tsx and the list it resolves into: borderless
+        // one-line rows, not a boxed card with two-line rows.
+        <div aria-busy>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3">
-              <Skeleton className="h-5 w-5" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-3 w-24" />
+            <div key={i} className="flex items-center justify-between gap-4 border-b border-border py-3">
+              <Skeleton className="h-4 w-48" />
+              <div className="flex items-center gap-6">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
               </div>
-              <Skeleton className="h-5 w-20" />
             </div>
           ))}
-        </DataList>
+        </div>
       ) : mode === 'review' ? (
         <SuggestionReviewList
           items={suggestionItems}
@@ -4424,7 +4424,7 @@ export default function TransactionsPage() {
                   // so it stays in view however far down the selection
                   // reaches and the list does not shift under it. Offset by
                   // --bottom-nav-h so it clears the mobile bottom nav (#2738).
-                  'fixed bottom-[calc(var(--bottom-nav-h)+1rem)] left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-background px-4 py-2 shadow-lg md:left-[calc(50%+var(--nav-w)/2)]',
+                  'fixed bottom-[calc(var(--bottom-nav-h)+1rem)] left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-background px-4 py-2 shadow-[var(--shadow-md)] md:left-[calc(50%+var(--nav-w)/2)]',
                 )}
               >
                 {batchProgress ? (
@@ -4783,7 +4783,7 @@ export default function TransactionsPage() {
           (opened without an anchor). */}
       {templatePickerOpen && templatePickerAnchor && (
         <CategoryPopover anchor={templatePickerAnchor} onClose={() => setTemplatePickerOpen(false)}>
-          <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2 text-[12.5px]">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 text-[12.5px]">
             {templatePickerTransaction && (
               <>
                 <span className="truncate" data-ph-mask>{templatePickerTransaction.description}</span>
@@ -4796,7 +4796,7 @@ export default function TransactionsPage() {
           <div className="flex min-h-0 flex-col overflow-hidden">
             <TemplatePicker {...templatePickerProps} dense />
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/70 bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border bg-background px-3 py-2">
             {templatePickerLinks}
           </div>
         </CategoryPopover>
@@ -5089,7 +5089,7 @@ export default function TransactionsPage() {
                         {c.customer_name || 'Kund'} · {c.invoice_number ?? '-'}
                       </span>
                       {c.match_reason === 'ocr_exact' && (
-                        <Badge variant="success">{t('badge_exact_ocr')}</Badge>
+                        <span className="text-xs text-muted-foreground">{t('badge_exact_ocr')}</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground tabular-nums">

@@ -138,7 +138,7 @@ export function McpConnectionsPanel({
           <ClientMark kind={c} size="lg" />
           <span className="min-w-0">
             <span className="block truncate text-[13px] font-medium">{targetName(c)}</span>
-            <span className="block truncate text-[11.5px] text-muted-foreground">{t(`tile_${c.replace('-', '_')}_sub`)}</span>
+            <span className="block truncate text-[12.5px] text-muted-foreground">{t(`tile_${c.replace('-', '_')}_sub`)}</span>
           </span>
         </button>
       ))}
@@ -237,7 +237,7 @@ export function McpConnectionsPanel({
                     <span className="flex min-w-0 flex-1 items-center gap-2 text-[13px]">
                       <span className="truncate">{rowName(key)}</span>
                       {key.mode === 'test' && (
-                        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">
+                        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[11px] font-normal">
                           {t('badge_test')}
                         </Badge>
                       )}
@@ -258,7 +258,7 @@ export function McpConnectionsPanel({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 shrink-0 px-3 text-muted-foreground hover:text-destructive"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
                       onClick={() => disconnect(key)}
                       aria-label={t('disconnect_aria', { name: rowName(key) })}
                     >

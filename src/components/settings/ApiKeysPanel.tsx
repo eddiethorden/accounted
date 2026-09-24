@@ -18,7 +18,7 @@ import { DestructiveConfirmDialog, useDestructiveConfirm } from '@/components/ui
 import { useToast } from '@/components/ui/use-toast'
 import { SettingsRow, SettingsRowEnd } from '@/components/settings/SettingsRows'
 import { CopyBlock } from '@/components/settings/CopyBlock'
-import { Loader2, Plus, AlertTriangle } from 'lucide-react'
+import { Plus, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   ALL_SCOPES,
@@ -73,7 +73,7 @@ function ScopeCard({
           className="shrink-0"
         />
         <span className="flex-1 text-xs font-medium text-foreground">{verb}</span>
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {tools > 0 ? t('tools_count', { count: tools }) : t('rest_badge')}
         </span>
       </div>
@@ -314,8 +314,7 @@ export function ApiKeysPanel({
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
               {t('cancel')}
             </Button>
-            <Button onClick={handleCreate} disabled={isCreating || newKeyScopes.size === 0}>
-              {isCreating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            <Button onClick={handleCreate} disabled={newKeyScopes.size === 0} loading={isCreating}>
               {t('create')}
             </Button>
           </DialogFooter>

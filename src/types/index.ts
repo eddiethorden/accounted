@@ -2652,6 +2652,9 @@ export type PendingOperationActorType = 'user' | 'api_key' | 'mcp_oauth' | 'cron
 export type PendingOperationRiskLevel = 'low' | 'medium' | 'high'
 
 export interface PendingOperationAgentMetadata {
+  skills_loaded?: string[]
+  skill_retrievals?: Array<{ slug: string; retrieved_at: string; body_hash?: string; version?: number }>
+  skills_provenance?: 'no_session' | 'unavailable' | 'recent_session' | 'recent_session_truncated'
   conversation_id?: string
   intent_id?: string
   model?: string
@@ -3749,6 +3752,15 @@ export interface Asset {
    *  applying `depreciation_method` to the asset as a whole. Null for K2
    *  companies (the API rejects writes for accounting_framework='k2'). */
   k3_components: K3Component[] | null
+  /** Ackumulerad avskrivning booked before the asset entered Accounted (a
+   *  previous system), stated per `opening_depreciation_date`. Never posted
+   *  by Accounted: the amount is already in the imported 12x9 balance. The
+   *  engine counts it as depreciation on the books through that date and
+   *  plans the rest from there. 0 with a null date for assets bought while
+   *  on Accounted. NUMERIC arrives as a string from PostgREST. Optional on
+   *  the type so rows read before the column existed stay valid. */
+  opening_accumulated_depreciation?: number | string | null
+  opening_depreciation_date?: string | null
   notes: string | null
   created_at: string
   updated_at: string
