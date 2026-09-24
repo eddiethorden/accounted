@@ -319,6 +319,8 @@ export const TOOL_SCOPE_MAP: Record<string, ApiKeyScope> = {
   gnubok_get_record_links:                'documents:read',
   gnubok_get_fact_history:                'documents:read',
   gnubok_get_source:                      'documents:read',
+  gnubok_list_records:                    'documents:read',
+  gnubok_read_document:                   'documents:read',
   gnubok_ask_document:                    'documents:read',
   gnubok_resolve_missing:                 'agent:write',
   gnubok_get_neighbourhood:               'documents:read',
