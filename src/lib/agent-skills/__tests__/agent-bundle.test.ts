@@ -63,7 +63,8 @@ describe('loadAgentsOverview', () => {
     const overview = await loadAgentsOverview(supabase as never, 'company-a')
     const month = overview.agents.find((a) => a.id === 'month-end-close')!
     expect(month.connections).toEqual([{ kind: 'bank', status: 'unknown' }, { kind: 'skatteverket', status: 'connected' }])
-    expect(overview.agents.find((a) => a.id === 'kreditfaktura-process')!.connections).toEqual([{ kind: 'peppol', status: 'connected' }])
+    // no agent waits on Peppol (invoices go out by e-mail)
+    expect(overview.agents.find((a) => a.id === 'kreditfaktura-process')!.connections).toEqual([])
   })
 })
 

@@ -15,7 +15,8 @@ import { PageHeader } from '@/components/ui/page-header'
 import { HelpPopover } from '@/components/ui/help-popover'
 import { Button } from '@/components/ui/button'
 import { SkillCreator, type CreatorMode } from './SkillCreator'
-import { SkillMarks } from './SkillMarks'
+import { SourceMarks } from './ConnectionMark'
+import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
 import { agentSegment, agentStatus, fetchConnections, readAgents, readCatalog, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
@@ -132,7 +133,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       desc={t(`skills.${id}.short`)}
       sphereKey={id}
       status={statusFor(id)}
-      marks={<SkillMarks id={id} />}
+      curated={id}
+      marks={<SourceMarks connections={AGENTS[id].connections} />}
     />
   )
   const top = REGISTRY_SKILLS.slice(0, FREE_SKILLS).map((s) => s.id)
