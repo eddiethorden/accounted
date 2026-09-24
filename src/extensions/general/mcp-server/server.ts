@@ -5119,8 +5119,17 @@ export const tools: McpTool[] = [
       required: ['company_id', 'kind', 'goal', 'scope', 'skills', 'instructions'],
     },
     annotations: ANNOTATIONS_READ_ONLY,
-    async execute(args, companyId, _userId, supabase) {
-      return getAccountingTask(args, companyId, supabase)
+    async execute(args, companyId, userId, supabase, actor) {
+      const task = await getAccountingTask(args, companyId, supabase)
+      // An agent run delivers its workflow and knowledge bodies here instead of
+      // load_skill: record them the same way so provenance and run counts hold.
+      if (actor && 'workflow' in task) {
+        await emitSkillLoaded({ slug: task.workflow.slug, tier: 'workflow', bodyHash: skillBodyHash(task.workflow.body), version: task.workflow.version ?? undefined, actor, userId, companyId })
+        for (const k of task.knowledge) {
+          await emitSkillLoaded({ slug: k.id, tier: 'horizontal', bodyHash: skillBodyHash(k.body), version: k.version ?? undefined, actor, userId, companyId })
+        }
+      }
+      return task
     },
   },
 

@@ -11,13 +11,25 @@ import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-di
 import { AI_CLIENTS, aiChatLink, aiPrefilledChatLink, openAiConnector, type AiClient } from '@/lib/onboarding/ai-clients'
 import { registrySkillSlug, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
+import type { AgentOverview } from '@/lib/agent-skills/agent-bundle'
+import type { CompanySkillRow } from '@/lib/agent-skills/company-skills'
 import { formatDateLong } from '@/lib/utils'
 import { SkillMarks } from './SkillMarks'
+import { AgentParts } from './AgentParts'
 import styles from './skills.module.css'
+
+type ShareStatus = CompanySkillRow['share_status']
 
 export type SheetTarget =
   | { kind: 'registry'; id: RegistrySkillId; locked: boolean }
-  | { kind: 'own'; slug: string; name: string; installationId: string; draft?: boolean }
+  | { kind: 'own'; slug: string; name: string; installationId: string; draft?: boolean; shareStatus?: ShareStatus }
+
+/** What the sheet knows about the agent beyond its target: from GET /api/agents. */
+export interface SheetAgentContext {
+  agent?: AgentOverview
+  company: AgentOverview['company']
+  facts: number
+}
 
 /**
  * Opens a chat for the prompt. The chat opens synchronously so the popup is
@@ -48,8 +60,9 @@ async function readBody(url: string): Promise<string> {
  * opens a chat with a curated skill's prompt already typed in; an own
  * skill's prompt is copied for the user to paste (see copyPromptAndOpen).
  */
-export function SkillSheet({ target, companyId, client, canWrite, todo, usage, onClose, onConnect, onEdit, onDelete, onAdd }: {
+export function SkillSheet({ target, context, companyId, client, canWrite, todo, usage, onClose, onConnect, onEdit, onDelete, onAdd, onShare }: {
   target: SheetTarget | null
+  context: SheetAgentContext
   companyId: string
   client: AiClient
   canWrite: boolean
@@ -63,18 +76,22 @@ export function SkillSheet({ target, companyId, client, canWrite, todo, usage, o
   onDelete: (target: Extract<SheetTarget, { kind: 'own' }>) => Promise<boolean>
   /** Adds an AI-saved draft so agents can load it. */
   onAdd: (target: Extract<SheetTarget, { kind: 'own' }>) => Promise<boolean>
+  /** Sends an own agent for review, or withdraws it. */
+  onShare: (target: Extract<SheetTarget, { kind: 'own' }>, share: { author_handle: string } | 'withdraw') => Promise<boolean>
 }) {
   return (
     <SlideOver open={target !== null} onOpenChange={(open) => { if (!open) onClose() }}>
       <SlideOverContent aria-describedby={undefined} className={styles.sheet}>
-        {target && <SheetBody key={target.kind === 'own' ? target.slug : target.id} target={target} companyId={companyId} client={client} canWrite={canWrite} todo={todo} usage={usage} onConnect={onConnect} onEdit={onEdit} onDelete={onDelete} onAdd={onAdd} />}
+        {target && <SheetBody key={target.kind === 'own' ? target.slug : target.id} target={target} context={context} onShare={onShare} companyId={companyId} client={client} canWrite={canWrite} todo={todo} usage={usage} onConnect={onConnect} onEdit={onEdit} onDelete={onDelete} onAdd={onAdd} />}
       </SlideOverContent>
     </SlideOver>
   )
 }
 
-function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect, onEdit, onDelete, onAdd }: {
+function SheetBody({ target, context, onShare, companyId, client, canWrite, todo, usage, onConnect, onEdit, onDelete, onAdd }: {
   target: SheetTarget
+  context: SheetAgentContext
+  onShare: (target: Extract<SheetTarget, { kind: 'own' }>, share: { author_handle: string } | 'withdraw') => Promise<boolean>
   companyId: string
   client: AiClient
   canWrite: boolean
@@ -102,7 +119,8 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
   const slug = own ? own.slug : registrySkillSlug(id!, client)
   const title = own ? own.name : t(`skills.${id}.name`)
   const say = own ? t('own_say', { name: own.name }) : t(`skills.${id}.say`)
-  const prompt = t('prompt', { say, skill: slug })
+  // Curated agents start through get_task (workflow, knowledge, company, connections in one call); own ones load their skill.
+  const prompt = own ? t('prompt_own', { say, skill: slug }) : t('prompt', { say, agent: id!, client })
   const locked = target.kind === 'registry' && target.locked
   // Fetched as the sheet opens, so the copy runs inside the click and the browser allows it.
   const body = useSWR(!locked ? ['/api/skills', companyId, slug] : null, ([url, , s]) => readBody(`${url}?slug=${encodeURIComponent(s)}`))
@@ -131,7 +149,8 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
         {usage && <p className={styles.usesLine}>{t('uses_line', { count: usage.count, date: formatDateLong(usage.last_at, locale) })}</p>}
       </div>
       <div className={styles.sheetMain}>
-        {steps.length > 0 && <ol className={styles.steps}>{steps.map((step, i) => <li key={i} data-ph-mask={own ? '' : undefined}>{step}</li>)}</ol>}
+        <AgentParts steps={steps} agent={context.agent} company={context.company} facts={context.facts} own={!!own} />
+        {own && !own.draft && <ShareBox target={own} canWrite={canWrite} onShare={onShare} />}
         <div className={styles.sheetFoot}>
           {own?.draft ? (
             <div className="flex flex-col gap-2">
@@ -167,7 +186,8 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
               <div className={styles.nightBtns}>
                 <Button variant="outline" size="lg" className="w-full" onClick={copyFull}>{t(fullCopy === 'copied' ? 'copied_full' : 'copy_full')}</Button>
                 {own && onEdit && <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => onEdit(own)}>{t('edit_answers')}</Button>}
-                {own && <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</Button>}
+                {/* a shared agent is deleted only after its sharing is withdrawn (the API refuses otherwise) */}
+                {own && (own.shareStatus ?? 'private') === 'private' && <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</Button>}
               </div>
               {copyState !== 'idle' && <p role="status" className={styles.nightNote}>{copyState === 'copied' ? t(own ? 'copied_open' : 'prefilled_open', { client: clientName }) : t('copy_failed')}</p>}
               {copyState === 'failed' && <pre className={styles.fullText} data-ph-mask>{prompt}</pre>}
@@ -189,5 +209,59 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
         />
       )}
     </div>
+  )
+}
+
+const HANDLE = /^[a-z0-9][a-z0-9-]{0,38}$/
+
+/** Share an own agent with the community: it waits for Accounted's review before anyone else sees it. */
+function ShareBox({ target, canWrite, onShare }: {
+  target: Extract<SheetTarget, { kind: 'own' }>
+  canWrite: boolean
+  onShare: (target: Extract<SheetTarget, { kind: 'own' }>, share: { author_handle: string } | 'withdraw') => Promise<boolean>
+}) {
+  const t = useTranslations('skills_registry')
+  const [open, setOpen] = useState(false)
+  const [handle, setHandle] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [state, setState] = useState<'idle' | 'sending' | 'failed'>('idle')
+  const status = target.shareStatus ?? 'private'
+
+  async function send(share: { author_handle: string } | 'withdraw') {
+    setState('sending')
+    setState((await onShare(target, share)) ? 'idle' : 'failed')
+  }
+
+  if (status === 'submitted' || status === 'published') {
+    return (
+      <div className={styles.share}>
+        <span className={styles.shareStatus}><span className={styles.chipDot} aria-hidden />{t(`share_status_${status}`)}</span>
+        <div><Button variant="outline" size="sm" disabled={!canWrite} loading={state === 'sending'} onClick={() => void send('withdraw')}>{t('share_withdraw')}</Button></div>
+        {state === 'failed' && <p role="alert">{t('share_failed')}</p>}
+      </div>
+    )
+  }
+  if (status === 'withdrawn') return <p className={styles.muted}>{t('share_status_withdrawn')}</p>
+  if (!open) {
+    return <div><Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => setOpen(true)}>{t('share_cta')}</Button></div>
+  }
+  return (
+    <form className={styles.share} onSubmit={(e) => { e.preventDefault(); if (HANDLE.test(handle) && confirmed) void send({ author_handle: handle }) }}>
+      <p>{t('share_body')}</p>
+      <label htmlFor="agent-share-handle">
+        {t('share_handle')}
+        <input id="agent-share-handle" type="text" value={handle} autoComplete="off" spellCheck={false} maxLength={39} onChange={(e) => setHandle(e.target.value.toLowerCase())} aria-describedby="agent-share-handle-hint" />
+        <small id="agent-share-handle-hint" className={styles.partNote}>{t('share_handle_hint')}</small>
+      </label>
+      <label className={styles.check} htmlFor="agent-share-confirm">
+        <input id="agent-share-confirm" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+        {t('share_confirm')}
+      </label>
+      <div className={styles.nightBtns}>
+        <Button type="submit" size="sm" disabled={!canWrite || !confirmed || !HANDLE.test(handle)} loading={state === 'sending'}>{t('share_submit')}</Button>
+        <Button variant="outline" size="sm" onClick={() => setOpen(false)}>{t('cancel')}</Button>
+      </div>
+      {state === 'failed' && <p role="alert">{t('share_failed')}</p>}
+    </form>
   )
 }
