@@ -190,7 +190,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         />
       ) : (<>
       <section className={styles.hero}>
-        <div className={styles.intro}><h2>{t('hero_title')}</h2><p>{t('hero_lede')}</p></div>
+        <div className={styles.intro}><h2>{t('hero_title')}</h2></div>
         <ul className={styles.agrid}>
           {top.map((id) => <li key={id}>{card(id)}</li>)}
           {industryPack ? (
