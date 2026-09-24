@@ -40,22 +40,11 @@ export function itemHue(kind: ItemKind, key: string, curated?: RegistrySkillId |
   return (KIND_HUES[kind] + ((seedOf(key) % 5) - 2) * 5 + 360) % 360
 }
 
-/**
- * Where the page is: everything general, one industry or company-form pack
- * (its registry id), the company's own items, or everything the community
- * shared. `?plats=` carries it so the back link from an item returns there.
- */
-export type Place = 'general' | 'own' | 'community' | `vertical/${string}` | `modifier/${string}`
-
-export function placeFromParam(value: string | null): Place {
-  if (!value || value === 'allmant') return 'general'
-  if (value === 'egna') return 'own'
-  if (value === 'community') return 'community'
-  const id = value.replace('.', '/')
-  return id.startsWith('vertical/') || id.startsWith('modifier/') ? id as Place : 'general'
-}
-export function placeHref(base: string, place: Place): string {
-  if (place === 'general') return base
-  const param = place === 'own' ? 'egna' : place === 'community' ? 'community' : place.replace('/', '.')
-  return `${base}?plats=${param}`
+/** The catalogue with a kind and (optionally) a category chosen: where an item's back link returns to. */
+export function catalogHref(base: string, kind: ItemKind, category?: string | null): string {
+  const sp = new URLSearchParams()
+  if (kind === 'rules') sp.set('typ', 'kunskap')
+  if (kind === 'analysis') sp.set('typ', 'analyser')
+  if (category) sp.set('kategori', category.replace('/', '.'))
+  return sp.size ? `${base}?${sp}` : base
 }
