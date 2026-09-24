@@ -673,6 +673,8 @@ export const invoiceInboxExtension: Extension = {
           matched_transaction_id: string | null
           created_journal_entry_id: string | null
           created_supplier_invoice_id: string | null
+          extracted_data: Record<string, unknown> | null
+          extraction_skipped: boolean | null
         }
         const rows = (data ?? []) as ItemRow[]
         const unresolved = rows.filter(
