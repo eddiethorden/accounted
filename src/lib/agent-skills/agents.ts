@@ -17,8 +17,8 @@ import type { RegistrySkillId } from './registry'
  *    customer's own AI client (Gmail connector, Claude in Chrome) and are only named.
  *
  * Each agent is named for its job (Kvittoagent, Momsagent). Its picture is the
- * onboarding's particle sphere; its page draws the agent's motif in halftone
- * (components/skills/AgentSphere.tsx, AgentArt.tsx).
+ * onboarding's particle sphere (components/skills/AgentSphere.tsx); its page
+ * stands it on a strata render (components/skills/agent-stages.ts).
  *
  * Browser-safe: the Agenter page imports this file. Every id must resolve to an
  * agent-audience atom (pinned by __tests__/agents.test.ts).
