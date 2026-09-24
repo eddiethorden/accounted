@@ -5,11 +5,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, Plus, Search, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
-import { AGENTS, CONNECTION_SETTINGS, isAgentId, isCheckable, type AgentConnection } from '@/lib/agent-skills/agents'
+import { AGENTS, isAgentId } from '@/lib/agent-skills/agents'
 import type { AgentConnectionState, AgentsOverview, KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeAction, KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { registrySkillSlug, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
@@ -19,17 +19,17 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { AgentBot } from './AgentBot'
+import { AgentBot, agentHue } from './AgentBot'
 import { seedOf } from './AgentSphere'
-import { AGENT_GROUNDS, OWN_GROUND } from './agent-stages'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
+import { SlidingTabs } from './SlidingTabs'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
 import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
-type View = 'main' | 'knowledge' | 'apps'
+type View = 'main' | 'knowledge' | 'company' | 'advanced'
 type Own = SkillSummary & { installations: [{ installation_id: string }] }
 
 async function readBody(url: string): Promise<string> {
@@ -94,7 +94,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
   const name = curated ? t(`skills.${curated}.agent`) : own?.name ?? ''
   const task = curated ? t(`skills.${curated}.name`) : null
-  const ground = curated ? AGENT_GROUNDS[curated] : OWN_GROUND
+  const hue = agentHue(agentId, curated)
   const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
   const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data?.own_knowledge[agentId] ?? []
@@ -170,17 +170,18 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
       <Link href={backHref} className={styles.back}><ArrowLeft className="h-4 w-4" aria-hidden />{t('back_to_agents')}</Link>
       <div className={styles.agrid2}>
         <section className={styles.stage} aria-label={name}>
-          <StrataField seed={seedOf(agentId)} ground={ground} />
+          <StrataField seed={seedOf(agentId)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
             <AgentBot agentKey={agentId} curated={curated} presence={status?.presence} size={88} />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" variant="secondary" className="gap-2" onClick={run}>
+            <Button size="lg" className="gap-2" onClick={run}>
               {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
               <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Button>
+            {runState !== 'idle' && <span className={styles.stageStatus} role="status">{runState === 'copied' ? t(curated ? 'prefilled_open' : 'copied_open', { client: clientName }) : t('copy_failed')}</span>}
             {/* only a status worth reading: work waiting, a missing connection, no AI yet */}
             {status && status.presence !== 'ready' && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
           </div>
@@ -190,56 +191,63 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           <div key={view} className={styles.viewIn}>
           {view === 'main' && (
             <>
-              <div className={styles.apHead}>
-                <h1 data-ph-mask={own ? '' : undefined}>{name}</h1>
-                <p>{desc}</p>
-                {runState !== 'idle' && <p role="status">{runState === 'copied' ? t(curated ? 'prefilled_open' : 'copied_open', { client: clientName }) : t('copy_failed')}</p>}
-              </div>
+              <div className={styles.apAvatar}><AgentBot agentKey={agentId} curated={curated} size={64} /></div>
+
+              <Field label={t('field_name')}>
+                <div className={styles.fieldBox} data-ph-mask={own ? '' : undefined}>{name}</div>
+                <span className={styles.fieldHint}>{desc}</span>
+              </Field>
+
+              <Field label={t('section_instructions')} note={own ? t('instructions_own') : [t('instructions_source'), overview?.workflow.version ? t('instructions_version', { version: overview.workflow.version }) : null].filter(Boolean).join(' · ')}>
+                <div className={styles.instrBox}><ol data-ph-mask={own ? '' : undefined}>{steps.map((step, i) => <li key={i}>{step}</li>)}</ol></div>
+              </Field>
 
               {own?.draft && (
-                <div className="flex flex-wrap gap-2">
-                  <Button disabled={!canWrite} onClick={() => void patchOwn({ action: 'add' })}><Plus className="h-4 w-4" aria-hidden />{t('add_draft')}</Button>
-                </div>
+                <div><Button disabled={!canWrite} onClick={() => void patchOwn({ action: 'add' })}><Plus className="h-4 w-4" aria-hidden />{t('add_draft')}</Button></div>
               )}
 
-              <div className={styles.instr}>
-                <div className={styles.partHead}>
-                  <span className={styles.partLabel}>{t('section_instructions')}</span>
-                  <span className={styles.partNote}>{own ? t('instructions_own') : [t('instructions_source'), overview?.workflow.version ? t('instructions_version', { version: overview.workflow.version }) : null].filter(Boolean).join(' · ')}</span>
-                </div>
-                <div className={styles.instrBox}><ol data-ph-mask={own ? '' : undefined}>{steps.map((step, i) => <li key={i}>{step}</li>)}</ol></div>
-                <CopyInstruction body={body.data} />
-              </div>
-
-              {curated && (
-                <Row label={t('section_connections')} onAdd={() => setView('apps')} addLabel={t('apps_add')}>
-                  {connections.length === 0 ? <span className={styles.muted}>{t('connections_none')}</span> : connections.map((c) => <ConnectionChip key={c.kind} connection={c} />)}
+              <div className={styles.rows}>
+                {curated && (
+                  <Row label={t('section_connections')}>
+                    {connections.length === 0 ? <span className={styles.muted}>{t('connections_none')}</span> : <Capped items={connections.map((c) => <ConnectionChip key={c.kind} connection={c} />)} />}
+                  </Row>
+                )}
+                <Row label={t('section_knowledge')} onAdd={canEdit ? () => setView('knowledge') : undefined} addLabel={t('knowledge_add')}>
+                  {knowledge.length === 0 ? <span className={styles.muted}>{t(own ? 'knowledge_own' : 'knowledge_none')}</span> : <Capped items={knowledge.map((k) => (
+                    <KnowledgeChip key={k.id} knowledge={k} canEdit={canEdit} onRemove={() => changeKnowledge('remove', k.id)} />
+                  ))} />}
                 </Row>
-              )}
-
-              <Row label={t('section_knowledge')} onAdd={canEdit ? () => setView('knowledge') : undefined} addLabel={t('knowledge_add')}>
-                {knowledge.length === 0 ? <span className={styles.muted}>{t(own ? 'knowledge_own' : 'knowledge_none')}</span> : knowledge.map((k) => (
-                  <KnowledgeChip key={k.id} knowledge={k} canEdit={canEdit} onRemove={() => changeKnowledge('remove', k.id)} />
-                ))}
-              </Row>
-              {canEdit && changed && <div><Button variant="ghost" size="sm" onClick={() => void changeKnowledge('reset')}>{t('knowledge_reset')}</Button></div>}
-
-              <Row label={t('section_company')}>
+                <Row label={t('section_company')} onOpen={() => setView('company')}>
+                  <span className={styles.muted}>{[
+                    overview && overview.facts_known > 0 ? t('company_facts_known', { known: overview.facts_known, total: AGENTS[curated!].facts.length }) : null,
+                    (agents.data?.documents ?? 0) > 0 ? t('company_documents', { count: agents.data!.documents }) : null,
+                  ].filter(Boolean).join(' · ') || t('company_none')}</span>
+                </Row>
+                <Row label={t('section_advanced')} onOpen={() => setView('advanced')} />
+              </div>
+            </>
+          )}
+          {view === 'company' && (
+            <SubView title={t('section_company')} onBack={() => setView('main')}>
+              <div className={styles.chips}>
                 {(agents.data?.agents[0]?.company ?? []).map((c) => <span key={c.id} className={`${styles.chip} ${styles.chipCompany}`}>{c.title}</span>)}
                 {overview && overview.facts_known > 0 && <span className={`${styles.chip} ${styles.chipCompany}`}>{t('company_facts_known', { known: overview.facts_known, total: AGENTS[curated!].facts.length })}</span>}
                 {(agents.data?.remembered ?? 0) > 0 && <span className={`${styles.chip} ${styles.chipCompany}`}>{t('company_remembered', { count: agents.data!.remembered })}</span>}
                 {(agents.data?.documents ?? 0) > 0 && <span className={`${styles.chip} ${styles.chipCompany}`}>{t('company_documents', { count: agents.data!.documents })}</span>}
-              </Row>
-
+              </div>
+              <p className={styles.muted}>{t('company_given')}</p>
+            </SubView>
+          )}
+          {view === 'advanced' && (
+            <SubView title={t('section_advanced')} onBack={() => setView('main')}>
+              <CopyInstruction body={body.data} />
+              {canEdit && changed && <div><Button variant="outline" size="sm" onClick={() => void changeKnowledge('reset')}>{t('knowledge_reset')}</Button></div>}
               {own && !own.draft && <ShareBox status={own.shareStatus ?? 'private'} canWrite={canWrite} onShare={(share) => patchOwn(share === 'withdraw' ? { action: 'withdraw' } : { action: 'submit', confirmed_no_customer_data: true, author_handle: share.author_handle })} />}
               {own && (own.shareStatus ?? 'private') === 'private' && <DeleteOwn canWrite={canWrite} onDelete={deleteOwn} />}
-            </>
+            </SubView>
           )}
           {view === 'knowledge' && (
             <KnowledgePanel held={knowledge} options={options.data ?? []} onBack={() => setView('main')} onChange={changeKnowledge} />
-          )}
-          {view === 'apps' && curated && (
-            <AppsPanel used={connections} onBack={() => setView('main')} />
           )}
           </div>
         </section>
@@ -248,14 +256,48 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   )
 }
 
-function Row({ label, children, onAdd, addLabel }: { label: string; children: ReactNode; onAdd?: () => void; addLabel?: string }) {
+/** One settings row as in Oasis: label left, one line of content, one square button in a fixed column. */
+function Row({ label, children, onAdd, addLabel, onOpen }: { label: string; children?: ReactNode; onAdd?: () => void; addLabel?: string; onOpen?: () => void }) {
+  const inner = (
+    <>
+      <span className={styles.rowLabel}>{label}</span>
+      <div className={styles.rowContent}>{children}</div>
+      <span className={styles.rowAction}>
+        {onAdd && <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button>}
+        {onOpen && <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />}
+      </span>
+    </>
+  )
+  return onOpen
+    ? <button type="button" className={`${styles.srow} ${styles.srowLink}`} onClick={onOpen}>{inner}</button>
+    : <div className={styles.srow}>{inner}</div>
+}
+
+/** A labelled field, label above its box. */
+function Field({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
-    <div className={styles.aprow}>
-      <span className={styles.l}>{label}</span>
-      <div className={styles.chips}>{children}</div>
-      <span className={styles.rowAction}>{onAdd && <Button variant="outline" size="icon-sm" aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button>}</span>
+    <div className={styles.field}>
+      <div className={styles.fieldHead}><span className={styles.rowLabel}>{label}</span>{note && <span className={styles.partNote}>{note}</span>}</div>
+      {children}
     </div>
   )
+}
+
+/** A panel sub-view: back to the agent, a title, its content. */
+function SubView({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+  const t = useTranslations('skills_registry')
+  return (
+    <div className="flex flex-col gap-4">
+      <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
+      <span className={styles.rowLabel}>{title}</span>
+      {children}
+    </div>
+  )
+}
+
+/** At most two chips on the line and a count for the rest, so a row never wraps. */
+function Capped({ items }: { items: ReactNode[] }) {
+  return <>{items.slice(0, 2)}{items.length > 2 && <span className={styles.chip}>+{items.length - 2}</span>}</>
 }
 
 function CopyInstruction({ body }: { body: string | undefined }) {
@@ -329,11 +371,7 @@ function KnowledgePanel({ held, options, onBack, onChange }: {
   return (
     <div className="flex flex-col gap-4">
       <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
-      <div className={styles.segs} role="tablist">
-        {(['accounted', 'community'] as const).map((s) => (
-          <button key={s} type="button" role="tab" aria-selected={source === s} className={styles.seg} onClick={() => setSource(s)}>{t(s === 'accounted' ? 'tab_accounted' : 'tab_community')}</button>
-        ))}
-      </div>
+      <SlidingTabs fill label={t('section_knowledge')} value={source} onChange={setSource} options={[{ value: 'accounted' as const, label: t('tab_accounted') }, { value: 'community' as const, label: t('tab_community') }]} />
       <label className={styles.search}>
         <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
         <input id="agent-knowledge-search" type="search" value={query} placeholder={t('knowledge_search')} onChange={(e) => setQuery(e.target.value)} />
@@ -358,42 +396,6 @@ function KnowledgePanel({ held, options, onBack, onChange }: {
           })}
         </div>
       )}
-    </div>
-  )
-}
-
-const ALL_CONNECTIONS: AgentConnection[] = ['bank', 'skatteverket', 'peppol', 'mail', 'browser']
-
-/** Kopplingar, as in Oasis's connector grid: the ones this agent uses first, then everything there is. */
-function AppsPanel({ used, onBack }: { used: AgentConnectionState[]; onBack: () => void }) {
-  const t = useTranslations('skills_registry')
-  const [query, setQuery] = useState('')
-  const q = query.trim().toLowerCase()
-  const states = new Map(used.map((c) => [c.kind, c]))
-  const tile = (kind: AgentConnection) => {
-    const state = states.get(kind)
-    const content = <><span className={styles.appIcon}><ConnectionMark kind={kind} /></span>{t(`conn_${kind}`)}{state && <small>{t(`conn_${state.status}`)}</small>}{!state && !isCheckable(kind) && <small>{t('conn_in_ai')}</small>}</>
-    return isCheckable(kind) && state?.status !== 'connected'
-      ? <Link key={kind} href={CONNECTION_SETTINGS[kind]} className={styles.apptile} data-used={state ? '' : undefined}>{content}</Link>
-      : <span key={kind} className={styles.apptile} data-used={state ? '' : undefined}>{content}</span>
-  }
-  const match = (kind: AgentConnection) => !q || t(`conn_${kind}`).toLowerCase().includes(q)
-  return (
-    <div className="flex flex-col gap-4">
-      <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
-      <label className={styles.search}>
-        <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
-        <input id="agent-apps-search" type="search" value={query} placeholder={t('apps_search')} onChange={(e) => setQuery(e.target.value)} />
-      </label>
-      {used.length > 0 && (
-        <>
-          <span className={styles.partLabel}>{t('apps_used')}</span>
-          <div className={styles.appgrid}>{used.map((c) => c.kind).filter(match).map(tile)}</div>
-        </>
-      )}
-      <span className={styles.partLabel}>{t('apps_all')}</span>
-      <div className={styles.appgrid}>{ALL_CONNECTIONS.filter((k) => !states.has(k)).filter(match).map(tile)}</div>
-      <p className={styles.muted}>{t('apps_note')}</p>
     </div>
   )
 }

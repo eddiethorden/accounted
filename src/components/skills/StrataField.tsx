@@ -27,7 +27,7 @@ function noise(x: number, y: number, seed: number) {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
 }
 
-export function StrataField({ seed, ground }: { seed: number; ground: string }) {
+export function StrataField({ seed, ground, bar = '#EBE5D3', strength = 1 }: { seed: number; ground: string; bar?: string; strength?: number }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -46,7 +46,7 @@ export function StrataField({ seed, ground }: { seed: number; ground: string }) 
       canvas!.style.width = `${W}px`
       canvas!.style.height = `${H}px`
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
-      ctx!.fillStyle = '#EBE5D3'
+      ctx!.fillStyle = bar
       const rowGap = 6
       const step = 4
       for (let y = 0; y < H; y += rowGap) {
@@ -57,7 +57,7 @@ export function StrataField({ seed, ground }: { seed: number; ground: string }) 
           if (field > 0.48) {
             const start = x
             while (x < W && noise(x / 160, y / 90, seed) * 0.7 + noise(x / 40, y / 24, seed + 3) * 0.3 > 0.48) x += step
-            ctx!.globalAlpha = 0.035 + (field - 0.48) * 0.12
+            ctx!.globalAlpha = (0.035 + (field - 0.48) * 0.12) * strength
             ctx!.fillRect(start * dpr, y * dpr, (x - start) * dpr, 2 * dpr)
           }
           x += step
@@ -78,7 +78,7 @@ export function StrataField({ seed, ground }: { seed: number; ground: string }) 
     })
     observer.observe(wrap)
     return () => { observer.disconnect(); window.clearTimeout(timer) }
-  }, [seed])
+  }, [seed, bar, strength])
 
   return (
     <div ref={wrapRef} className={styles.strata} style={{ background: ground }} aria-hidden>

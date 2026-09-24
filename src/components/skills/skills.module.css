@@ -521,9 +521,10 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 /* ── the agent page ── */
 .apage { display: flex; flex-direction: column; gap: 16px; }
 .agrid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: stretch; }
+/* the stage and the panel are one pair: same top, same bottom */
 @media (max-width: 960px) { .agrid2 { grid-template-columns: 1fr; } }
-.stage { position: sticky; top: 16px; align-self: start; height: 560px; border-radius: 16px; overflow: hidden; color: hsl(var(--foreground)); }
-@media (max-width: 960px) { .stage { position: relative; top: 0; height: 380px; } }
+.stage { position: relative; min-height: 620px; border: 1px solid hsl(var(--border)); border-radius: 16px; overflow: hidden; color: hsl(var(--foreground)); }
+@media (max-width: 960px) { .stage { min-height: 380px; } }
 .strata { position: absolute; inset: 0; }
 .strata canvas { display: block; }
 /* the agent sits in the middle of its stage, as a small white card */
@@ -532,7 +533,7 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 .stageTile small { font-size: 12.5px; color: hsl(var(--muted-foreground)); }
 .stageFoot { position: absolute; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .stageStatus { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid hsl(var(--border)); border-radius: 9999px; background: hsl(var(--background) / 0.94); font-size: 12.5px; }
-.apanel { display: flex; flex-direction: column; gap: 20px; min-height: 560px; padding: 24px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background)); }
+.apanel { display: flex; flex-direction: column; gap: 20px; min-height: 620px; padding: 28px 32px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background)); }
 .apHead { display: flex; flex-direction: column; gap: 6px; }
 .apHead h1 { font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 32px; }
 .apHead p { font-size: 13px; line-height: 19px; color: hsl(var(--muted-foreground)); }
@@ -585,3 +586,36 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 @media (prefers-reduced-motion: reduce) { .viewIn, .apage, .fadeIn { animation: none; } }
 
 .bot { position: relative; flex: none; display: inline-grid; place-items: center; }
+
+/* ── the agent panel, laid out as Oasis does: fields, then rows on one grid ── */
+.apAvatar { display: flex; justify-content: center; padding: 4px 0 8px; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.fieldHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.fieldBox { display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid hsl(var(--border)); border-radius: 10px; font-size: 15px; }
+.fieldHint { font-size: 12.5px; line-height: 17px; color: hsl(var(--muted-foreground)); }
+.rowLabel { font-size: 15px; line-height: 21px; color: hsl(var(--muted-foreground)); }
+.rows { display: flex; flex-direction: column; }
+.srow { display: grid; grid-template-columns: 120px minmax(0, 1fr) 40px; align-items: center; gap: 12px; min-height: 60px; width: 100%; border: 0; background: none; padding: 0; font: inherit; text-align: left; color: inherit; }
+.srowLink { cursor: pointer; border-radius: 10px; transition: background-color 150ms var(--ease-out); }
+.srowLink:hover { background: hsl(var(--secondary) / 0.6); }
+.srowLink:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.rowContent { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.rowContent .muted { overflow: hidden; text-overflow: ellipsis; }
+.rowAction { display: flex; justify-content: center; align-items: center; width: 40px; }
+.sqBtn { border-radius: 10px; }
+.instrBox { position: relative; max-height: 200px; }
+
+/* ── sliding tabs: the pill glides, a click leaves no outline ── */
+.slideTabs { position: relative; display: inline-flex; gap: 4px; padding: 3px; width: fit-content; max-width: 100%; border: 1px solid hsl(var(--border)); border-radius: 9999px; background: hsl(var(--secondary) / 0.5); }
+.slideTabs[data-fill] { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; border-radius: 12px; }
+.slidePill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 9999px; background: hsl(var(--background)); box-shadow: 0 0 0 1px hsl(var(--border)); transition: transform 300ms var(--ease-out), width 300ms var(--ease-out); }
+.slideTabs[data-fill] .slidePill { border-radius: 9px; }
+.slideTab { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; background: transparent; color: hsl(var(--muted-foreground)); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 150ms var(--ease-out); outline: none; }
+.slideTab[aria-selected='true'] { color: hsl(var(--foreground)); }
+.slideTab:focus-visible { border-radius: 9999px; box-shadow: 0 0 0 2px hsl(var(--ring)); }
+@media (prefers-reduced-motion: reduce) { .slidePill { transition: none; } }
+
+/* every card fills its grid cell: panels and feet line up across a row */
+.agrid > li { display: flex; }
+.agrid > li > .acard { flex: 1; }
+.acard .acPanel { flex: 1; }

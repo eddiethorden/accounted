@@ -18,6 +18,7 @@ import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { SourceMarks } from './ConnectionMark'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
+import { SlidingTabs } from './SlidingTabs'
 import { agentSegment, agentStatus, fetchConnections, readAgents, readCatalog, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -163,6 +164,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
                 </span>
                 <span className={styles.acTile}><span className={styles.createPlus} aria-hidden><Plus className="h-4 w-4" /></span></span>
               </span>
+              <span className={styles.acFoot}><span className={styles.statusSlot} /><span className={styles.open} aria-hidden>{t('open_hint')}</span></span>
             </button>
           </li>
         </ul>
@@ -171,15 +173,16 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       <section className={styles.lower} aria-label={t('title')}>
         {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
         {catalog.error && <p role="alert" className={styles.note}>{t('load_failed')} <button type="button" className="underline underline-offset-4" onClick={() => void catalog.mutate()}>{t('retry')}</button></p>}
-        <div className={styles.tabs} role="tablist" aria-label={t('title')}>
-          {(['accounted', 'own', 'community'] as const).map((key) => (
-            <button key={key} type="button" role="tab" id={`agents-tab-${key}`} aria-selected={tab === key} aria-controls="agents-panel" className={styles.tab} onClick={() => setTab(key)}>
-              {t(`tab_${key}`)}
-              {key === 'own' && own.length > 0 && <span className={styles.tabCount}>{own.length}</span>}
-              {key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}
-            </button>
-          ))}
-        </div>
+        <SlidingTabs
+          label={t('title')}
+          value={tab}
+          onChange={setTab}
+          ids={{ prefix: 'agents-tab', controls: 'agents-panel' }}
+          options={(['accounted', 'own', 'community'] as const).map((key) => ({
+            value: key,
+            label: <>{t(`tab_${key}`)}{key === 'own' && own.length > 0 && <span className={styles.tabCount}>{own.length}</span>}{key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}</>,
+          }))}
+        />
 
         <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`}>
           {tab === 'accounted' && (
