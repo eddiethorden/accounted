@@ -130,7 +130,7 @@ describe('GET /items', () => {
 
   it("shows the document's own reading for an item routed in before it landed, and drops the not-read flag", async () => {
     const { supabase, enqueue } = createQueuedMockSupabase()
-    enqueue({ data: [makeInvoiceInboxItem({ id: 'routed', document_id: 'doc-r', extraction_skipped: true }), makeInvoiceInboxItem({ id: 'bare', document_id: 'doc-x', extraction_skipped: true })] })
+    enqueue({ data: [{ ...makeInvoiceInboxItem({ id: 'routed', document_id: 'doc-r' }), extraction_skipped: true }, { ...makeInvoiceInboxItem({ id: 'bare', document_id: 'doc-x' }), extraction_skipped: true }] })
     enqueue({ data: [{ id: 'doc-r', extracted_data: { documentKind: 'receipt', totals: { total: 220 } } }, { id: 'doc-x', extracted_data: null }] })
     const { body } = await parseJsonResponse<{ data: { items: Array<Record<string, unknown>> } }>(await route.handler(req(), buildCtx(supabase)))
     const byId = Object.fromEntries(body.data.items.map((i) => [i.id as string, i]))
