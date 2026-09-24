@@ -803,3 +803,15 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .copyIcon:disabled { opacity: .4; cursor: default; }
 .copyIcon[data-state='copied'] { color: hsl(var(--success)); }
 .copyIcon:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+/* the banner is one link; its start button and logos stay clickable above it */
+.featured { position: relative; cursor: pointer; transition: box-shadow 150ms var(--ease-out); }
+.featured:hover { box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.12); }
+.featuredLink { position: absolute; inset: 0; border-radius: inherit; z-index: 0; }
+.featuredLink:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.featuredText, .featuredArt { position: relative; z-index: 1; pointer-events: none; }
+.featuredText a, .featuredText button { pointer-events: auto; }
+.startBtn { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 5px; border: 0; border-radius: 9999px; background: hsl(var(--foreground)); color: hsl(var(--background)); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+.startBtn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.35); }
+.startBtn:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.startLogo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9999px; background: #fff; }
+.startLogo img { width: 18px; height: 18px; object-fit: contain; }

@@ -179,12 +179,12 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" className="gap-2 pl-3.5" onClick={run}>
+            <button type="button" className={styles.startBtn} onClick={run}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={18} height={18} className={styles.clientLogo} />
+              <span className={styles.startLogo}><img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={16} height={16} /></span>
               {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
               <ArrowUpRight className="h-4 w-4" aria-hidden />
-            </Button>
+            </button>
             {runState !== 'idle' && <span className={styles.stageStatus} role="status">{runState === 'copied' ? t(curated ? 'prefilled_open' : 'copied_open', { client: clientName }) : t('copy_failed')}</span>}
             {/* only a status worth reading: work waiting, a missing connection, no AI yet */}
             {status && status.presence !== 'ready' && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
