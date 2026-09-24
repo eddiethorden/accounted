@@ -880,7 +880,7 @@ export default function InvoicesPage() {
             // The ROT/RUT overview (begäran, beslut, utbetalning, nekat
             // belopp) has its own page; the file dialog still opens from
             // ?rot-rut=1 here for existing links and the Att göra rows.
-            <Button
+            <Button size="sm"
               type="button"
               variant="outline"
               onClick={() => router.push('/invoices/rot-rut')}
@@ -891,7 +891,7 @@ export default function InvoicesPage() {
           )}
           {isQuotesList ? (
             // One way to make a quote, so a plain button: no modes to remember.
-            <Button
+            <Button size="sm"
               type="button"
               onClick={openNewQuote}
               disabled={!canWrite}

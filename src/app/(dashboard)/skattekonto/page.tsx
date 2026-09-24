@@ -695,7 +695,7 @@ export default function SkattekontoPage() {
         help={helpNode}
         action={
           notConnected ? (
-            <Button
+            <Button size="sm"
               variant="ghost"
               asChild
               className="text-muted-foreground hover:text-foreground"
@@ -705,7 +705,7 @@ export default function SkattekontoPage() {
           ) : (
             // The span carries the tooltip: `title` is suppressed on disabled elements.
             <span title={!hasSkvCapability ? 'Synk mot Skatteverket kräver ett abonnemang' : undefined}>
-              <Button
+              <Button size="sm"
                 variant="ghost"
                 onClick={syncNow}
                 disabled={syncing || !hasSkvCapability}

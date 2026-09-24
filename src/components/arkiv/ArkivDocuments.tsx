@@ -8,11 +8,12 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ToolbarSearch } from '@/components/ui/toolbar-search'
+import { TOOLBAR_FIELD_CLASS, ToolbarSearch } from '@/components/ui/toolbar-search'
 import { QUIET_LINK_CLASS, TD_CLASS, TH_CLASS } from '@/components/ui/dry-table'
 import type { ArkivDocumentRow } from '@/app/api/arkiv/documents/route'
 import { DOC_TYPES } from '@/lib/documents/classify/taxonomy'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 /** Type dropdown values: a group name the API understands, or one doc_type. */
 const FILTERS: Array<{ value: string; labelKey: string }> = [
@@ -26,7 +27,7 @@ const FILTERS: Array<{ value: string; labelKey: string }> = [
   { value: 'other', labelKey: 'filter_other' },
 ]
 
-const PICKER_CLASS = 'h-8 w-auto gap-1.5 rounded-full px-3.5 text-[13px]'
+const PICKER_CLASS = cn(TOOLBAR_FIELD_CLASS, 'w-auto gap-1.5')
 
 /**
  * The Arkiv table (canvas artboard Arkiv): the type picker and the search

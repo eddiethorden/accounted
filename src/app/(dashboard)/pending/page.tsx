@@ -727,7 +727,7 @@ export default function PendingOperationsPage() {
       <div className="page-header flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="page-header-title font-display text-2xl leading-8 tracking-tight">{t('title')}</h1>
         {activeTab === 'pending' && bulkEligible.length > 0 && (
-          <Button
+          <Button size="sm"
             disabled={isBulkCommitting || isRejecting}
             onClick={() => {
               setSelectedIds(new Set(bulkEligibleIds))

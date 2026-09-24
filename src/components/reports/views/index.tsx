@@ -37,7 +37,6 @@ import { formatVoucher } from '@/lib/bookkeeping/voucher-series-resolver'
 import { AccountNumber } from '@/components/ui/account-number'
 import { ReportExportMenu } from '@/components/reports/ReportExportMenu'
 import { PageHeader } from '@/components/ui/page-header'
-import { HandoffButton } from '@/components/ai-handoff/HandoffButton'
 import { VatChecksCard } from '@/components/reports/VatChecksCard'
 import { runVatDeclarationChecks } from '@/lib/reports/vat-declaration-checks'
 import { rcInputTotalsFromDeclaration } from '@/lib/reports/vat-declaration'
@@ -1967,7 +1966,6 @@ export function VatDeclarationView({ pageTitle }: { pageTitle?: string } = {}) {
           title={pageTitle}
           action={
             <div className="flex items-center gap-2">
-            <HandoffButton disabled={!data} task={{ kind: 'vat', scope: { ...(data ? { date_from: data.period.start, date_to: data.period.end } : {}), ...(isYearly && fiscalPeriodId ? { fiscal_period_id: fiscalPeriodId } : {}) } }} />
             <ReportExportMenu
               variant="outline"
               items={[

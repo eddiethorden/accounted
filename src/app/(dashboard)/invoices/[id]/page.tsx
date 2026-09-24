@@ -1798,7 +1798,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             className="shrink-0"
           />
           {isEditableDraft && canWrite && (
-            <Button variant="outline" asChild>
+            <Button size="sm" variant="outline" asChild>
               <Link href={`/invoices/${invoice.id}/edit`}>
                 <Pencil className="mr-2 h-4 w-4" />
                 {t('edit_draft')}
@@ -1807,13 +1807,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           )}
           {/* Review in the browser (#1190); the download lives in the menu. */}
           {!isSelfBilled && (
-            <Button variant="outline" onClick={() => previewPDF()}>
+            <Button size="sm" variant="outline" onClick={() => previewPDF()}>
               <Eye className="mr-2 h-4 w-4" />
               {t('preview_pdf')}
             </Button>
           )}
           {isProforma && invoice.status !== 'cancelled' && (
-            <Button
+            <Button size="sm"
               onClick={convertToInvoice}
               disabled={!canWrite}
               loading={isConverting}
@@ -1828,7 +1828,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </Button>
           )}
           {canDecideQuote && quoteStatus !== 'accepted' && (
-            <Button
+            <Button size="sm"
               variant="outline"
               onClick={acceptQuote}
               disabled={isConverting || !canWrite}
@@ -1840,7 +1840,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </Button>
           )}
           {canConvertQuote && (
-            <Button
+            <Button size="sm"
               onClick={startQuoteConvert}
               disabled={isDeciding || !canWrite}
               loading={isConverting}
@@ -1855,7 +1855,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </Button>
           )}
           {isUnnumberedDraft && (
-            <Button
+            <Button size="sm"
               onClick={openFinalizeDialog}
               disabled={isFinalizing || !canWrite}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
@@ -1866,7 +1866,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           )}
           {invoice.status === 'draft' && !isDeliveryNote && invoice.invoice_number && (
             preferredSendMode === 'email' ? (
-              <Button
+              <Button size="sm"
                 onClick={() => openSendDialog('email')}
                 disabled={!canWrite}
                 title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
@@ -1875,7 +1875,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 {t(issuesByBooking ? 'send_via_email_and_book' : 'send_via_email')}
               </Button>
             ) : (
-              <Button
+              <Button size="sm"
                 onClick={() => openSendDialog('manual')}
                 disabled={!canWrite}
                 title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
@@ -1886,7 +1886,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             )
           )}
           {creditNoteNeedsRepair && (
-            <Button
+            <Button size="sm"
               onClick={() => openSendDialog('manual')}
               disabled={!canWrite}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
@@ -1896,7 +1896,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </Button>
           )}
           {isDeliveryNote && invoice.status === 'draft' && (
-            <Button
+            <Button size="sm"
               onClick={() => updateStatus('sent')}
               disabled={!canWrite}
               loading={isUpdating}
@@ -1913,7 +1913,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           {/* partially_paid included (#1717): completes a stuck partial, e.g.
               a sub-krona öresavrundning remaining, via the same dialog. */}
           {(invoice.status === 'sent' || invoice.status === 'overdue' || invoice.status === 'partially_paid') && isRealInvoice && !isCreditNote && (
-            <Button
+            <Button size="sm"
               onClick={() => setShowPaymentDialog(true)}
               disabled={isUpdating || !canWrite}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
@@ -1928,7 +1928,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   aria-label={tCommon('more_options')}
                   loading={isDownloading || isDownloadingPeppol || isPreparingPeppol || isCreatingOrder}
                 >

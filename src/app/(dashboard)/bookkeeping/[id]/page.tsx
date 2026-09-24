@@ -604,7 +604,7 @@ export default function JournalEntryDetailPage({ params }: { params: Promise<{ i
           {showActions && (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {entry.status === 'draft' && (
-                <Button
+                <Button size="sm"
                   variant="outline"
                   onClick={() => setShowEdit(true)}
                   disabled={!canWrite}
@@ -615,7 +615,7 @@ export default function JournalEntryDetailPage({ params }: { params: Promise<{ i
                 </Button>
               )}
               {entry.status === 'draft' && (
-                <Button
+                <Button size="sm"
                   onClick={openCommitConfirm}
                   disabled={!canWrite}
                   loading={isCommitting}
@@ -626,7 +626,7 @@ export default function JournalEntryDetailPage({ params }: { params: Promise<{ i
                 </Button>
               )}
               {canCorrect && isOpeningBalance && (
-                <Button
+                <Button size="sm"
                   variant="outline"
                   onClick={() => setShowCorrectIB(true)}
                   disabled={!canWrite}
@@ -637,7 +637,7 @@ export default function JournalEntryDetailPage({ params }: { params: Promise<{ i
                 </Button>
               )}
               {showStrikeButton && (
-                <Button
+                <Button size="sm"
                   variant="outline"
                   onClick={() => setShowStrikeLines(true)}
                   disabled={!canWrite}
@@ -650,7 +650,7 @@ export default function JournalEntryDetailPage({ params }: { params: Promise<{ i
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label={tCommon('more_options')}>
+                  <Button variant="ghost" size="icon-sm" aria-label={tCommon('more_options')}>
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
