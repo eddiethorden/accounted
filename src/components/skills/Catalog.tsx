@@ -22,7 +22,8 @@ import { ConnectionMark, SourceMarks } from './ConnectionMark'
 import { copyPromptAndOpen } from './run'
 import type { Presence } from './hues'
 import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
-import { itemHue, type ItemKind } from './hues'
+import { itemHue, seedOf, type ItemKind } from './hues'
+import { StrataField } from './StrataField'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { agentSegment, agentStatus, communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
 import styles from './skills.module.css'
@@ -363,10 +364,12 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
   }
   return (
     <section className={styles.featured} style={{ background: `hsl(${hue} 32% 90%)` }}>
+      {/* A faint strata ground, the stage's in the item's colour, kept quiet behind the text. */}
+      <StrataField seed={seedOf(item.key)} ground={`hsl(${hue} 32% 90%)`} bar={`hsl(${hue} 35% 45%)`} strength={1.2} />
       {/* The whole banner opens the item; the start button and connection logos sit above this link. */}
       <Link href={item.href} className={styles.featuredLink} aria-label={item.title} />
       <div className={styles.featuredText}>
-        <span>{industry ? t('featured_industry') : item.source === 'community' && item.meta ? t('featured_community', { who: `@${item.meta.author}` }) : t('featured_accounted')}</span>
+        {(industry || item.source === 'community') && <span>{industry ? t('featured_industry') : t('featured_community', { who: `@${item.meta?.author ?? ''}` })}</span>}
         <h2>{item.title}</h2>
         <p>{item.lede ?? item.desc}</p>
         <div className={styles.featuredActions}>
