@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import { withRouteContext } from '@/lib/api/with-route-context'
+import { isSandboxCompany } from '@/lib/sandbox/guard'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getStripe, isStripeConfigured } from '@/lib/stripe/client'
 
@@ -51,8 +52,14 @@ function toBillingInvoice(invoice: Stripe.Invoice): BillingInvoice {
  * billing/portal): the row is webhook-owned and not member-readable under
  * RLS; the query still filters by the membership-validated companyId.
  */
-export const GET = withRouteContext('billing.invoices', async (_request, { user, companyId }) => {
+export const GET = withRouteContext('billing.invoices', async (_request, { user, supabase, companyId }) => {
   if (!isStripeConfigured() || user.is_anonymous) {
+    return NextResponse.json({ invoices: [] })
+  }
+  // Sandbox companies never reach external systems (lib/sandbox/guard.ts),
+  // like billing/checkout and billing/portal. A sandbox has no receipts, so
+  // the answer is the empty list the Kvitton tab already renders.
+  if (await isSandboxCompany(supabase, companyId)) {
     return NextResponse.json({ invoices: [] })
   }
 

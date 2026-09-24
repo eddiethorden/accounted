@@ -21,6 +21,11 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => serviceSupabase,
 }))
 
+const isSandboxCompanyMock = vi.fn()
+vi.mock('@/lib/sandbox/guard', () => ({
+  isSandboxCompany: (...args: unknown[]) => isSandboxCompanyMock(...args),
+}))
+
 const invoicesList = vi.fn()
 const isStripeConfiguredMock = vi.fn()
 vi.mock('@/lib/stripe/client', () => ({
@@ -57,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   reset()
   isStripeConfiguredMock.mockReturnValue(true)
+  isSandboxCompanyMock.mockResolvedValue(false)
   requireAuthMock.mockResolvedValue({ user: { id: 'user-1', is_anonymous: false }, supabase: {}, error: null })
 })
 
@@ -75,6 +81,17 @@ describe('GET /api/billing/invoices', () => {
 
   it('returns an empty list when Stripe is not configured', async () => {
     isStripeConfiguredMock.mockReturnValue(false)
+
+    const { status, body } = await parseJsonResponse<{ invoices: unknown[] }>(await get())
+
+    expect(status).toBe(200)
+    expect(body.invoices).toEqual([])
+    expect(invoicesList).not.toHaveBeenCalled()
+  })
+
+  it('never contacts Stripe for a sandbox company', async () => {
+    isSandboxCompanyMock.mockResolvedValue(true)
+    enqueue({ data: { stripe_customer_id: 'cus_stray' } })
 
     const { status, body } = await parseJsonResponse<{ invoices: unknown[] }>(await get())
 
