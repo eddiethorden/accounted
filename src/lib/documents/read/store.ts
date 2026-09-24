@@ -7,7 +7,7 @@ import { createLogger } from '@/lib/logger'
 import { recordArkivUsage } from '@/lib/arkiv/usage'
 import { readDocumentBytes } from './router'
 import { historyReaderTier, readLaneFor, readPlanFor, isActingType, type ReadPlan } from './lanes'
-import { READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
+import { NOT_STRUCTURED_MIME_FILTER, READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
 
 const log = createLogger('documents/read')
 
@@ -183,8 +183,11 @@ export async function readUnreadDocuments(
   const walkByPlan = async (docs: ReadableDocumentRow[]): Promise<boolean> => {
     for (const doc of docs) {
       if (spentTime()) return true
-      const { outcome } = await readDocumentByPlan(supabase, doc, now)
-      const out = outcome ?? { status: 'skipped' as const, reason: 'lane_done' }
+      const plan = planForDocument(doc, now)
+      // History costs the model only while the company has a budget; without one the backfill reads text layers and a question reads the rest.
+      const out = plan
+        ? await readAndStoreDocument(supabase, doc, { allowModel: plan.allowModel && (plan.lane === 'live' || budget > 0), maxModelPages: plan.maxModelPages, tier: plan.tier })
+        : { status: 'skipped' as const, reason: 'lane_done' }
       await tally(doc, out)
       if (isReaderUnavailable(out)) return false
     }
@@ -220,14 +223,15 @@ export async function readUnreadDocuments(
       const tier = historyReaderTier()
       let plan: { allowModel: boolean; maxModelPages: number | null; tier?: AiTier } | null = null
       if (lane === 'live') plan = { allowModel: true, maxModelPages: null }
+      else if ((await roomToday(doc.company_id)) <= 0) plan = null
       else if (lane === 'history_loose') plan = !doc.doc_type ? { allowModel: true, maxModelPages: 1, tier } : isActingType(doc.doc_type) ? { allowModel: true, maxModelPages: null, tier } : null
-      else if ((await roomToday(doc.company_id)) > 0) plan = { allowModel: true, maxModelPages: null, tier }
+      else plan = { allowModel: true, maxModelPages: null, tier }
       if (!plan) continue
       taken++
       const out = await readAndStoreDocument(supabase, doc, plan)
       await tally(doc, out)
       if (isReaderUnavailable(out)) return counts
-      if (lane === 'history_tied' && out.status === 'read') spent.set(doc.company_id, (spent.get(doc.company_id) ?? 0) + out.pages)
+      if (lane !== 'live' && out.status === 'read') spent.set(doc.company_id, (spent.get(doc.company_id) ?? 0) + out.pages)
     }
   }
 
@@ -236,6 +240,8 @@ export async function readUnreadDocuments(
     .from('document_attachments')
     .select('id, company_id, storage_path, mime_type, created_at, journal_entry_id, journal_entry_line_id, doc_type, pages_read_at, read_error')
     .is('pages_read_at', null)
+    // A bank response is the record itself and is never read; newest first, they filled every batch (prod 2026-09-24: 28 000 queued, backlog reads down to 3 a day).
+    .or(NOT_STRUCTURED_MIME_FILTER)
     .order('created_at', { ascending: false })
     .limit(limit - counts.processed)
   if (error) throw new Error(`fetch unread documents failed: ${error.message}`)

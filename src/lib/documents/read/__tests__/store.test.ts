@@ -28,6 +28,7 @@ function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<
       return api
     }
     api.is = () => api
+    api.or = (f: string) => { state.filters.or = f; return api }
     api.in = (k: string, v: unknown) => {
       state.filters[k] = v
       if (k === 'read_error') state.op = 'select-retry'
@@ -179,8 +180,11 @@ describe('readUnreadDocuments', () => {
   it('walks the unread batch and counts outcomes', async () => {
     asMock(downloadDocumentObject).mockResolvedValue({ blob: new Blob([Buffer.from('x')]), error: null, resolvedPath: 'p' })
     asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'office', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'office', hasTextLayer: true }] })
-    const { supabase } = makeSupabase([doc, { ...doc, id: 'doc-2', mime_type: 'application/xml' }])
+    const { supabase, calls } = makeSupabase([doc, { ...doc, id: 'doc-2', mime_type: 'application/xml' }])
     expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 2, read: 1, skipped: 1, errors: 0 })
+    // Bank responses are asked away in the query: newest first, they had filled every batch.
+    const unreadSelect = calls.find((c) => c.op === 'select' && c.table === 'document_attachments')
+    expect(unreadSelect?.filters.or).toContain('application/json')
   })
 
   it('stops the batch at the first document the missing reader fails, leaving the rest unread', async () => {
