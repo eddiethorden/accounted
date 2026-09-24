@@ -24,7 +24,6 @@ import { CommunityFoot, KindView } from './KindViews'
 import { KindsIntro } from './KindsIntro'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { itemHue, KINDS, kindFromParam, kindHref, type ItemKind } from './hues'
-import { SlidingTabs } from './SlidingTabs'
 import { agentSegment, agentStatus, communityMeta, communitySegment, fetchConnections, kindOf, rulesSegment, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -227,18 +226,19 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       <section className={styles.lower} aria-label={t('title')}>
         {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
         {catalog.error && <p role="alert" className={styles.note}>{t('load_failed')} <button type="button" className="underline underline-offset-4" onClick={() => void catalog.mutate()}>{t('retry')}</button></p>}
-        <SlidingTabs
-          label={t('title')}
+        <SegmentedControl
+          aria-label={t('sources_label')}
+          className={styles.sourceSwitch}
           value={tab}
           onChange={setTab}
-          ids={{ prefix: 'agents-tab', controls: 'agents-panel' }}
           options={(['accounted', 'own', 'community'] as const).map((key) => ({
             value: key,
-            label: <>{t(`tab_${key}`)}{key === 'own' && own.length > 0 && <span className={styles.tabCount}>{own.length}</span>}{key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}</>,
+            label: t(`tab_${key}`),
+            count: key === 'own' ? own.length : key === 'community' ? community.length : undefined,
           }))}
         />
 
-        <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`}>
+        <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-label={t(`tab_${tab}`)}>
           {tab === 'accounted' && (
             <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
               {flows.map((id) => <li key={id}>{card(id)}</li>)}

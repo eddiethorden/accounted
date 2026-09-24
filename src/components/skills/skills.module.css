@@ -455,7 +455,6 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 .tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border: 0; border-radius: 99px; background: transparent; color: hsl(var(--muted-foreground)); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .tab[aria-selected='true'] { background: hsl(var(--background)); color: hsl(var(--foreground)); box-shadow: 0 1px 0 hsl(var(--border)); }
 .tab:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset: 2px; }
-.tabCount { font-size: 11px; font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground)); }
 .empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; max-width: 560px; padding: 28px; border: 1px dashed hsl(var(--border)); border-radius: var(--radius); }
 .empty h3 { font-family: var(--font-display); font-weight: 400; font-size: 20px; line-height: 26px; }
 .empty p { font-size: 13px; line-height: 19px; color: hsl(var(--muted-foreground)); }
@@ -595,13 +594,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .instrBox { position: relative; max-height: 200px; }
 
 /* ── sliding tabs: the pill glides, a click leaves no outline ── */
-.slideTabs { position: relative; display: inline-flex; gap: 4px; padding: 3px; width: fit-content; max-width: 100%; border: 1px solid hsl(var(--border)); border-radius: 9999px; background: hsl(var(--secondary) / 0.5); }
-.slideTabs[data-fill] { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; border-radius: 12px; }
-.slidePill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 9999px; background: hsl(var(--background)); box-shadow: 0 0 0 1px hsl(var(--border)); transition: transform 300ms var(--ease-out), width 300ms var(--ease-out); }
-.slideTabs[data-fill] .slidePill { border-radius: 9px; }
-.slideTab { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; background: transparent; color: hsl(var(--muted-foreground)); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 150ms var(--ease-out); outline: none; }
-.slideTab[aria-selected='true'] { color: hsl(var(--foreground)); }
-.slideTab:focus-visible { color: hsl(var(--foreground)); text-decoration: underline; text-underline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) { .slidePill { transition: none; } }
 
 /* every card fills its grid cell: panels and feet line up across a row */
@@ -727,3 +719,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .kindsIntroPlus { font-size: 20px; color: hsl(var(--muted-foreground)); }
 .kindsIntroEnd { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-left: 20px; border-left: 1px solid hsl(var(--border)); }
 @media (max-width: 960px) { .kindsIntroEnd { padding-left: 0; border-left: 0; } }
+
+/* the source switch sits in the content, left-aligned, the same control as the top bar's */
+.sourceSwitch { align-self: flex-start; }
