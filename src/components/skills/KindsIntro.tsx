@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { FlowSymbol } from './FlowSymbol'
 import { Folder } from './Folder'
+import { AnalysisSymbol } from './AnalysisSymbol'
 import styles from './skills.module.css'
 
 const seenKey = (companyId: string) => `erp_agentinstruktioner_intro_seen:${companyId}`
@@ -19,8 +20,8 @@ function readSeen(companyId: string): boolean {
 }
 
 /**
- * The first visit's explanation: what a flow is, what knowledge is, and that
- * a flow carries knowledge. Shown until the user closes it; the help popover
+ * The first visit's explanation: what a flow is, what knowledge is (a flow
+ * carries it), and what an analysis is. Shown until the user closes it; the help popover
  * in the top bar says the same afterwards. Remembered per browser only,
  * because it is a convenience, not a setting.
  */
@@ -47,6 +48,10 @@ export function KindsIntro({ companyId }: { companyId: string }) {
       <div className={styles.kindsIntroPart}>
         <span className={styles.kindsIntroPic}><Folder hue={34} size={44} /></span>
         <div><b>{t('kind_one_rules')}</b><p>{t('intro_knowledge')}</p></div>
+      </div>
+      <div className={`${styles.kindsIntroPart} ${styles.kindsIntroApart}`}>
+        <span className={styles.kindsIntroPic}><AnalysisSymbol hue={152} size={44} /></span>
+        <div><b>{t('kind_one_analysis')}</b><p>{t('intro_analysis')}</p></div>
       </div>
       <div className={styles.kindsIntroEnd}>
         <p>{t('intro_together')}</p>

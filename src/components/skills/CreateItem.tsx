@@ -140,9 +140,10 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
       <Link href={back} className={styles.back}><ArrowLeft className="h-4 w-4" aria-hidden />{t('back_to_agents')}</Link>
       <div className={styles.agrid2}>
         <section className={styles.stage} aria-label={t('create_manual')}>
-          <StrataField seed={seedOf(kind)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
+          {/* One grain for the page: switching kind changes the colour, not the pattern. */}
+          <StrataField seed={seedOf('ny')} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
-            <ItemSymbol kind={kind} hue={hue} size={104} open />
+            <span key={kind} className={`${styles.tileSymbol} ${styles.fadeIn}`}><ItemSymbol kind={kind} hue={hue} size={104} open /></span>
             <b className={name.trim() ? undefined : styles.placeholderName}>{name.trim() || t('create_untitled')}</b>
             <small>{t(`kind_one_${kind}`)} · {t('source_own_item')}</small>
           </div>
@@ -156,10 +157,11 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
           <div key={view} className={styles.viewIn}>
             {view === 'main' && (
               <>
-                <div className={styles.apAvatar}><ItemSymbol kind={kind} hue={hue} size={60} /></div>
+                {/* A fixed box: the folder is shorter than the other symbols, and the switch below must not move. */}
+                <div className={`${styles.apAvatar} ${styles.apAvatarFixed}`}><span key={kind} className={styles.fadeIn}><ItemSymbol kind={kind} hue={hue} size={60} /></span></div>
                 <SegmentedControl<ItemKind>
                   aria-label={t('kinds_label')}
-                  className={styles.sourceSwitch}
+                  className={styles.kindSwitch}
                   value={kind}
                   onChange={setKind}
                   options={(['workflow', 'rules', 'analysis'] as const).map((k) => ({ value: k, label: t(`kind_one_${k}`) }))}
@@ -170,6 +172,7 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
                 <Field label={t('write_description')}>
                   <input className={`${styles.fieldBox} ${styles.fieldInput}`} value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} placeholder={t(`write_description_${kind}`)} aria-label={t('write_description')} />
                 </Field>
+                <div key={kind} className={`${styles.kindFields} ${styles.fadeIn}`}>
                 {kind === 'workflow' ? (
                   <Field label={t('section_instructions')} note={t('write_steps_hint')}>
                     <div className={styles.instrEdit}>
@@ -206,6 +209,7 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
                     </Row>
                   </div>
                 )}
+                </div>
               </>
             )}
             {view === 'knowledge' && (

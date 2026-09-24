@@ -515,8 +515,9 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 @media (max-width: 960px) { .agrid2 { grid-template-columns: 1fr; } }
 .stage { position: relative; height: var(--agent-page-h); border: 1px solid hsl(var(--border)); border-radius: 16px; overflow: hidden; color: hsl(var(--foreground)); }
 @media (max-width: 960px) { .stage { height: 380px; } }
-.strata { position: absolute; inset: 0; }
-.strata canvas { display: block; }
+/* the ground eases between colours; the canvas fills the stage, so a resize stretches the grain until the redraw instead of leaving a blank strip */
+.strata { position: absolute; inset: 0; transition: background-color 350ms var(--ease-out); }
+.strata canvas { display: block; width: 100%; height: 100%; }
 /* the agent sits in the middle of its stage, as a small white card */
 .stageTile { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -54%); display: flex; flex-direction: column; align-items: center; gap: 12px; width: 220px; padding: 26px 20px 22px; border-radius: 20px; background: hsl(var(--background)); box-shadow: var(--shadow-lg); text-align: center; color: hsl(var(--foreground)); }
 .stageTile b { font-size: 15px; font-weight: 500; line-height: 21px; }
@@ -707,18 +708,26 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .chipLink:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* ── first visit: what a flow is, what knowledge is ── */
-.kindsIntro { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: 20px; padding: 20px 22px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background)); }
+.kindsIntro { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 20px; padding: 20px 22px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background)); }
 @media (max-width: 960px) { .kindsIntro { grid-template-columns: 1fr; } .kindsIntroPlus { display: none; } }
 .kindsIntroPart { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .kindsIntroPart b { font-size: 14px; font-weight: 500; }
 .kindsIntroPart p, .kindsIntroEnd p { font-size: 13px; line-height: 19px; color: hsl(var(--muted-foreground)); }
 .kindsIntroPic { display: grid; place-items: center; width: 56px; height: 56px; flex: none; }
 .kindsIntroPlus { font-size: 20px; color: hsl(var(--muted-foreground)); }
+/* an analysis stands on its own: set off from the flow + knowledge pair by a rule, not a plus */
+.kindsIntroApart { padding-left: 20px; border-left: 1px solid hsl(var(--border)); }
+@media (max-width: 960px) { .kindsIntroApart { padding-left: 0; border-left: 0; } }
 .kindsIntroEnd { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-left: 20px; border-left: 1px solid hsl(var(--border)); }
 @media (max-width: 960px) { .kindsIntroEnd { padding-left: 0; border-left: 0; } }
 
 /* the source switch sits in the content, left-aligned, the same control as the top bar's */
 .sourceSwitch { align-self: flex-start; }
+/* Skriv själv: the kind switch sits centred under the symbol; the symbol boxes keep one height across kinds */
+.kindSwitch { align-self: center; }
+.apAvatarFixed { height: 72px; align-items: center; padding: 0; }
+.tileSymbol { display: grid; place-items: center; height: 104px; }
+.kindFields { display: flex; flex-direction: column; gap: 20px; }
 
 .placeEmpty { padding: 14px 16px; border: 1px dashed hsl(var(--border)); border-radius: 12px; font-size: 13px; color: hsl(var(--muted-foreground)); }
 
