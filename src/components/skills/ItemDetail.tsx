@@ -16,7 +16,7 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Field, Row, SubView } from './AgentDetail'
-import { FlowOrb } from './FlowOrb'
+import { FlowSymbol } from './FlowSymbol'
 import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
 import { catalogHref, itemHue, seedOf, type ItemKind } from './hues'
@@ -187,7 +187,7 @@ function GiveCard({ name, task, hue, has, note, disabled, onToggle }: { name: st
   const [busy, setBusy] = useState(false)
   return (
     <div className={styles.giveCard} data-held={has ? "" : undefined}>
-      <FlowOrb hue={hue} seedKey={name} size={34} />
+      <FlowSymbol hue={hue} size={34} />
       <span className={styles.giveText}><b>{name}</b><span>{note ? `${task} · ${note}` : task}</span></span>
       <Button variant={has ? 'default' : 'outline'} size="icon" className={styles.sqBtn} aria-pressed={has} aria-label={has ? t('knowledge_remove', { name }) : t('give_to_named', { name })} disabled={disabled} loading={busy}
         onClick={() => { setBusy(true); void onToggle().finally(() => setBusy(false)) }}>

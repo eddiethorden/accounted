@@ -16,7 +16,7 @@ import { ItemSymbol } from './ItemSymbol'
 import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
-import { SourceMarks } from './ConnectionMark'
+import { ConnectionMark, SourceMarks } from './ConnectionMark'
 import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
@@ -305,6 +305,14 @@ function Featured({ item, industry }: { item: Item; industry: boolean }) {
         <span>{industry ? t('featured_industry') : item.source === 'community' && item.meta ? t('featured_community', { who: `@${item.meta.author}` }) : t('featured_accounted')}</span>
         <h2>{item.title}</h2>
         <p>{item.lede ?? item.desc}</p>
+        {item.connections && item.connections.length > 0 && (
+          <div className={styles.featuredUses}>
+            <span>{t('featured_uses')}</span>
+            {item.connections.map((c) => (
+              <span key={c} className={styles.featuredChip}><span className={styles.appchip}><ConnectionMark kind={c} /></span>{t(`conn_${c}`)}</span>
+            ))}
+          </div>
+        )}
         <div><Button asChild size="sm"><Link href={item.href}>{t('open_hint')}</Link></Button></div>
       </div>
       <span className={styles.featuredArt}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={120} open /></span>
