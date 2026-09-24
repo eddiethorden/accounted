@@ -130,7 +130,6 @@ type NavLabelKey =
   | 'invoice_inbox'
   | 'arkiv'
   | 'arkiv_all'
-  | 'arkiv_connections'
   | 'arkiv_history'
   | 'invoices'
   | 'quotes'

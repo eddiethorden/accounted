@@ -15,8 +15,8 @@ import { UploadDrop } from './UploadDrop'
 /**
  * /arkiv: the header with upload, the search field, then every document as
  * folders (ArkivTree). While a search is on, the hits stand where the tree
- * was; `?q=` opens the page searching, which is how a counterparty on the
- * Kopplingar page lands here. The search field sits right under the top
+ * was; `?q=` opens the page searching, so a link can land here with a
+ * question ready. The search field sits right under the top
  * bar, so the header carries no "Sök" button of its own, and the way to ask
  * through the person's own assistant lives behind the "?" (convention 7).
  */
