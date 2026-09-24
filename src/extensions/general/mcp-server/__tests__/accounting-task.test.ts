@@ -42,6 +42,17 @@ describe('get_task', () => {
     vi.mocked(loadAgentBundle).mockResolvedValue(null)
     await expect(getAccountingTask({ kind: 'agent:nope' }, 'company-a', {} as never)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
+  it('asks "fungerade det?" at the end of a community flow, and only there', async () => {
+    vi.mocked(loadCatalogSkill).mockResolvedValue({ slug: 'community/stang-dagskassan', name: 'Stäng dagskassan', tier: 'community', summary: '', tags: [], body: '# Steg' })
+    const shared = await getAccountingTask({ kind: 'skill:community/stang-dagskassan' }, 'company-a', {} as never)
+    const closing = shared.instructions.at(-1)!
+    expect(closing).toContain('Fungerade det?')
+    expect(closing).toContain('gnubok_feedback')
+    expect(closing).toContain('skill_slug "community/stang-dagskassan"')
+    vi.mocked(loadCatalogSkill).mockResolvedValue({ slug: 'month-end-close', name: 'Månadsbokslut', tier: 'workflow', summary: '', tags: [], body: '# Steg' })
+    const curated = await getAccountingTask({ kind: 'skill:month-end-close' }, 'company-a', {} as never)
+    expect(curated.instructions.join(' ')).not.toContain('Fungerade det?')
+  })
   it('resolves own slugs only inside the authorized company catalog', async () => {
     vi.mocked(loadCatalogSkill).mockResolvedValue(null)
     await expect(getAccountingTask({ kind: 'skill:own/missing' }, 'company-a', {} as never)).rejects.toMatchObject({ code: 'NOT_FOUND' })

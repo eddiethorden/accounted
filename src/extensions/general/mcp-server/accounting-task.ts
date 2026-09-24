@@ -41,6 +41,14 @@ export const AGENT_INSTRUCTIONS = [
   'A connection with status `missing` cannot be used: tell the user where to connect it (`settings_href`). Status `in_ai` means your own tools (for example Gmail or a browser); use them only if you have them.',
 ] as const
 
+/**
+ * Closes a community flow: the user's answer tells the next company whether
+ * to trust it. gnubok_feedback saves it to the same row as the Skills page.
+ */
+export function communityClosingInstruction(slug: string): string {
+  return `This is a community item shared by another company. When the work is done, ask the user "Fungerade det?" (did it work for you?) and record the answer with gnubok_feedback: skill_slug "${slug}", works true or false, context = what the user said. Ask once; if the user does not answer, record nothing.`
+}
+
 // Compact wire schema: TaskRequestSchema above validates everything, and the
 // handoff prompt passes scope verbatim, so listing its fields here would only
 // spend the default tools/list budget.
@@ -70,7 +78,7 @@ export async function getAccountingTask(args: Record<string, unknown>, companyId
     goal: task.goal,
     scope: scope ?? {},
     skills: [...new Set([...task.skills, ...catalog.filter((skill) => skill.active && skill.tier !== 'workflow').map((skill) => skill.slug)])],
-    instructions: [...ACCOUNTING_TASK_INSTRUCTIONS],
+    instructions: [...ACCOUNTING_TASK_INSTRUCTIONS, ...(requestedSkill?.tier === 'community' ? [communityClosingInstruction(requestedSkill.slug)] : [])],
   }
 }
 
