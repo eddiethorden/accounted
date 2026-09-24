@@ -143,7 +143,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
     <AgentCard
       key={id}
       href={`${hrefBase}/${agentSegment(id)}`}
-      title={t(`skills.${id}.agent`)}
+      title={t(`skills.${id}.name`)}
       desc={t(`skills.${id}.short`)}
       hue={itemHue('workflow', id, id)}
       status={statusFor(id)}

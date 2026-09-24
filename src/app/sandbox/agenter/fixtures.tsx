@@ -118,7 +118,7 @@ const OWN_BODY = [
 ].join('\n')
 
 // Example community items (names, handles and counts are made up for the demo), one or more per kind.
-const shared = (slug: string, name: string, summary: string, kind: 'workflow' | 'rules' | 'analysis' | 'connection', author: string, authorShared: number, votes: number, works: number, notWorks: number) => ({
+const shared = (slug: string, name: string, summary: string, kind: 'workflow' | 'rules' | 'analysis', author: string, authorShared: number, votes: number, works: number, notWorks: number) => ({
   slug: `community/${slug}`, name, summary, tags: ['community'], tier: 'community', source: 'community', active: false, installations: [],
   community: { kind, author, author_shared: authorShared, votes, voted: false, works, not_works: notWorks, feedback: null, reviewed_at: '2026-09-18T10:00:00Z' },
 })
@@ -131,8 +131,6 @@ const CATALOG = [
   shared('ravaruprocent', 'Råvaruprocent per månad', 'Varuinköp mot försäljning, och vad som är normalt för en restaurang.', 'analysis', 'lunchkrogen', 3, 64, 40, 3),
   shared('kassaflode-13', 'Kassaflöde 13 veckor framåt', 'Kända in- och utbetalningar vecka för vecka, med varning när saldot blir lågt.', 'analysis', 'byra-lind', 7, 41, 25, 2),
   shared('personalkostnad', 'Personalkostnad per omsättningskrona', 'Löner och avgifter mot omsättning, månad för månad.', 'analysis', 'kafe-norr', 4, 29, 18, 4),
-  shared('zettle', 'Zettle via din AI', 'Lägg till Zettle-kopplingen i Claude, så kan dagskassan läsas direkt.', 'connection', 'kafe-norr', 4, 19, 12, 1),
-  shared('shopify', 'Shopify-order som underlag', 'Ordrar och utbetalningar från Shopify som underlag till bokföringen.', 'connection', 'butiken', 1, 12, 7, 2),
   { slug: 'own/00000000-0000-4000-8000-000000000001', name: 'Påminnelse om leverantörsfakturor', summary: 'Listar obetalda leverantörsfakturor som förfaller inom en vecka.', tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: '00000000-0000-4000-8000-000000000001', scope: 'company' }] },
 ]
 

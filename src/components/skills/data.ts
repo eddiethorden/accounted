@@ -131,9 +131,9 @@ export function kindOf(skill: SkillSummary): ItemKind {
   return communityMeta(skill)?.kind ?? 'workflow'
 }
 
-/** The URL segments of the item pages that are not flows: a rule pack, or a shared community item. */
+/** The URL segments of the item pages that are not flows: a knowledge pack, or a shared community item. */
 export function rulesSegment(atomId: string): string {
-  return `regler.${atomId.replace('/', '.')}`
+  return `kunskap.${atomId.replace('/', '.')}`
 }
 export function communitySegment(slug: string): string {
   return `community.${slug.replaceAll('/', '.')}`

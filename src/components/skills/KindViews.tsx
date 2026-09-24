@@ -3,33 +3,24 @@
 import { useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronUp } from 'lucide-react'
-import { CONNECTION_SETTINGS, isCheckable, type AgentConnection } from '@/lib/agent-skills/agents'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { AgentCard } from './AgentCard'
-import { ConnectionMark } from './ConnectionMark'
 import { SlidingTabs } from './SlidingTabs'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
-type Source = 'accounted' | 'community' | 'own' | 'ai'
+type Source = 'accounted' | 'community' | 'own'
 
-const SOURCES: Record<Exclude<ItemKind, 'workflow'>, Source[]> = {
-  rules: ['accounted', 'community', 'own'],
-  analysis: ['accounted', 'community', 'own'],
-  connection: ['accounted', 'community', 'ai'],
-}
+const SOURCES: Source[] = ['accounted', 'community', 'own']
 const LEVELS = ['horizontal', 'modifier', 'vertical'] as const
-const ACCOUNTED_CONNECTIONS: AgentConnection[] = ['bank', 'skatteverket', 'peppol']
-const AI_CONNECTIONS: AgentConnection[] = ['mail', 'browser']
 
 /**
- * Regler, Analyser and Kopplingar: the same page as the flows, with the same
- * three sources in tabs. Regler are the reviewed packs (grouped general to
- * specific), Kopplingar are Accounted's own, the community's recipes, and
- * what lives in the user's AI.
+ * Kunskap and Analyser: the same page as the flows, with the same three
+ * sources in tabs. Kunskap is the reviewed packs, grouped general to
+ * specific; a pack never runs on its own, it is given to flows.
  */
 export function KindView({ kind, hrefBase, catalog, options, overview, clientName, remembered }: {
   kind: Exclude<ItemKind, 'workflow'>
@@ -48,7 +39,6 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
   const community = catalog.filter((s) => s.tier === 'community' && kindOf(s) === kind)
     .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
   const usedBy = (atomId: string) => overview?.agents.filter((a) => a.knowledge.some((k) => k.id === atomId)).length ?? 0
-  const connectionState = (kindName: AgentConnection) => overview?.agents.flatMap((a) => a.connections).find((c) => c.kind === kindName)?.status
 
   const count = (s: Source) => s === 'community' ? community.length : 0
   const packs = options.filter((o) => o.tier !== 'community')
@@ -60,9 +50,9 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
         value={source}
         onChange={setSource}
         ids={{ prefix: `${kind}-tab`, controls: `${kind}-panel` }}
-        options={SOURCES[kind].map((key) => ({
+        options={SOURCES.map((key) => ({
           value: key,
-          label: <>{key === 'ai' ? t('tab_ai', { client: clientName }) : t(`tab_${key}`)}{count(key) > 0 && <span className={styles.tabCount}>{count(key)}</span>}</>,
+          label: <>{t(`tab_${key}`)}{count(key) > 0 && <span className={styles.tabCount}>{count(key)}</span>}</>,
         }))}
       />
       <div key={source} className={`${styles.kindPanel} ${styles.fadeIn}`} id={`${kind}-panel`} role="tabpanel" aria-labelledby={`${kind}-tab-${source}`}>
@@ -99,39 +89,6 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
         {kind === 'analysis' && source === 'accounted' && <Empty title={t('analysis_accounted_title')} body={t('analysis_accounted_body')} />}
         {kind === 'analysis' && source === 'own' && <Empty title={t('analysis_own_title')} body={t('analysis_own_body', { client: clientName })} />}
 
-        {kind === 'connection' && source === 'accounted' && (
-          <ul className={styles.agrid}>{ACCOUNTED_CONNECTIONS.map((c) => {
-            const state = connectionState(c)
-            return (
-              <li key={c}>
-                <AgentCard
-                  href={CONNECTION_SETTINGS[c as keyof typeof CONNECTION_SETTINGS]}
-                  title={t(`conn_${c}`)}
-                  desc={t(`conn_desc_${c}`)}
-                  hue={itemHue('connection', c)}
-                  marks={<span className={styles.mark}><ConnectionMark kind={c} /></span>}
-                  foot={state && isCheckable(c) ? <span className={styles.status} data-presence={state === 'connected' ? 'ready' : 'blocked'}>{t(state === 'connected' ? 'conn_state_connected' : 'conn_state_missing')}</span> : undefined}
-                />
-              </li>
-            )
-          })}</ul>
-        )}
-        {kind === 'connection' && source === 'ai' && (
-          <>
-            <p className={styles.note}>{t('conn_ai_note', { client: clientName })}</p>
-            <ul className={styles.agrid}>{AI_CONNECTIONS.map((c) => (
-              <li key={c}>
-                <AgentCard
-                  title={t(`conn_${c}`)}
-                  desc={t(`conn_desc_${c}`)}
-                  hue={itemHue('connection', c)}
-                  marks={<span className={styles.mark}><ConnectionMark kind={c} /></span>}
-                  foot={<span className={styles.metaLine}>{t('conn_ai_unseen', { client: clientName })}</span>}
-                />
-              </li>
-            ))}</ul>
-          </>
-        )}
       </div>
     </section>
   )
