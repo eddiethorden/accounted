@@ -583,3 +583,5 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .fadeIn { animation: view-in 300ms var(--ease-out) both; }
 .statusSlot { min-height: 17px; }
 @media (prefers-reduced-motion: reduce) { .viewIn, .apage, .fadeIn { animation: none; } }
+
+.bot { position: relative; flex: none; display: inline-grid; place-items: center; }

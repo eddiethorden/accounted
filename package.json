@@ -57,6 +57,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "3d-force-graph": "1.80.0",
     "ai": "6.0.259",
+    "bot-avatars": "0.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

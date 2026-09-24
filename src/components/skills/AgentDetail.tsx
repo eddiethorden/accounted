@@ -5,12 +5,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, FileText, Globe, Landmark, Plus, Search, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, Plus, Search, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
-import { useCashAccounts } from '@/lib/reference-data/hooks'
-import { bankLogoUrl } from '@/lib/reconciliation/bank-logos'
 import { AGENTS, CONNECTION_SETTINGS, isAgentId, isCheckable, type AgentConnection } from '@/lib/agent-skills/agents'
 import type { AgentConnectionState, AgentsOverview, KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeAction, KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
@@ -21,10 +19,11 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { AgentSphere, seedOf } from './AgentSphere'
+import { AgentBot } from './AgentBot'
+import { seedOf } from './AgentSphere'
 import { AGENT_GROUNDS, OWN_GROUND } from './agent-stages'
 import { StrataField } from './StrataField'
-import { GmailMark } from './SkillMarks'
+import { ConnectionMark } from './ConnectionMark'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
 import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
@@ -173,16 +172,17 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
         <section className={styles.stage} aria-label={name}>
           <StrataField seed={seedOf(agentId)} ground={ground} />
           <div className={styles.stageTile}>
-            <AgentSphere size={72} presence={status?.presence ?? 'ready'} seed={seedOf(agentId) % 100} />
+            <AgentBot agentKey={agentId} curated={curated} presence={status?.presence} size={88} />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" variant="outline" className="gap-2" onClick={run}>
+            <Button size="lg" variant="secondary" className="gap-2" onClick={run}>
               {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
               <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Button>
-            {status && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
+            {/* only a status worth reading: work waiting, a missing connection, no AI yet */}
+            {status && status.presence !== 'ready' && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
           </div>
         </section>
 
@@ -289,19 +289,6 @@ function KnowledgeChip({ knowledge, canEdit, onRemove }: { knowledge: KnowledgeM
       )}
     </span>
   )
-}
-
-/** A connection with its brand mark: the company's bank, Skatteverket, Peppol, or what lives in the AI. */
-function ConnectionMark({ kind }: { kind: AgentConnection }) {
-  const { cashAccounts } = useCashAccounts({ enabledOnly: true })
-  const bank = cashAccounts.map((a) => bankLogoUrl(a.bank_name, a.name)).find((url): url is string => !!url)
-  /* eslint-disable @next/next/no-img-element */
-  if (kind === 'skatteverket') return <img src="/logos/skatteverket_color.svg" alt="" />
-  if (kind === 'mail') return <GmailMark />
-  if (kind === 'bank') return bank ? <img src={bank} alt="" /> : <Landmark className="h-4 w-4" aria-hidden />
-  if (kind === 'peppol') return <FileText className="h-4 w-4" aria-hidden />
-  return <Globe className="h-4 w-4" aria-hidden />
-  /* eslint-enable @next/next/no-img-element */
 }
 
 function ConnectionChip({ connection }: { connection: AgentConnectionState }) {

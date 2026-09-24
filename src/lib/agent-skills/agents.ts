@@ -84,14 +84,15 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
   'invoicing-rules': {
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`, 'horizontal/swedish-e-invoicing/swedish-cius-and-specifics', 'horizontal/swedish-e-invoicing/consumer-and-b2c'],
-    connections: ['peppol', 'mail'],
+    // Invoices go out by e-mail from Accounted; Peppol is optional, so the agent does not wait on it.
+    connections: [],
     facts: ['legal_name', 'org_number', 'registered_office', 'f_skatt', 'vat_registered', 'sni_codes'],
     agreements: false,
   },
   'kreditfaktura-process': {
     knowledge: [INVOICE, VAT],
     references: [`${INVOICE}/invoice-rules`],
-    connections: ['peppol'],
+    connections: [],
     facts: ['vat_registered', 'accounting_method'],
     agreements: false,
   },
