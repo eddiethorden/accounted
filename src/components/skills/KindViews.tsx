@@ -6,7 +6,7 @@ import { ChevronUp } from 'lucide-react'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { AgentCard } from './AgentCard'
-import { SlidingTabs } from './SlidingTabs'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
@@ -45,17 +45,14 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
 
   return (
     <section className={styles.lower} aria-label={t(`kind_${kind}`)}>
-      <SlidingTabs
-        label={t(`kind_${kind}`)}
+      <SegmentedControl
+        aria-label={t('sources_label')}
+        className={styles.sourceSwitch}
         value={source}
         onChange={setSource}
-        ids={{ prefix: `${kind}-tab`, controls: `${kind}-panel` }}
-        options={SOURCES.map((key) => ({
-          value: key,
-          label: <>{t(`tab_${key}`)}{count(key) > 0 && <span className={styles.tabCount}>{count(key)}</span>}</>,
-        }))}
+        options={SOURCES.map((key) => ({ value: key, label: t(`tab_${key}`), count: count(key) }))}
       />
-      <div key={source} className={`${styles.kindPanel} ${styles.fadeIn}`} id={`${kind}-panel`} role="tabpanel" aria-labelledby={`${kind}-tab-${source}`}>
+      <div key={source} className={`${styles.kindPanel} ${styles.fadeIn}`} id={`${kind}-panel`} role="tabpanel" aria-label={t(`tab_${source}`)}>
         {source === 'community' && (community.length === 0
           ? <Empty title={t('community_empty_title')} body={t(`community_empty_${kind}`)} />
           : <ul className={styles.agrid}>{community.map((skill) => (

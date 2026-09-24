@@ -23,7 +23,7 @@ import { FlowOrb } from './FlowOrb'
 import { itemHue, seedOf } from './hues'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
-import { SlidingTabs } from './SlidingTabs'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
 import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, rulesSegment, simulatedClient, type SkillSummary } from './data'
@@ -394,7 +394,7 @@ function KnowledgePanel({ held, options, onBack, onChange }: {
   return (
     <div className="flex flex-col gap-4">
       <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
-      <SlidingTabs fill label={t('section_knowledge')} value={source} onChange={setSource} options={[{ value: 'accounted' as const, label: t('tab_accounted') }, { value: 'community' as const, label: t('tab_community') }]} />
+      <SegmentedControl aria-label={t('sources_label')} className={styles.sourceSwitch} value={source} onChange={setSource} options={[{ value: 'accounted' as const, label: t('tab_accounted') }, { value: 'community' as const, label: t('tab_community') }]} />
       <label className={styles.search}>
         <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
         <input id="agent-knowledge-search" type="search" value={query} placeholder={t('knowledge_search')} onChange={(e) => setQuery(e.target.value)} />
