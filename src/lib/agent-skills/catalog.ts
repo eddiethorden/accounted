@@ -37,7 +37,7 @@ export async function loadSkillCatalog(supabase: SupabaseClient, companyId: stri
       // but are never returned as active or loadable to an AI.
       if (!skill && (row.atom_id || !row.name || !row.body)) return []
       return [{
-        ...(skill ?? { slug: `own/${row.id}`, name: row.name!, summary: row.description ?? '', body: row.body!, tags: ['own'], tier: 'own' as const, source: 'own' as const }),
+        ...(skill ?? { slug: `own/${row.id}`, name: row.name!, summary: row.description ?? '', body: row.body!, tags: ['own'], tier: 'own' as const, source: 'own' as const, itemKind: row.kind ?? 'workflow' }),
         active: row.share_status !== 'withdrawn' && !row.draft, shareStatus: row.share_status,
         ...(row.draft ? { draft: true } : {}),
         installations: [{ installation_id: row.id, scope: row.team_id ? 'team' : 'company' }],

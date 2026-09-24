@@ -66,7 +66,16 @@ describe('skills HTTP routes', () => {
   it('creates private instructions under the resolved company and user', async () => {
     enqueue({ data: { id } })
     expect((await POST(request('POST', { kind: 'own', name: 'Name', description: 'Desc', body: 'Use mappings.' }), staticParams)).status).toBe(201)
-    expect(findCall('company_skills', 'insert')?.[0]).toMatchObject({ company_id: 'company-a', team_id: null, created_by: 'user' })
+    expect(findCall('company_skills', 'insert')?.[0]).toMatchObject({ company_id: 'company-a', team_id: null, created_by: 'user', kind: 'workflow' })
+  })
+  it('stores what an own item is when it is written by hand', async () => {
+    enqueue({ data: { id } })
+    expect((await POST(request('POST', { kind: 'own', item_kind: 'rules', name: 'Name', description: 'Desc', body: 'Vidarefakturering: med moms.' }), staticParams)).status).toBe(201)
+    expect(findCall('company_skills', 'insert')?.[0]).toMatchObject({ kind: 'rules' })
+  })
+  it('rejects an unknown kind of item', async () => {
+    expect((await POST(request('POST', { kind: 'own', item_kind: 'connection', name: 'Name', description: 'Desc', body: 'B' }), staticParams)).status).toBe(400)
+    expect(supabase.from).not.toHaveBeenCalled()
   })
   it('does not add a withdrawn catalog skill', async () => {
     enqueue({ data: null })

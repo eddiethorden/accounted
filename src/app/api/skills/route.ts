@@ -48,6 +48,7 @@ export const POST = withRouteContext('skills.create', async (request, { supabase
     name: input.kind === 'own' ? input.name : null,
     description: input.kind === 'own' ? input.description : null,
     body: input.kind === 'own' ? input.body : null,
+    ...(input.kind === 'own' ? { kind: input.item_kind } : {}),
   }).select('id').single()
   if (error?.code === '23505') return NextResponse.json({ error: { code: 'CONFLICT', message: 'Skillen är redan tillagd.', message_en: 'Skill already added.' } }, { status: 409 })
   if (error) throw error
