@@ -843,7 +843,7 @@ export default function SupplierInvoiceDetailPage() {
             />
           )}
           {canApprove && (
-            <Button
+            <Button size="sm"
               onClick={handleApprove}
               disabled={isProcessing || !canWrite}
               loading={processingAction === 'approve'}
@@ -858,7 +858,7 @@ export default function SupplierInvoiceDetailPage() {
             </Button>
           )}
           {canAddToFile && (
-            <Button onClick={() => setIsFileDialogOpen(true)} disabled={isProcessing || !canWrite} title={!canWrite ? t('viewer_disabled_tooltip') : undefined}>
+            <Button size="sm" onClick={() => setIsFileDialogOpen(true)} disabled={isProcessing || !canWrite} title={!canWrite ? t('viewer_disabled_tooltip') : undefined}>
               {canWrite ? <FileText className="mr-2 h-4 w-4" /> : <Lock className="mr-2 h-4 w-4" />}
               {t('add_to_payment_file')}
             </Button>
@@ -867,7 +867,7 @@ export default function SupplierInvoiceDetailPage() {
               betald steps back to a secondary so the header keeps one next
               step (an aged-but-unattested invoice can have both). */}
           {canMarkPaid && (
-            <Button
+            <Button size="sm"
               variant={canApprove || canAddToFile ? 'outline' : 'default'}
               onClick={() => setIsPayDialogOpen(true)}
               disabled={isProcessing || !canWrite}
@@ -878,7 +878,7 @@ export default function SupplierInvoiceDetailPage() {
             </Button>
           )}
           {canUncredit && (
-            <Button
+            <Button size="sm"
               variant="outline"
               onClick={handleUncredit}
               disabled={isProcessing || !canWrite}
@@ -899,7 +899,7 @@ export default function SupplierInvoiceDetailPage() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   aria-label={tCommon('more_options')}
                   loading={processingAction === 'credit' || processingAction === 'delete'}
                 >

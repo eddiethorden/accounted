@@ -378,7 +378,7 @@ export default function PeriodiseringWizardPage() {
       <PageHeader
         title={closingYear ? `Periodisering: Bokslut ${closingYear}` : 'Periodisering'}
         action={
-          <Button variant="outline" asChild>
+          <Button size="sm" variant="outline" asChild>
             <Link href="/bookkeeping/year-end">
               <ArrowLeft className="mr-2 h-4 w-4" /> Tillbaka till bokslut
             </Link>

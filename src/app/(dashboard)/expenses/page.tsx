@@ -933,9 +933,9 @@ export default function ExpenseClaimsPage() {
         description={t('description')}
         action={
           canWrite ? (
-            <Button onClick={() => setCreating(true)}>{t('new_claim')}</Button>
+            <Button size="sm" onClick={() => setCreating(true)}>{t('new_claim')}</Button>
           ) : (
-            <Button disabled title={t('viewer_disabled_tooltip')}>
+            <Button size="sm" disabled title={t('viewer_disabled_tooltip')}>
               <Lock className="mr-2 h-4 w-4" />
               {t('new_claim')}
             </Button>
@@ -986,7 +986,7 @@ export default function ExpenseClaimsPage() {
           ]}
         />
         {canWrite && selected.size > 0 && (
-          <Button
+          <Button size="sm"
             variant="outline"
             disabled={!selectionValid}
             title={selectionValid ? undefined : t('payout_selection_invalid')}

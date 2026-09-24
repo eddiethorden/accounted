@@ -1414,7 +1414,7 @@ export default function InvoiceInboxWorkspace(_props: WorkspaceComponentProps) {
             onChange={handleFileInputChange}
           />
           {agentHandoff && (agentHandoff.count > 0 || purchases.length > 0) && (
-            <KvittojaktenButton clients={agentHandoff.clients} variant="button" />
+            <KvittojaktenButton clients={agentHandoff.clients} />
           )}
           <Button
             variant="outline"
