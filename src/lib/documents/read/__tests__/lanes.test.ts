@@ -53,6 +53,13 @@ describe('needsReadOnDemand', () => {
     expect(needsReadOnDemand({ pages_read_at: 'x', read_error: null })).toBe(false)
     expect(needsReadOnDemand({ pages_read_at: 'x', read_error: 'download_failed: gone' })).toBe(false)
   })
+
+  it('reads again what an earlier reader could not and a later one can: an oversized photo, a HEIC', () => {
+    expect(needsReadOnDemand({ pages_read_at: 'x', read_error: 'read_failed: 400 messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 6721660 bytes > 5242880 bytes', mime_type: 'image/jpeg' })).toBe(true)
+    expect(needsReadOnDemand({ pages_read_at: 'x', read_error: 'unsupported_mime', mime_type: 'image/heic' })).toBe(true)
+    expect(needsReadOnDemand({ pages_read_at: 'x', read_error: 'unsupported_mime', mime_type: 'application/zip' })).toBe(false)
+    expect(needsReadOnDemand({ pages_read_at: 'x', read_error: 'read_failed: Invalid PDF structure.', mime_type: 'application/pdf' })).toBe(false)
+  })
 })
 
 describe('historyReaderTier', () => {

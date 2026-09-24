@@ -46,7 +46,7 @@ export const GET = withRouteContext('arkiv.document', async (_request, ctx, { pa
   const { id } = await params
   const { data: doc, error } = await ctx.supabase
     .from('document_attachments')
-    .select('id, file_name, created_at, page_count, doc_type, admission_state, journal_entry_id, journal_entry_line_id, pages_read_at, read_error, extracted_data')
+    .select('id, file_name, created_at, page_count, doc_type, admission_state, journal_entry_id, journal_entry_line_id, pages_read_at, read_error, extracted_data, mime_type')
     .eq('id', id)
     .eq('company_id', ctx.companyId)
     .maybeSingle()
@@ -63,6 +63,7 @@ export const GET = withRouteContext('arkiv.document', async (_request, ctx, { pa
     journal_entry_line_id: string | null
     pages_read_at: string | null
     read_error: string | null
+    mime_type?: string | null
     extracted_data: {
       lineItems?: Array<{ description?: string | null; quantity?: number | null; unitPrice?: number | null; lineTotal?: number | null; vatRate?: number | null }>
     } | null

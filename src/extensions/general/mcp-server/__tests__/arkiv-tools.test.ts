@@ -142,6 +142,16 @@ describe('Arkiv tools', () => {
     await expect(tool('gnubok_read_document').execute({ record_ref: `agreement:${AGR}` }, CO, 'user-1', supabase)).rejects.toThrow(/document:<uuid>/)
   })
 
+  it('read_document says why a document has no text instead of answering with nothing', async () => {
+    enqueue({ data: { id: DOC, file_name: 'data.csv', doc_type: null, page_count: null } })
+    enqueue({ data: [] })
+    enqueue({ data: { read_error: 'read_failed: unsupported input' } })
+    const out = (await tool('gnubok_read_document').execute({ document_id: DOC }, CO, 'user-1', supabase)) as { pages: unknown[]; unreadable: string; file_url_hint: string }
+    expect(out.pages).toEqual([])
+    expect(out.unreadable).toBe('read_failed: unsupported input')
+    expect(out.file_url_hint).toContain('gnubok_get_source')
+  })
+
   it('list_records refuses an unknown type with the names it takes', async () => {
     await expect(tool('gnubok_list_records').execute({ type: 'spaceship' }, CO, 'user-1', supabase)).rejects.toThrow(/agreements, authority/)
   })

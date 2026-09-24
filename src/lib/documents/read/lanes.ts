@@ -84,6 +84,18 @@ export function readPlanFor(input: PlanInput): ReadPlan | null {
 /** The read stamps a question or a budget may finish: the model was never let at the pages, or only at some. */
 export const ON_DEMAND_REASONS = ['ai_gated', 'partial:ai_gated', 'partial:budget', 'ai_unconfigured', 'partial:ai_unconfigured'] as const
 
-export function needsReadOnDemand(doc: { pages_read_at?: string | null; read_error?: string | null }): boolean {
-  return !doc.pages_read_at || (ON_DEMAND_REASONS as readonly string[]).includes(doc.read_error ?? '')
+/**
+ * Failures a later reader cures: a photo over the model's 5 MB limit (read
+ * before downscaling existed) and a HEIC stamped unsupported (read before it
+ * was decoded). Stamped once, they were never tried again, so an agent asking
+ * for the page got nothing (prod 2026-09-24: 5 photos on verifikat, 4 HEICs).
+ */
+export function isCuredFailure(doc: { read_error?: string | null; mime_type?: string | null }): boolean {
+  const reason = doc.read_error ?? ''
+  if (/exceeds 5 MB maximum/.test(reason)) return true
+  return reason === 'unsupported_mime' && (doc.mime_type === 'image/heic' || doc.mime_type === 'image/heif')
+}
+
+export function needsReadOnDemand(doc: { pages_read_at?: string | null; read_error?: string | null; mime_type?: string | null }): boolean {
+  return !doc.pages_read_at || (ON_DEMAND_REASONS as readonly string[]).includes(doc.read_error ?? '') || isCuredFailure(doc)
 }
