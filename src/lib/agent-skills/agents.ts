@@ -18,7 +18,7 @@ import type { RegistrySkillId } from './registry'
  *
  * Each agent is named for its job (Kvittoagent, Momsagent). Its picture is the
  * onboarding's particle sphere (components/skills/AgentSphere.tsx); its page
- * stands it on a strata render (components/skills/agent-stages.ts).
+ * stands it on a plain ground with faint strata (components/skills/StrataField.tsx).
  *
  * Browser-safe: the Agenter page imports this file. Every id must resolve to an
  * agent-audience atom (pinned by __tests__/agents.test.ts).

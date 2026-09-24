@@ -22,7 +22,8 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
 import { AgentSphere, seedOf } from './AgentSphere'
-import { AGENT_STAGES, OWN_STAGE } from './agent-stages'
+import { AGENT_GROUNDS, OWN_GROUND } from './agent-stages'
+import { StrataField } from './StrataField'
 import { GmailMark } from './SkillMarks'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
@@ -94,7 +95,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
   const name = curated ? t(`skills.${curated}.agent`) : own?.name ?? ''
   const task = curated ? t(`skills.${curated}.name`) : null
-  const stage = curated ? AGENT_STAGES[curated] : OWN_STAGE
+  const ground = curated ? AGENT_GROUNDS[curated] : OWN_GROUND
   const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
   const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data?.own_knowledge[agentId] ?? []
@@ -169,17 +170,15 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
       <PageHeader title={t('title')} />
       <Link href={backHref} className={styles.back}><ArrowLeft className="h-4 w-4" aria-hidden />{t('back_to_agents')}</Link>
       <div className={styles.agrid2}>
-        <section className={styles.stage} style={{ background: stage.ground }} aria-label={name}>
-          {/* A static, pre-sized strata render from public/agenter: next/image adds nothing here. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className={styles.stageImg} src={stage.src} width={stage.w} height={stage.h} alt="" style={{ objectPosition: stage.position }} />
+        <section className={styles.stage} aria-label={name}>
+          <StrataField seed={seedOf(agentId)} ground={ground} />
           <div className={styles.stageTile}>
             <AgentSphere size={72} presence={status?.presence ?? 'ready'} seed={seedOf(agentId) % 100} />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" className="gap-2" onClick={run}>
+            <Button size="lg" variant="outline" className="gap-2" onClick={run}>
               {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
               <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Button>
