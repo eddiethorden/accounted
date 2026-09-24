@@ -30,7 +30,8 @@ describe('POST /api/agents/community/feedback', () => {
     [{ slug: SLUG }],
     [{ slug: 'bookkeep', vote: true }],
     [{ slug: SLUG, vote: 'yes' }],
-    [{ slug: SLUG, feedback: 'maybe' }],
+    [{ slug: SLUG, feedback: 'works' }],
+    [{ slug: SLUG, vote: true, feedback: 'works' }],
     [{ slug: SLUG, vote: true, company_id: 'other' }],
   ])('rejects invalid input %j', async (body) => {
     expect((await post(body)).status).toBe(400)
@@ -44,21 +45,17 @@ describe('POST /api/agents/community/feedback', () => {
     expect(findCall('community_feedback', 'upsert')).toBeUndefined()
   })
 
-  it('saves a vote alone, leaving the answer as it was', async () => {
-    enqueue({ data: { id: SLUG } }); enqueue({ data: { vote: true, feedback: 'works' } })
+  it('saves an upvote', async () => {
+    enqueue({ data: { id: SLUG } }); enqueue({ data: { vote: true } })
     const response = await post({ slug: SLUG, vote: true })
     expect(response.status).toBe(200)
-    expect((await response.json()).data).toEqual({ slug: SLUG, vote: true, feedback: 'works' })
+    expect((await response.json()).data).toEqual({ slug: SLUG, vote: true })
     expect(findCall('community_feedback', 'upsert')).toEqual([{ atom_id: SLUG, company_id: 'company-a', user_id: 'user-a', vote: true }, { onConflict: 'atom_id,user_id' }])
   })
 
-  it('saves an answer alone, and null clears it', async () => {
-    enqueue({ data: { id: SLUG } }); enqueue({ data: { vote: false, feedback: 'not_works' } })
-    expect((await post({ slug: SLUG, feedback: 'not_works' })).status).toBe(200)
-    expect(findCall('community_feedback', 'upsert')?.[0]).toEqual({ atom_id: SLUG, company_id: 'company-a', user_id: 'user-a', feedback: 'not_works' })
-    reset()
-    enqueue({ data: { id: SLUG } }); enqueue({ data: { vote: false, feedback: null } })
-    expect((await post({ slug: SLUG, feedback: null })).status).toBe(200)
-    expect(findCall('community_feedback', 'upsert')?.[0]).toEqual({ atom_id: SLUG, company_id: 'company-a', user_id: 'user-a', feedback: null })
+  it('takes an upvote back', async () => {
+    enqueue({ data: { id: SLUG } }); enqueue({ data: { vote: false } })
+    expect((await post({ slug: SLUG, vote: false })).status).toBe(200)
+    expect(findCall('community_feedback', 'upsert')?.[0]).toEqual({ atom_id: SLUG, company_id: 'company-a', user_id: 'user-a', vote: false })
   })
 })

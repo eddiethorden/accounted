@@ -108,9 +108,9 @@ export function agentIdFromSegment(segment: string): string {
 }
 
 /**
- * What the community says about a shared item: its kind, who shared it,
- * votes and "fungerar / fungerar inte". The catalog sends it on every
- * community item (src/lib/agent-skills/community.ts).
+ * What the community says about a shared item: its kind, who shared it and
+ * its upvotes. The catalog sends it on every community item
+ * (src/lib/agent-skills/community.ts, the one definition).
  */
 export type { CommunityMeta }
 export function communityMeta(skill: SkillSummary): CommunityMeta | null {

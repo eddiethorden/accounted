@@ -42,11 +42,12 @@ export const AGENT_INSTRUCTIONS = [
 ] as const
 
 /**
- * Closes a community flow: the user's answer tells the next company whether
- * to trust it. gnubok_feedback saves it to the same row as the Skills page.
+ * Closes a community flow: a "yes, it worked" is the user's upvote, which
+ * tells the next company to trust it. gnubok_feedback saves it to the same
+ * row as the upvote on the Agentinstruktioner page.
  */
 export function communityClosingInstruction(slug: string): string {
-  return `This is a community item shared by another company. When the work is done, ask the user "Fungerade det?" (did it work for you?) and record the answer with gnubok_feedback: skill_slug "${slug}", works true or false, context = what the user said. Ask once; if the user does not answer, record nothing.`
+  return `This is a community item shared by another company. When the work is done, ask the user "Fungerade det?" (did it work for you?). On a yes, call gnubok_feedback with skill_slug "${slug}", upvote true, context = what the user said. On a no or no answer, record nothing. Ask once.`
 }
 
 // Compact wire schema: TaskRequestSchema above validates everything, and the

@@ -117,7 +117,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
 
   const hue = itemHue(item.kind, item.key)
   // Back to where the item lives: its industry or company form, or the general list.
-  const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : item.community?.industries[0] ?? null
+  const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : null
   const listHref = catalogHref(backHref, item.kind, home)
   // Own items live under Egna.
   const back = item.own ? `${listHref}${listHref.includes('?') ? '&' : '?'}vy=egna` : listHref

@@ -1,21 +1,15 @@
--- Community feedback on shared agent instructions (Agentinstruktioner).
+-- Community upvotes on shared agent instructions (Agentinstruktioner).
 --
--- 1. What kind of item a shared instruction is (flow, knowledge, analysis),
---    chosen by its author at submission. Stored on the submission itself
---    (company_skills), frozen with the rest of the submitted content, and
---    read through published_atom_id once the reviewer has published it.
--- 2. community_feedback: one row per (community item, user). A vote and a
---    "fungerar / fungerar inte" answer, independent of each other. A user
---    reads and writes only their own row; everyone sees the counts through
---    community_item_stats(), which returns aggregates and public listing
---    data only, never a company or user.
+-- 1. The kind of a shared item (company_skills.kind, added by
+--    20260924180657_company_skills_kind) is frozen once the item is submitted,
+--    like the name and body (guard_company_skill_change), and read through
+--    published_atom_id once the reviewer has published it.
+-- 2. community_feedback: one row per (community item, user) holding that
+--    person's upvote. A user reads and writes only their own row; everyone
+--    sees the counts through community_item_stats(), which returns aggregates
+--    and public listing data only, never a company or user.
 
--- 1. The kind of a shared item
-ALTER TABLE public.company_skills
-  ADD COLUMN kind text NOT NULL DEFAULT 'workflow' CHECK (kind IN ('workflow', 'rules', 'analysis'));
-
--- The author chooses it when submitting; afterwards it is part of the frozen
--- submission, like the name and body (guard_company_skill_change).
+-- 1. The kind is part of the frozen submission
 CREATE FUNCTION public.freeze_company_skill_kind() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
@@ -28,14 +22,13 @@ $$;
 CREATE TRIGGER company_skills_kind_frozen BEFORE UPDATE ON public.company_skills
   FOR EACH ROW EXECUTE FUNCTION public.freeze_company_skill_kind();
 
--- 2. Votes and answers
+-- 2. Upvotes
 CREATE TABLE public.community_feedback (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   atom_id text NOT NULL REFERENCES public.agent_atom_registry(id) ON DELETE CASCADE,
   company_id uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   vote boolean NOT NULL DEFAULT false,
-  feedback text CHECK (feedback IN ('works', 'not_works')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT community_feedback_one_per_user UNIQUE (atom_id, user_id)
@@ -59,7 +52,7 @@ CREATE POLICY community_feedback_update ON public.community_feedback FOR UPDATE 
 CREATE POLICY community_feedback_delete ON public.community_feedback FOR DELETE TO authenticated
   USING (user_id = auth.uid());
 
--- Only live, published community items can be rated, and a row stays on its
+-- Only live, published community items can be voted on, and a row stays on its
 -- item and its person.
 CREATE FUNCTION public.guard_community_feedback() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
@@ -71,7 +64,7 @@ BEGIN
     SELECT 1 FROM public.agent_atom_registry a
     WHERE a.id = NEW.atom_id AND a.tier = 'community' AND a.is_active AND a.mcp_exposed AND a.parent_atom_id IS NULL
   ) THEN
-    RAISE EXCEPTION 'Only live community items can be rated' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Only live community items can be voted on' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
@@ -88,15 +81,15 @@ CREATE TRIGGER audit_community_feedback
 
 -- Everything the catalog shows about a live community item, in one read:
 -- its kind, its author, how many items the author has published,
--- whether the author is an accounting firm (a byrå team), vote and answer
--- counts, and how many companies loaded it (mcp.skill_loaded, as far back as
+-- whether the author is an accounting firm (a byrå team), the upvote
+-- count, and how many companies loaded it (mcp.skill_loaded, as far back as
 -- event_log keeps skill loads). SECURITY DEFINER because votes, submissions
 -- and loads belong to other tenants; only public listing data and counts
 -- leave the function.
 CREATE FUNCTION public.community_item_stats()
 RETURNS TABLE (
   atom_id text, kind text, author text,
-  author_shared integer, author_verified boolean, votes integer, works integer, not_works integer, used_by integer
+  author_shared integer, author_verified boolean, votes integer, used_by integer
 )
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   WITH items AS (
@@ -117,11 +110,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   authors AS (
     SELECT l.author_handle, count(*)::integer AS shared FROM listing l GROUP BY l.author_handle
   ),
-  answers AS (
-    SELECT f.atom_id,
-      (count(*) FILTER (WHERE f.vote))::integer AS votes,
-      (count(*) FILTER (WHERE f.feedback = 'works'))::integer AS works,
-      (count(*) FILTER (WHERE f.feedback = 'not_works'))::integer AS not_works
+  upvotes AS (
+    SELECT f.atom_id, (count(*) FILTER (WHERE f.vote))::integer AS votes
     FROM public.community_feedback f JOIN items i ON i.id = f.atom_id
     GROUP BY f.atom_id
   ),
@@ -134,11 +124,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   )
   SELECT i.id, COALESCE(l.kind, 'workflow'), l.author_handle,
     COALESCE(au.shared, 0), COALESCE(l.verified, false),
-    COALESCE(an.votes, 0), COALESCE(an.works, 0), COALESCE(an.not_works, 0), COALESCE(lo.companies, 0)
+    COALESCE(an.votes, 0), COALESCE(lo.companies, 0)
   FROM items i
   LEFT JOIN listing l ON l.atom_id = i.id
   LEFT JOIN authors au ON au.author_handle = l.author_handle
-  LEFT JOIN answers an ON an.atom_id = i.id
+  LEFT JOIN upvotes an ON an.atom_id = i.id
   LEFT JOIN loads lo ON lo.atom_id = i.id
   ORDER BY i.id;
 $$;

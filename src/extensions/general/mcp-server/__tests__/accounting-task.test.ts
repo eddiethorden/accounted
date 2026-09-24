@@ -48,7 +48,7 @@ describe('get_task', () => {
     const closing = shared.instructions.at(-1)!
     expect(closing).toContain('Fungerade det?')
     expect(closing).toContain('gnubok_feedback')
-    expect(closing).toContain('skill_slug "community/stang-dagskassan"')
+    expect(closing).toContain('skill_slug "community/stang-dagskassan", upvote true')
     vi.mocked(loadCatalogSkill).mockResolvedValue({ slug: 'month-end-close', name: 'Månadsbokslut', tier: 'workflow', summary: '', tags: [], body: '# Steg' })
     const curated = await getAccountingTask({ kind: 'skill:month-end-close' }, 'company-a', {} as never)
     expect(curated.instructions.join(' ')).not.toContain('Fungerade det?')

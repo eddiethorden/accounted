@@ -26,8 +26,8 @@ export const PATCH = withRouteContext<Params>('skills.update', async (request, {
     : input.action === 'submit'
       ? supabase.from('company_skills').update({
         share_status: 'submitted', author_handle: input.author_handle, share_confirmed_at: new Date().toISOString(),
-        // What kind of item it is, as the author says; frozen with the submission.
-        kind: input.kind ?? 'workflow',
+        // The author may still say what kind of item it is; frozen with the submission.
+        ...(input.kind ? { kind: input.kind } : {}),
       })
       : input.action === 'add'
         ? supabase.from('company_skills').update({ draft: false })
