@@ -190,6 +190,7 @@ import { loadSkillProvenance, skillBodyHash, oauthActorLabel } from '@/lib/agent
 import { loadCompanySkillRows, ownSkill } from '@/lib/agent-skills/company-skills'
 import { buildOwnSkill, OWN_SKILL_COPY } from '@/lib/agent-skills/own-skill-body'
 import { SkillBodySchema } from '@/lib/agent-skills/validation'
+import { recordCommunityFeedback } from '@/lib/agent-skills/community'
 import type { SkillTier } from './skills'
 import {
   RECOMMENDED_WORKFLOW_LOADOUTS,
@@ -5519,24 +5520,28 @@ export const tools: McpTool[] = [
       properties: {
         context: {
           type: 'string',
-          description: 'What you were trying to do and what blocked you, or what worked well. Free text, max 2000 chars.',
+          description: 'What you tried and what blocked you or worked well. Max 2000 chars.',
         },
         sentiment: {
           type: 'string',
           enum: ['positive', 'negative', 'neutral'],
-          description: 'Direction of the feedback. Default: negative.',
+          description: 'Default: negative.',
         },
         suggestion: {
           type: 'string',
-          description: 'Optional concrete suggestion (e.g. "add a tool for X", "rename Y arg").',
+          description: 'Optional concrete suggestion, e.g. "add a tool for X".',
         },
         tool_name: {
           type: 'string',
-          description: 'Optional specific tool the feedback concerns.',
+          description: 'Tool it concerns.',
         },
         skill_slug: {
           type: 'string',
-          description: 'Optional specific skill the feedback concerns.',
+          description: 'Skill it concerns.',
+        },
+        works: {
+          type: 'boolean',
+          description: 'For a community/ skill_slug: did it work for the user?',
         },
       },
       required: ['context'],
@@ -5558,7 +5563,7 @@ export const tools: McpTool[] = [
       idempotentHint: false,
       openWorldHint: false,
     },
-    async execute(args, companyId, userId, _supabase, actor) {
+    async execute(args, companyId, userId, supabase, actor) {
       const context = (args.context as string | undefined)?.trim()
       if (!context) throw new Error('context is required')
       if (context.length > 2000) throw new Error('context is too long (max 2000 chars)')
@@ -5568,6 +5573,15 @@ export const tools: McpTool[] = [
       const toolName = (args.tool_name as string | undefined)?.trim() || null
       const skillSlug = (args.skill_slug as string | undefined)?.trim() || null
 
+      // "Fungerade det?" at the end of a community flow: the user's answer is
+      // saved like the one on the Skills page, before the telemetry rate limit
+      // (the upsert is idempotent, and the answer must not be lost to it).
+      if (typeof args.works === 'boolean') {
+        if (!skillSlug?.startsWith('community/')) throw codedError('VALIDATION_ERROR', 'works needs the community/ skill_slug it answers for')
+        const saved = await recordCommunityFeedback(supabase, { companyId, userId, slug: skillSlug, feedback: args.works ? 'works' : 'not_works' })
+        if (!saved) throw codedError('NOT_FOUND', `Community skill not found: ${skillSlug}`)
+      }
+
       // Rate-limit per API key (or per user when no key id). 1 per 60 s.
       // In-memory + single-process: leaky bucket would be cleaner but the
       // signal here is product-team triage, not security; over-counting is
@@ -5576,6 +5590,7 @@ export const tools: McpTool[] = [
       const now = Date.now()
       const last = feedbackRateLimit.get(rateKey)
       if (last && now - last < FEEDBACK_RATE_LIMIT_MS) {
+        if (typeof args.works === 'boolean') return { recorded: true, message: 'The user\'s answer is saved on the community skill.' }
         const waitSec = Math.ceil((FEEDBACK_RATE_LIMIT_MS - (now - last)) / 1000)
         throw new Error(`gnubok_feedback is rate-limited. Try again in ${waitSec}s.`)
       }
