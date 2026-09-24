@@ -9,6 +9,7 @@ import { ArrowLeft, Plus, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import type { KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
+import { OWN_AGENT_KNOWLEDGE } from '@/lib/agent-skills/agents'
 import type { KnowledgeAction } from '@/lib/agent-skills/knowledge-choices'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
@@ -51,18 +52,25 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
     focusStep.current = null
   }, [steps])
   const [text, setText] = useState('')
+  // What the flow will carry: Accounted's default for own flows (minus any taken away) and what was added.
   const [knowledge, setKnowledge] = useState<string[]>([])
+  const [removedDefaults, setRemovedDefaults] = useState<string[]>([])
   const [view, setView] = useState<'main' | 'knowledge'>('main')
   const [state, setState] = useState<'idle' | 'saving'>('idle')
   const [problem, setProblem] = useState<string | null>(null)
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
 
+  // Coloured by its name, as the saved item will be.
   const hue = itemHue(kind, name.trim() || 'ny')
   const filled = steps.map((s) => s.trim()).filter(Boolean)
   const ready = !!name.trim() && !!description.trim() && (kind === 'workflow' ? filled.length > 0 : !!text.trim())
-  const held: KnowledgeMeta[] = knowledge.flatMap((id) => {
+  const carried = [
+    ...OWN_AGENT_KNOWLEDGE.filter((id) => !removedDefaults.includes(id)).map((id) => ({ id, source: 'default' as const })),
+    ...knowledge.map((id) => ({ id, source: 'added' as const })),
+  ]
+  const held: KnowledgeMeta[] = carried.flatMap(({ id, source }) => {
     const o = options.data?.find((x) => x.id === id)
-    return o ? [{ id: o.id, tier: o.tier, source: 'added' as const, title: o.title, summary: o.summary, version: o.version, reviewed_at: o.reviewed_at }] : []
+    return o ? [{ id: o.id, tier: o.tier, source, title: o.title, summary: o.summary, version: o.version, reviewed_at: o.reviewed_at }] : []
   })
 
   function setStep(i: number, value: string) {
@@ -77,7 +85,11 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
   }
   async function changeKnowledge(action: KnowledgeAction, atomId?: string): Promise<boolean> {
     if (!atomId) return true
-    setKnowledge((current) => action === 'add' ? [...new Set([...current, atomId])] : current.filter((k) => k !== atomId))
+    if (OWN_AGENT_KNOWLEDGE.includes(atomId)) {
+      setRemovedDefaults((current) => action === 'remove' ? [...new Set([...current, atomId])] : current.filter((k) => k !== atomId))
+    } else {
+      setKnowledge((current) => action === 'add' ? [...new Set([...current, atomId])] : current.filter((k) => k !== atomId))
+    }
     return true
   }
 
@@ -106,11 +118,14 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
       const { data } = await response.json() as { data: { id: string } }
       // The chosen knowledge goes with the new flow, as it would when added on its page.
       if (kind === 'workflow') {
-        for (const atomId of knowledge) {
-          await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add', agent_id: `own/${data.id}`, atom_id: atomId }) })
+        const changes = [...knowledge.map((id) => ['add', id] as const), ...removedDefaults.map((id) => ['remove', id] as const)]
+        for (const [action, atomId] of changes) {
+          await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, agent_id: `own/${data.id}`, atom_id: atomId }) })
         }
       }
-      await mutate((key) => Array.isArray(key) && typeof key[0] === 'string' && (key[0] === '/api/skills' || key[0] === '/api/agents'))
+      // Drop the cached catalog rather than revalidate it: nothing on this page reads it, so a
+      // revalidation would not run, and the new item's page would open on the old list.
+      await mutate((key) => Array.isArray(key) && typeof key[0] === 'string' && (key[0] === '/api/skills' || key[0] === '/api/agents'), undefined, { revalidate: false })
       router.push(kind === 'workflow' ? `${backHref}/own-${data.id}` : `${backHref}/egen.${data.id}`)
     } catch {
       setProblem(t('write_failed'))

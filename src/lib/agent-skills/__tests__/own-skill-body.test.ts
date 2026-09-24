@@ -42,6 +42,12 @@ describe('buildOwnSkill', () => {
     expect(skill.body).toContain('## Regler\n\n- Inget bokförs utan att användaren godkänt det.')
   })
 
+  it('leaves out the "how the user described it" heading when the user said nothing', () => {
+    const skill = buildOwnSkill(summary, { description: '', turns: [], extra: [] }, copy)
+    expect(skill.body).not.toContain(copy.toldHeading)
+    expect(skill.body.endsWith('\n')).toBe(true)
+  })
+
   it('strips what the validator rejects from what the user typed', () => {
     const skill = buildOwnSkill({ ...summary, name: 'Lön <b>{x}</b>' }, { ...told, description: 'Kör `rm` <script>' }, copy)
     expect(SkillBodySchema.safeParse(skill.body).success).toBe(true)

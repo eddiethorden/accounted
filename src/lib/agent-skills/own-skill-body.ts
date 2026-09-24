@@ -45,14 +45,14 @@ export function buildOwnSkill(
     `- ${copy.approvalLine}`,
     `- ${copy.lockedLine}`,
     '',
-    `## ${copy.toldHeading}`,
-    '',
-    cleanText(told.description, 2000),
-    '',
+  ]
+  // What the user said goes in only when they said something: no empty heading for the AI to puzzle over.
+  const said = cleanText(told.description, 2000)
+  const toldLines = [
     ...told.turns.map((turn) => `- ${cleanText(turn.question, 200)} ${cleanText(turn.answer, 400)}`),
     ...told.extra.map((item) => `- ${copy.addedLabel} ${cleanText(item, 400)}`),
-    '',
   ]
+  if (said || toldLines.length > 0) lines.push(`## ${copy.toldHeading}`, '', ...(said ? [said, ''] : []), ...toldLines, ...(toldLines.length ? [''] : []))
   return { name, description: lede, body: lines.join('\n') }
 }
 

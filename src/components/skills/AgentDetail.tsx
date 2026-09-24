@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
 import { FlowSymbol } from './FlowSymbol'
 import { CopyIcon } from './CopyIcon'
-import { itemHue, seedOf } from './hues'
+import { itemHue, seedOf, type ItemKind } from './hues'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
 import { SegmentedControl } from '@/components/ui/segmented-control'
@@ -84,7 +84,8 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   const [view, setView] = useState<View>('main')
   const [runState, setRunState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
-  if (!curated && catalog.data && !own) {
+  // Gone only once a fresh catalog says so: a cached list can predate the item.
+  if (!curated && catalog.data && !catalog.isValidating && !own) {
     return (
       <div className={styles.apage}>
         <PageHeader title={t('title')} />
@@ -96,7 +97,8 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
   const name = curated ? t(`skills.${curated}.name`) : own?.name ?? ''
   const task = t('kind_one_workflow')
-  const hue = itemHue('workflow', agentId, curated)
+  // An own flow takes its colour from its name, as it did while it was being written.
+  const hue = itemHue('workflow', curated ? agentId : name, curated)
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
   const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data ? agents.data.own_knowledge[agentId] ?? agents.data.own_default : []
   const connections: AgentConnectionState[] = overview?.connections ?? []
@@ -178,12 +180,15 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" className="gap-2 pl-4" onClick={run}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
-              {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
-              <ArrowUpRight className="h-4 w-4" aria-hidden />
-            </Button>
+            {/* A draft saved by an AI is not loadable until it is added, so it cannot be started yet. */}
+            {own?.draft ? <span className={styles.stageStatus}>{t('draft_run_hint')}</span> : (
+              <Button size="lg" className="gap-2 pl-4" onClick={run}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
+                {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
+                <ArrowUpRight className="h-4 w-4" aria-hidden />
+              </Button>
+            )}
             {runState !== 'idle' && <span className={styles.stageStatus} role="status">{runState === 'copied' ? t(curated ? 'prefilled_open' : 'copied_open', { client: clientName }) : t('copy_failed')}</span>}
             {/* only a status worth reading: work waiting, a missing connection, no AI yet */}
             {status && status.presence !== 'ready' && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
@@ -407,7 +412,7 @@ export function KnowledgePanel({ held, options, onBack, onChange }: {
         <input id="agent-knowledge-search" type="search" value={query} placeholder={t('knowledge_search')} onChange={(e) => setQuery(e.target.value)} />
       </label>
       {failed && <p role="alert" className={styles.muted}>{t('knowledge_save_failed')}</p>}
-      {shown.length === 0 ? <p className={styles.muted}>{t(source === 'community' ? 'knowledge_community_empty' : 'knowledge_all_added')}</p> : (
+      {shown.length === 0 ? <p className={styles.muted}>{t(q ? 'knowledge_no_match' : source === 'community' ? 'knowledge_community_empty' : 'knowledge_all_added')}</p> : (
         <div className={styles.kgrid2}>
           {shown.map((o) => {
             const has = holds.has(o.id)
@@ -481,18 +486,19 @@ function ShareBox({ status, canWrite, onShare }: {
   )
 }
 
-function DeleteOwn({ canWrite, onDelete }: { canWrite: boolean; onDelete: () => Promise<boolean> }) {
+/** Delete an own item: a flow here, knowledge or an analysis on its item page. */
+export function DeleteOwn({ canWrite, onDelete, kind = 'workflow' }: { canWrite: boolean; onDelete: () => Promise<boolean>; kind?: ItemKind }) {
   const t = useTranslations('skills_registry')
   const [confirm, setConfirm] = useState(false)
   const [failed, setFailed] = useState(false)
   return (
-    <ActionRow title={t('adv_delete_title')} desc={t('adv_delete_desc')} alert={failed ? t('save_failed') : undefined}>
+    <ActionRow title={t(`delete_title_${kind}`)} desc={t(`delete_desc_${kind}`)} alert={failed ? t('save_failed') : undefined}>
       <Button variant="outline" size="sm" className={styles.dangerBtn} disabled={!canWrite} onClick={() => setConfirm(true)}>{t('delete')}</Button>
       <DestructiveConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
         title={t('delete')}
-        description={t('delete_confirm')}
+        description={t(`delete_confirm_${kind}`)}
         confirmLabel={t('delete')}
         cancelLabel={t('cancel')}
         onConfirm={async () => { setFailed(!(await onDelete())) }}

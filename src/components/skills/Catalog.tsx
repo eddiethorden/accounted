@@ -331,7 +331,7 @@ function CreateButtons({ client, canWrite, onCreate, onWrite }: { client: AiClie
 /** One item in the catalogue, in the page's own card: tinted panel, its picture on a tile, and a foot. */
 function CatalogCard({ item }: { item: Item }) {
   const t = useTranslations('skills_registry')
-  const hue = itemHue(item.kind, item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
+  const hue = itemHue(item.kind, item.source === 'own' ? item.title : item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
   const foot = item.meta ? <CommunityFoot meta={item.meta} />
     : item.usedByFlows ? <span className={styles.metaLine}>{t('used_by', { count: item.usedByFlows })}</span>
     : undefined
@@ -357,7 +357,7 @@ function CatalogCard({ item }: { item: Item }) {
 function Featured({ item, industry, client, aiReady, overview }: { item: Item; industry: boolean; client: AiClient; aiReady: boolean; overview: AgentsOverview | null | undefined }) {
   const t = useTranslations('skills_registry')
   const [ran, setRan] = useState(false)
-  const hue = itemHue(item.kind, item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
+  const hue = itemHue(item.kind, item.source === 'own' ? item.title : item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
   const ai = AI_CLIENTS.find((c) => c.id === client)!
   const runnable = item.kind === 'workflow' && item.source === 'accounted' && aiReady
   const states = overview?.agents.find((a) => a.id === item.key)?.connections ?? []

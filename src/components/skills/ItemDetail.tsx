@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowUpRight, Check, ChevronUp, Plus } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
@@ -18,7 +19,7 @@ import { AI_CLIENTS, pickConnectedAiClient, type AiClient } from '@/lib/onboardi
 import { copyPromptAndOpen } from './run'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
-import { Field, Row, SubView } from './AgentDetail'
+import { DeleteOwn, Field, Row, SubView } from './AgentDetail'
 import { FlowSymbol } from './FlowSymbol'
 import { CopyIcon } from './CopyIcon'
 import { ItemSymbol } from './ItemSymbol'
@@ -68,6 +69,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const t = useTranslations('skills_registry')
   const locale = useLocale()
   const { canWrite } = useCanWrite()
+  const router = useRouter()
   const knowledgeName = useKnowledgeName()
   const knowledgeDesc = useKnowledgeDesc()
   const isRules = segment.startsWith('kunskap.')
@@ -104,7 +106,21 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   // What the AI actually reads: the pack's own text from the registry, fetched when the page opens.
   const bodySlug = pack?.id ?? shared?.slug ?? mine?.slug ?? null
   const body = useSWR(bodySlug ? ['/api/skills', companyId, bodySlug] : null, ([url, , slug]) => readBody(`${url}?slug=${encodeURIComponent(slug)}`))
-  const loaded = isRules ? !!options.data : !!catalog.data
+  // Gone only once a fresh list says so: a cached one can predate an item just saved.
+  async function deleteMine(): Promise<boolean> {
+    const installation = mine?.installations[0]
+    if (!installation) return false
+    try {
+      const response = await fetch(`/api/skills/${installation.installation_id}`, { method: 'DELETE' })
+      if (!response.ok) return false
+      await catalog.mutate()
+      router.push(`${catalogHref(backHref, item?.kind ?? 'rules')}${item?.kind === 'workflow' ? '?' : '&'}vy=egna`)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const loaded = isRules ? !!options.data : !!catalog.data && !catalog.isValidating
   if (!item) {
     return (
       <div className={styles.apage}>
@@ -115,7 +131,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
     )
   }
 
-  const hue = itemHue(item.kind, item.key)
+  const hue = itemHue(item.kind, item.own ? item.name : item.key)
   // Back to where the item lives: its industry or company form, or the general list.
   const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : null
   const listHref = catalogHref(backHref, item.kind, home)
@@ -201,6 +217,9 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                     {body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{body.error ? t('body_failed_pack') : t('loading_short')}</span>}
                   </div>
                 </Field>}
+                {mine?.installations[0] && (mine.shareStatus ?? 'private') === 'private' && (
+                  <div className={styles.alist}><DeleteOwn kind={item.kind} canWrite={canWrite} onDelete={deleteMine} /></div>
+                )}
               </>
             )}
             {view === 'give' && item.atomId && (
