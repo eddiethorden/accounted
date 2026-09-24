@@ -622,3 +622,18 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 @media (max-width: 960px) { .apanel { height: auto; overflow: visible; } }
 /* the knowledge grid scrolls with the panel, not on its own */
 .apanel .kgrid2 { max-height: none; overflow: visible; }
+
+/* Sub-view heading and the advanced settings list: every row shares its edges, one action on the right. */
+.subTitle { font-family: var(--font-display); font-size: 22px; line-height: 28px; font-weight: 400; margin: 0; }
+.alist { display: flex; flex-direction: column; border: 1px solid hsl(var(--border)); border-radius: 12px; overflow: hidden; }
+.arow { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+.arow + .arow { border-top: 1px solid hsl(var(--border)); }
+.arowMain { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; }
+.arowText { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.arowTitle { font-size: 14px; line-height: 20px; font-weight: 500; }
+.arowDesc { font-size: 13px; line-height: 18px; color: hsl(var(--muted-foreground)); }
+.arowAlert { font-size: 13px; line-height: 18px; color: hsl(var(--destructive)); }
+.arowAction { display: flex; justify-content: flex-end; }
+.arowAction > button { min-width: 96px; }
+.arow .share { border: 0; padding: 0; background: none; }
+.dangerBtn { color: hsl(var(--destructive)); }
