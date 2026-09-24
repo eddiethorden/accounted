@@ -11,6 +11,7 @@ import type { CatalogSkill } from '@/lib/agent-skills/catalog'
 import type { WorklistCategory } from '@/lib/worklist/types'
 import { FREE_SKILLS, REGISTRY_SKILLS, hasTodoSignal, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
+import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import { AI_CLIENTS, aiConnectAction, aiPrefilledChatLink, openAiConnector, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
 import { createAiStatusPoller, type AiStatusPoller } from '@/lib/onboarding/ai-status-poll'
 import { PageHeader } from '@/components/ui/page-header'
@@ -19,11 +20,13 @@ import { Button } from '@/components/ui/button'
 import { SkillSheet, type SheetTarget } from './SkillSheet'
 import { SkillCreator, type CreatorMode, type KeyRect } from './SkillCreator'
 import { SkillMarks } from './SkillMarks'
+import { useKnowledgeName } from './AgentParts'
 import { Spark, centerIn, prefersReducedMotion, wait } from './spark'
 import styles from './skills.module.css'
 
 type SkillSummary = Omit<CatalogSkill, 'body'>
-type OwnRow = { slug: string; name: string; summary: string; installationId: string; draft?: boolean }
+type OwnRow = { slug: string; name: string; summary: string; installationId: string; draft?: boolean; shareStatus?: SkillSummary['shareStatus'] }
+type Tab = 'accounted' | 'own' | 'community'
 type PageState = 'loading' | 'locked' | 'waiting' | 'unlocking' | 'open'
 type Row = { key: string; name: string; desc: string; own?: OwnRow; id?: RegistrySkillId }
 
@@ -80,6 +83,13 @@ async function readUsage(url: string): Promise<SkillUsage> {
   const response = await fetch(url)
   if (!response.ok) return {}
   return (await response.json()).data as SkillUsage
+}
+
+/** Each agent's knowledge, company atoms and connections; a failed read leaves the parts empty. */
+async function readAgents(url: string): Promise<AgentsOverview | null> {
+  const response = await fetch(url)
+  if (!response.ok) return null
+  return (await response.json()).data as AgentsOverview
 }
 
 async function readCatalog(url: string): Promise<SkillSummary[]> {
@@ -147,7 +157,10 @@ function Registry({ companyId }: { companyId: string }) {
   // the one thing worth doing now: the skill with the most waiting
   const own: OwnRow[] = (catalog.data ?? [])
     .filter((skill) => skill.tier === 'own' && skill.shareStatus !== 'withdrawn' && skill.installations[0])
-    .map((skill) => ({ slug: skill.slug, name: skill.name, summary: skill.summary, installationId: skill.installations[0].installation_id, draft: skill.draft }))
+    .map((skill) => ({ slug: skill.slug, name: skill.name, summary: skill.summary, installationId: skill.installations[0].installation_id, draft: skill.draft, shareStatus: skill.shareStatus }))
+  // Reviewed community agents and knowledge: published atoms of the community tier.
+  const community = (catalog.data ?? []).filter((skill) => skill.tier === 'community')
+  const knowledgeName = useKnowledgeName()
 
   // ── connection: asked on load and whenever the user comes back to the tab ──
   const [connected, setConnected] = useState<AiClient[] | null>(null)
@@ -236,6 +249,9 @@ function Registry({ companyId }: { companyId: string }) {
       : isConnected ? 'open' : pending ? 'waiting' : 'locked'
   const client = pickConnectedAiClient(connected ?? [], pending ?? undefined) ?? pending ?? 'claude'
   const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
+  const agents = useSWR(['/api/agents', companyId, client], ([url, , c]) => readAgents(`${url}?client=${c}`))
+  const agentFor = (id: RegistrySkillId) => agents.data?.agents.find((a) => a.id === id)
+  const [tab, setTab] = useState<Tab>('accounted')
 
   // ── connect ──
   const [addressCopy, setAddressCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -295,6 +311,18 @@ function Registry({ companyId }: { companyId: string }) {
       return false
     }
   }
+  async function shareOwn(target: Extract<SheetTarget, { kind: 'own' }>, share: { author_handle: string } | 'withdraw'): Promise<boolean> {
+    try {
+      const body = share === 'withdraw' ? { action: 'withdraw' } : { action: 'submit', confirmed_no_customer_data: true, author_handle: share.author_handle }
+      const response = await fetch(`/api/skills/${target.installationId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!response.ok) return false
+      await catalog.mutate()
+      setSheet({ ...target, shareStatus: share === 'withdraw' ? 'withdrawn' : 'submitted' })
+      return true
+    } catch {
+      return false
+    }
+  }
   async function deleteOwn(target: Extract<SheetTarget, { kind: 'own' }>): Promise<boolean> {
     try {
       const response = await fetch(`/api/skills/${target.installationId}`, { method: 'DELETE' })
@@ -327,7 +355,7 @@ function Registry({ companyId }: { companyId: string }) {
   }
   function openRow(row: Row) {
     setSheet(row.own
-      ? { kind: 'own', slug: row.own.slug, name: row.own.name, installationId: row.own.installationId, draft: row.own.draft }
+      ? { kind: 'own', slug: row.own.slug, name: row.own.name, installationId: row.own.installationId, draft: row.own.draft, shareStatus: row.own.shareStatus }
       : { kind: 'registry', id: row.id!, locked: rowsLocked })
   }
   const landingSlug = landing ? own.find((row) => row.installationId === landing)?.slug : undefined
@@ -364,13 +392,20 @@ function Registry({ companyId }: { companyId: string }) {
   const top = REGISTRY_SKILLS.slice(0, FREE_SKILLS)
   // skills with work waiting on Att göra come first
   const rest = REGISTRY_SKILLS.slice(FREE_SKILLS).map((skill) => skill.id)
-  const rows: Row[] = [
-    ...own.map((row) => ({ key: row.slug, name: row.name, desc: row.summary, own: row })),
-    ...[...rest.filter((id) => doNow.has(id)), ...rest.filter((id) => !doNow.has(id))]
-      .map((id) => ({ key: id, name: t(`skills.${id}.name`), desc: t(`skills.${id}.desc`), id })),
-  ]
+  const rows: Row[] = tab === 'own'
+    ? own.map((row) => ({ key: row.slug, name: row.name, desc: row.summary, own: row }))
+    : tab === 'community'
+      ? []
+      : [...rest.filter((id) => doNow.has(id)), ...rest.filter((id) => !doNow.has(id))]
+        .map((id) => ({ key: id, name: t(`skills.${id}.name`), desc: t(`skills.${id}.desc`), id }))
+  const drafts = own.filter((row) => row.draft).length
+  // An own agent landing from the AI shows in its tab.
+  useEffect(() => { if (landing || drafts > 0) setTab((current) => current === 'community' ? current : 'own') }, [landing, drafts])
   useEffect(() => { rowOrder.current = rows.map((row) => row.key) })
   const rowsLocked = state === 'locked' || state === 'waiting' || state === 'loading'
+  // The sheet locks only when no AI is known to be connected: while the status loads it
+  // shows the run button, instead of asking a connected user to connect.
+  const sheetLocked = state === 'locked' || state === 'waiting'
   const sheetKey = sheet?.kind === 'registry' ? sheet.id : null
   const pendingName = pending ? AI_CLIENTS.find((c) => c.id === pending)!.name : ''
   const address = pending && pending !== 'claude' ? connectAction(pending).copy : null
@@ -426,7 +461,40 @@ function Registry({ companyId }: { companyId: string }) {
       <section className={styles.lower} aria-label={t('title')}>
         {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
         {catalog.error && <p role="alert" className={styles.note}>{t('load_failed')} <button type="button" className="underline underline-offset-4" onClick={() => void catalog.mutate()}>{t('retry')}</button></p>}
-        <div className={styles.veilwrap}>
+        <div className={styles.tabs} role="tablist" aria-label={t('title')}>
+          {(['accounted', 'own', 'community'] as const).map((key) => (
+            <button key={key} type="button" role="tab" id={`agents-tab-${key}`} aria-selected={tab === key} aria-controls="agents-panel" className={styles.tab} onClick={() => setTab(key)}>
+              {t(`tab_${key}`)}
+              {key === 'own' && own.length > 0 && <span className={styles.tabCount}>{own.length}</span>}
+              {key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}
+            </button>
+          ))}
+        </div>
+        {tab === 'own' && own.length === 0 && !rowsLocked && (
+          <div className={styles.empty}>
+            <p>{t('own_empty', { client: clientName })}</p>
+            <Button disabled={!canWrite} onClick={createSkill}>{t('create_card_cta', { client: clientName })}</Button>
+          </div>
+        )}
+        {tab === 'community' && (community.length === 0 ? (
+          <div className={styles.empty}>
+            <h3>{t('community_empty_title')}</h3>
+            <p>{t('community_empty_body')}</p>
+            <Button variant="outline" onClick={() => setTab('own')}>{t('community_share_cta')}</Button>
+          </div>
+        ) : (
+          <ul className={styles.rows}>
+            {community.map((skill) => (
+              <li key={skill.slug}>
+                <div className={styles.row}>
+                  <span className={styles.nm}>{skill.name}</span>
+                  <span className={styles.ds}>{skill.summary}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ))}
+        <div className={styles.veilwrap} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`} hidden={tab === 'community'}>
           <ul className={styles.rows} aria-hidden={rowsLocked || undefined}>
             {rows.map((row, i) => (
               <li key={row.key}>
@@ -445,6 +513,7 @@ function Registry({ companyId }: { companyId: string }) {
                   {row.own?.draft && <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span>}
                   {row.id && doNow.has(row.id) && <span className={`${styles.now} ${styles.nowLight}`}>{t('now_count', { count: doNow.get(row.id)! })}</span>}
                   {row.id && allDone(row.id) && <span className={`${styles.done} ${styles.doneLight}`}><Check className="h-3 w-3" aria-hidden />{t('all_done')}</span>}
+                  {row.id && agentFor(row.id) && <span className={styles.kn}>{agentFor(row.id)!.knowledge.map((k) => knowledgeName(k.id, k.title)).join(' · ')}</span>}
                   <span className={styles.foot}>
                     {row.id && <SkillMarks id={row.id} />}
                     {uses(row.key) > 0 && <span className={styles.uses}>{t('uses', { count: uses(row.key) })}</span>}
@@ -502,7 +571,9 @@ function Registry({ companyId }: { companyId: string }) {
       </section>
 
       <SkillSheet
-        target={sheet}
+        target={sheet?.kind === 'registry' ? { ...sheet, locked: sheetLocked } : sheet}
+        context={{ agent: sheet?.kind === 'registry' ? agentFor(sheet.id) : undefined, company: agents.data?.agents[0]?.company ?? [], facts: agents.data?.facts ?? 0 }}
+        onShare={shareOwn}
         companyId={companyId}
         client={client}
         canWrite={canWrite}
