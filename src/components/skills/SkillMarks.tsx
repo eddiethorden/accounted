@@ -43,7 +43,7 @@ export function SkillMarks({ id }: { id: RegistrySkillId }) {
   /* eslint-enable @next/next/no-img-element */
 }
 
-function GmailMark() {
+export function GmailMark() {
   return (
     <svg viewBox="0 0 48 48">
       <path fill="#4caf50" d="M45 16.2l-5 2.75-5 4.75V40h7c1.657 0 3-1.343 3-3V16.2z" />
