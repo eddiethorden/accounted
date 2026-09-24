@@ -1,3 +1,7 @@
+---
+areas: [moms]
+---
+
 # Blandad verksamhet in a clinic or salon: practical reference
 
 Scope: the bookkeeping and advisory consequences, for a Swedish clinic, dental practice, physiotherapist, psychologist or beauty salon, of having both VAT-exempt and VAT-taxable revenue. Whether a given supply is exempt is decided in **`momsfri-vard.md`**. The general rules on proportional deduction, justering/jämkning and frivillig beskattning live in **`swedish-vat`**: this file gives the sector-specific application, not the theory. Asset classification rules live in **`swedish-asset-accounting`**, payroll mechanics in **`swedish-payroll`**, cash-register mechanics in **`swedish-cash-register`**.

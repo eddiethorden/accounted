@@ -1,3 +1,7 @@
+---
+areas: [moms, fakturering]
+---
+
 # Momsfri vård, tandvård och skönhet: VAT Exemption Reference
 
 Scope: healthcare clinics, dental practices, physiotherapists, psychologists, naprapaths, chiropractors and beauty/aesthetic salons operating in Sweden. This file decides **whether a supply is exempt**. General VAT mechanics (periods, deadlines, rutor, reverse charge, BAS 26xx, jämkning formulas) live in **`swedish-vat`**: do not restate them here. Input-VAT splitting for a clinic with both exempt and taxable revenue lives in **`blandad-verksamhet-vard.md`**.

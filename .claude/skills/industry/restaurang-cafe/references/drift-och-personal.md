@@ -1,3 +1,7 @@
+---
+areas: [lopande, lon]
+---
+
 # Restaurang och café: drift, personal och nyckeltal
 
 Operating-side reference for an agent doing bookkeeping and advising for a Swedish restaurant, café, food truck, gatukök or catering business. Everything below is stated as it is in force on **17 September 2026**.

@@ -1,3 +1,7 @@
+---
+areas: [moms, lopande]
+---
+
 # Restaurang och café: moms och försäljning
 
 Reference for an agent doing bookkeeping and advising for a Swedish restaurant, café, food truck, gatukök or catering business. All rates and amounts below are those in force on **17 September 2026**.
