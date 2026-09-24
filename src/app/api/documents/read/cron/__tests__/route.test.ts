@@ -31,7 +31,7 @@ describe('GET /api/documents/read/cron', () => {
     const { status, body } = await parseJsonResponse(await GET(new Request('http://localhost/api/documents/read/cron')))
     expect(status).toBe(200)
     expect(body).toMatchObject({ ok: true, processed: 3, read: 2 })
-    expect(readUnreadDocuments).toHaveBeenCalledWith({ tag: 'service' }, 40, expect.objectContaining({ budgetMs: 180_000, budgetPagesPerDay: 0 }))
+    expect(readUnreadDocuments).toHaveBeenCalledWith({ tag: 'service' }, 40, expect.objectContaining({ budgetMs: 180_000, budgetPagesPerDay: Number.POSITIVE_INFINITY }))
   })
 
   it('passes the daily page budget for voucher-tied history from the environment', async () => {
@@ -55,7 +55,7 @@ describe('GET /api/documents/read/cron', () => {
     expect(enqueueDocumentJob).toHaveBeenCalledWith({ tag: 'service' }, 'co-2', 'd3', 'classify')
   })
 
-  it('leaves history it read untyped without a budget, since typing is a model call, and types it under one', async () => {
+  it('types history it read like a new document when there is no cap, and leaves it untyped at a budget of 0', async () => {
     const old = new Date(Date.now() - 90 * 86_400_000).toISOString()
     ;(readUnreadDocuments as ReturnType<typeof vi.fn>).mockImplementation(async (_s: unknown, _n: number, opts: { onRead: (doc: Record<string, unknown>) => Promise<void> }) => {
       await opts.onRead({ id: 'old', company_id: 'co-1', doc_type: null, created_at: old })
@@ -63,13 +63,14 @@ describe('GET /api/documents/read/cron', () => {
       return { processed: 2, read: 2, skipped: 0, errors: 0 }
     })
     await GET(new Request('http://localhost/api/documents/read/cron'))
-    expect(enqueueDocumentJob).toHaveBeenCalledTimes(1)
-    expect(enqueueDocumentJob).toHaveBeenCalledWith({ tag: 'service' }, 'co-1', 'new', 'classify')
+    expect(enqueueDocumentJob).toHaveBeenCalledTimes(2)
 
     vi.clearAllMocks()
-    process.env.ARKIV_BACKFILL_PAGES_PER_DAY = '50'
+    process.env.ARKIV_BACKFILL_PAGES_PER_DAY = '0'
     await GET(new Request('http://localhost/api/documents/read/cron'))
-    expect(enqueueDocumentJob).toHaveBeenCalledTimes(2)
+    expect(enqueueDocumentJob).toHaveBeenCalledTimes(1)
+    expect(enqueueDocumentJob).toHaveBeenCalledWith({ tag: 'service' }, 'co-1', 'new', 'classify')
     delete process.env.ARKIV_BACKFILL_PAGES_PER_DAY
   })
+
 })

@@ -90,6 +90,30 @@ describe('readUnreadDocuments, the lanes and the budget', () => {
     ])
   })
 
+  it('reads history in full in one pass when there is no cap, like a document that arrived today', async () => {
+    asMock(readDocumentBytes).mockResolvedValue(readOk([[1, 'pdf_text']]))
+    enqueue({ data: [] }) // retry batch
+    enqueue({ data: unreadBatch })
+    for (let i = 0; i < 9; i++) enqueue({})
+    await readUnreadDocuments(supabase, 10, { now, budgetPagesPerDay: Number.POSITIVE_INFINITY })
+    expect(asMock(readDocumentBytes).mock.calls.map((c) => c[2])).toEqual([
+      { allowModel: true, maxModelPages: null, tier: 'extraction' },
+      { allowModel: true, maxModelPages: null, tier: 'extraction' },
+      { allowModel: true, maxModelPages: null },
+    ])
+  })
+
+  it('finishes gated history without a daily count when there is no cap', async () => {
+    asMock(readDocumentBytes).mockResolvedValue(readOk([[1, 'claude_vision']]))
+    const tied = { ...base, id: 'tied', created_at: daysAgo(60), journal_entry_id: 'je', pages_read_at: 'x', read_error: 'ai_gated', mime_type: 'image/jpeg' }
+    enqueue({ data: [tied] }) // retry batch
+    for (let i = 0; i < 3; i++) enqueue({}) // one read: delete, insert, stamp
+    enqueue({ data: [] }) // unread batch
+    expect(await readUnreadDocuments(supabase, 10, { now, budgetPagesPerDay: Number.POSITIVE_INFINITY })).toMatchObject({ processed: 1, read: 1 })
+    expect(readDocumentBytes).toHaveBeenCalledWith(expect.any(Buffer), 'image/jpeg', { allowModel: true, maxModelPages: null, tier: 'extraction' })
+    expect(findCalls('arkiv_usage_daily', 'eq')).toEqual([])
+  })
+
   it('leaves gated voucher-tied history alone without a budget, and spends the budget on it when there is one', async () => {
     asMock(readDocumentBytes).mockResolvedValue(readOk([[1, 'claude_vision'], [2, 'claude_vision']]))
     const tied = { ...base, id: 'tied', created_at: daysAgo(60), journal_entry_id: 'je', pages_read_at: 'x', read_error: 'ai_gated', mime_type: 'image/jpeg' }

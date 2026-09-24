@@ -149,7 +149,7 @@ async function stamp(supabase: SupabaseClient, documentId: string, outcome: Stor
  * lane (phase 9f): unread documents of the companies in the rollout, then
  * their documents whose model pages were gated, unconfigured or over budget
  * last time (only when a model is configured, and for voucher-tied history
- * only while the company's daily page budget, ARKIV_BACKFILL_PAGES_PER_DAY,
+ * only while the company's daily page budget, ARKIV_BACKFILL_PAGES_PER_DAY (unset: no cap),
  * has room), then the newest unread documents of everyone else, text layers
  * only. The platform holds far more unread files than one run reads, so
  * without that order a company switched on today waits behind every other
@@ -166,7 +166,7 @@ export async function readUnreadDocuments(
   } = {},
 ): Promise<{ processed: number; read: number; skipped: number; errors: number }> {
   const now = opts.now ?? new Date()
-  const budget = Math.max(0, Math.floor(opts.budgetPagesPerDay ?? 0))
+  const budget = Math.max(0, Math.floor(opts.budgetPagesPerDay ?? 0)) // Infinity stays Infinity: no cap
   const counts = { processed: 0, read: 0, skipped: 0, errors: 0 }
   const startedAt = Date.now()
   const spentTime = () => counts.processed >= limit || (opts.budgetMs !== undefined && Date.now() - startedAt >= opts.budgetMs)
@@ -184,10 +184,16 @@ export async function readUnreadDocuments(
     for (const doc of docs) {
       if (spentTime()) return true
       const plan = planForDocument(doc, now)
-      // History costs the model only while the company has a budget; without one the backfill reads text layers and a question reads the rest.
-      const out = plan
-        ? await readAndStoreDocument(supabase, doc, { allowModel: plan.allowModel && (plan.lane === 'live' || budget > 0), maxModelPages: plan.maxModelPages, tier: plan.tier })
-        : { status: 'skipped' as const, reason: 'lane_done' }
+      // No cap: history is read in full in one pass, like a document that arrived today. A budget of 0 reads its text
+      // layers only; a finite budget keeps the lanes (tied history waits for the retry pass and its daily pages).
+      const opts = !plan
+        ? null
+        : plan.lane === 'live'
+          ? { allowModel: plan.allowModel, maxModelPages: plan.maxModelPages, tier: plan.tier }
+          : budget === Number.POSITIVE_INFINITY
+            ? { allowModel: isArkivEnabled(doc.company_id), maxModelPages: null, tier: plan.tier }
+            : { allowModel: plan.allowModel && budget > 0, maxModelPages: plan.maxModelPages, tier: plan.tier }
+      const out = opts ? await readAndStoreDocument(supabase, doc, opts) : { status: 'skipped' as const, reason: 'lane_done' }
       await tally(doc, out)
       if (isReaderUnavailable(out)) return false
     }
@@ -204,6 +210,7 @@ export async function readUnreadDocuments(
     const spent = new Map<string, number>()
     const roomToday = async (companyId: string): Promise<number> => {
       if (budget <= 0) return 0
+      if (budget === Number.POSITIVE_INFINITY) return budget
       if (!spent.has(companyId)) {
         const { data: rows } = await supabase
           .from('arkiv_usage_daily')
@@ -224,6 +231,7 @@ export async function readUnreadDocuments(
       const tier = historyReaderTier()
       let plan: { allowModel: boolean; maxModelPages: number | null; tier?: AiTier } | null = null
       if (lane === 'live') plan = { allowModel: true, maxModelPages: null }
+      else if (budget === Number.POSITIVE_INFINITY) plan = { allowModel: true, maxModelPages: null, tier }
       else if ((await roomToday(doc.company_id)) <= 0) plan = null
       else if (lane === 'history_loose') plan = !doc.doc_type ? { allowModel: true, maxModelPages: 1, tier } : isActingType(doc.doc_type) ? { allowModel: true, maxModelPages: null, tier } : null
       else plan = { allowModel: true, maxModelPages: null, tier }

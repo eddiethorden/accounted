@@ -19,9 +19,15 @@ export const maxDuration = 300
 const BATCH = 40
 const TIME_BUDGET_MS = 180_000
 
-/** Vision pages per company and day the backfill may spend on history (older than 30 days); 0 (the default) means history is read from text layers only, untyped, and the rest waits for a question. */
+/**
+ * Vision pages per company and day the backfill may spend on history (older than 30 days). Unset means no cap:
+ * every document is read and typed whatever its age, so search, the folders and agents see one archive
+ * (founder, 2026-09-24: cost is no problem, UX first). A number caps it; 0 reads history from text layers only.
+ */
 export function backfillPagesPerDay(): number {
-  const n = Number(process.env.ARKIV_BACKFILL_PAGES_PER_DAY ?? 0)
+  const raw = process.env.ARKIV_BACKFILL_PAGES_PER_DAY
+  if (raw === undefined || raw.trim() === '') return Number.POSITIVE_INFINITY
+  const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 
@@ -31,8 +37,7 @@ export const GET = withCronContext('documents.read', async (_request, ctx) => {
   const counts = await readUnreadDocuments(supabase, BATCH, {
     budgetMs: TIME_BUDGET_MS,
     budgetPagesPerDay: budget,
-    // A recent document read here gets typed like one that arrived today. History is typed only under a budget:
-    // typing is a model call, and without one it stays text a search finds and a question opens (founder, 2026-09-24).
+    // A document read here gets typed like one that arrived today; with the budget at 0, history stays untyped text.
     onRead: async (doc) => {
       if (!doc.company_id || doc.doc_type || !isArkivEnabled(doc.company_id)) return
       if (budget <= 0 && readLaneFor(doc) !== 'live') return
