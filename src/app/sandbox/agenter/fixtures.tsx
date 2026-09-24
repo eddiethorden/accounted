@@ -170,6 +170,8 @@ function installFixtures() {
         if (OWN_BODIES.has(slug)) return json({ body: OWN_BODIES.get(slug) })
         const real = PACK_TEXTS.get(slug)
         if (real) return json({ body: real })
+        const section = KONSULT_IT_SECTIONS.find((sec) => sec.id === slug)
+        if (section) return json({ body: `# ${section.title}\n\nI appen visas avsnittets egen text här, samma text som din AI läser.` })
         const pack = OPTIONS.find((o) => o.id === slug)
         if (pack) return json({ body: `# ${pack.title}\n\nI appen visas packets egen text här, samma text som din AI läser.` })
         const item = CATALOG.find((c) => c.slug === slug)
