@@ -185,7 +185,9 @@ function installFixtures() {
         const slug = url.searchParams.get('slug')
         if (!slug) return json(CATALOG)
         if (slug === 'own/00000000-0000-4000-8000-000000000001') return json({ body: OWN_BODY })
-        if (slug.startsWith('vertical/') || slug.startsWith('horizontal/') || slug.startsWith('modifier/')) return json({ body: PACK_BODY })
+        if (slug === 'vertical/konsult-it') return json({ body: PACK_BODY })
+        const pack = OPTIONS.find((o) => o.id === slug)
+        if (pack) return json({ body: `# ${pack.title}\n\nI appen visas packets egen text här, samma text som din AI läser.` })
         const item = CATALOG.find((c) => c.slug === slug)
         return json({ body: item ? `# ${item.name}\n\n${item.summary}` : '# Accounted workflow' })
       }

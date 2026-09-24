@@ -672,10 +672,10 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .voteBtn { background: hsl(var(--background)); }
 .voteBtn[aria-pressed='true'] { border-color: hsl(var(--foreground)); }
 .worksPair { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.giveCard { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); transition: border-color 150ms var(--ease-out), background-color 150ms var(--ease-out); }
+.giveCard { height: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); transition: border-color 150ms var(--ease-out), background-color 150ms var(--ease-out); }
 .giveCard[data-held] { border-color: hsl(var(--success) / 0.5); background: hsl(var(--success) / 0.05); }
 .giveText { display: flex; flex-direction: column; min-width: 0; }
-.giveText b { font-size: 14px; font-weight: 500; }
+.giveText b { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .giveText span { font-size: 12px; color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .orb { position: relative; flex: none; display: inline-block; }
 .orb canvas { display: block; }
@@ -694,8 +694,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .creatorStats dd { margin: 0; font-size: 20px; font-variant-numeric: tabular-nums; }
 .authorLink { font-size: 13px; color: hsl(var(--foreground)); text-decoration: underline; text-decoration-color: hsl(var(--border)); text-underline-offset: 3px; }
 .authorLink:hover { text-decoration-color: currentColor; }
-.intro { flex-wrap: wrap; }
-.intro p { font-size: 13px; line-height: 19px; color: hsl(var(--muted-foreground)); }
 /* a pack's own text, as the AI reads it */
 .mdBody { padding: 14px 16px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); font-size: 13.5px; line-height: 21px; overflow-wrap: anywhere; }
 .mdBody h1, .mdBody h2, .mdBody h3 { font-weight: 500; margin: 14px 0 6px; line-height: 1.3; }
@@ -711,3 +709,7 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .mdBody table { display: block; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
 .mdBody th, .mdBody td { border: 1px solid hsl(var(--border)); padding: 4px 8px; text-align: left; }
 .mdBody a { text-decoration: underline; text-underline-offset: 3px; }
+
+/* every card in the picker the same height, whatever its name's length */
+.kgrid2 > li { display: flex; }
+.kgrid2 > li > * { flex: 1; min-width: 0; }
