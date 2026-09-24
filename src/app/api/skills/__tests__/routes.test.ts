@@ -97,6 +97,34 @@ describe('skills HTTP routes', () => {
     expect(findCalls('company_skills', 'eq')).toContainEqual(['company_id', 'company-a'])
     expect(findCalls('company_skills', 'eq')).toContainEqual(['share_status', 'private'])
   })
+  it('stores the kind the author gives a shared item, defaulting to a flow', async () => {
+    enqueue({ data: { id } })
+    expect((await PATCH(request('PATCH', { action: 'submit', author_handle: 'author', confirmed_no_customer_data: true, kind: 'analysis' }), params)).status).toBe(200)
+    expect(findCall('company_skills', 'update')?.[0]).toMatchObject({ kind: 'analysis' })
+    reset(); enqueue({ data: { id } })
+    expect((await PATCH(request('PATCH', { action: 'submit', author_handle: 'author', confirmed_no_customer_data: true }), params)).status).toBe(200)
+    expect(findCall('company_skills', 'update')?.[0]).toMatchObject({ kind: 'workflow' })
+  })
+  it.each([{ kind: 'connection' }, { area: 'moms' }, { industries: ['vertical/restaurang-cafe'] }])('rejects an unknown kind or field %j', async (extra) => {
+    expect((await PATCH(request('PATCH', { action: 'submit', author_handle: 'author', confirmed_no_customer_data: true, ...extra }), params)).status).toBe(400)
+    expect(findCall('company_skills', 'update')).toBeUndefined()
+  })
+  it('sends community counts and the caller\'s own vote on community items only', async () => {
+    vi.mocked(loadSkillCatalog).mockResolvedValue([
+      { slug: 'community/stang-dagskassan', tier: 'community', name: 'Stäng dagskassan', body: 'B', reviewedAt: '2026-09-18' },
+      { slug: 'bookkeep', tier: 'workflow', name: 'Bokför', body: 'B' },
+    ] as never)
+    enqueue({ data: [{ atom_id: 'community/stang-dagskassan', kind: 'workflow', author: 'kafe-norr', author_shared: 4, author_verified: false, votes: 48, works: 31, not_works: 2, used_by: 12 }] })
+    enqueue({ data: [{ id: 'f1', atom_id: 'community/stang-dagskassan', vote: true, feedback: 'works' }] })
+    const data = (await (await GET(request('GET'), staticParams)).json()).data
+    expect(data[0].community).toEqual({
+      kind: 'workflow', author: 'kafe-norr', author_shared: 4, author_verified: false, votes: 48, voted: true, works: 31, not_works: 2,
+      feedback: 'works', reviewed_at: '2026-09-18', used_by: 12,
+    })
+    expect(data[1].community).toBeUndefined()
+    expect(supabase.rpc).toHaveBeenCalledWith('community_item_stats')
+    expect(findCalls('community_feedback', 'eq')).toEqual([['user_id', 'user']])
+  })
   it('freezes submitted text', async () => {
     vi.mocked(loadCompanySkillRows).mockResolvedValue([{ ...privateSkill, share_status: 'submitted' }])
     expect((await PATCH(request('PATCH', { action: 'edit', name: 'N', description: 'D', body: 'Changed' }), params)).status).toBe(409)

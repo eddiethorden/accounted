@@ -26,6 +26,9 @@ export const SkillBodySchema = z.string().trim().min(1).superRefine((body, ctx) 
   for (const message of markdownProblems(body)) ctx.addIssue({ code: 'custom', message })
 })
 
+/** What a shared item is, chosen by its author at submission: a flow, knowledge or an analysis. */
+export const COMMUNITY_KINDS = ['workflow', 'rules', 'analysis'] as const
+
 export const CreateCompanySkillSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('catalog'), atom_id: z.string().min(1).max(200), scope: z.enum(['company', 'team']).default('company') }).strict(),
   z.object({ kind: z.literal('own'), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), body: SkillBodySchema, scope: z.enum(['company', 'team']).default('company'), item_kind: z.enum(['workflow', 'rules', 'analysis']).default('workflow') }).strict(),
@@ -33,7 +36,7 @@ export const CreateCompanySkillSchema = z.discriminatedUnion('kind', [
 
 export const UpdateCompanySkillSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('edit'), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), body: SkillBodySchema }).strict(),
-  z.object({ action: z.literal('submit'), confirmed_no_customer_data: z.literal(true), author_handle: z.string().regex(/^[a-z0-9][a-z0-9-]{0,38}$/) }).strict(),
+  z.object({ action: z.literal('submit'), confirmed_no_customer_data: z.literal(true), author_handle: z.string().regex(/^[a-z0-9][a-z0-9-]{0,38}$/), kind: z.enum(COMMUNITY_KINDS).optional() }).strict(),
   z.object({ action: z.literal('withdraw') }).strict(),
   z.object({ action: z.literal('add') }).strict(),
 ])
