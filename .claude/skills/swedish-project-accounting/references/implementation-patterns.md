@@ -1,3 +1,7 @@
+---
+audience: developer
+---
+
 # Implementation Patterns for Project Accounting
 
 ## Table of contents

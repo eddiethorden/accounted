@@ -1,3 +1,7 @@
+---
+audience: developer
+---
+
 # SIE4 Record Type Reference
 
 Complete specification of all SIE4 record types, fields, and rules.
