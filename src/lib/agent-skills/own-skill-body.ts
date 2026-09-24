@@ -88,3 +88,14 @@ export const OWN_SKILL_COPY: Record<'sv' | 'en', OwnSkillCopy> = {
     addedLabel: 'Added afterwards:',
   },
 }
+
+/**
+ * Own knowledge or an analysis, as an AI saves it: the name, one line on
+ * what it is, then the text as written, in the same shape "Skriv själv"
+ * saves. The text keeps its paragraphs; SkillBodySchema decides what passes.
+ */
+export function buildOwnText(name: string, description: string, text: string): { name: string; description: string; body: string } {
+  const title = cleanText(name, 120)
+  const lede = cleanText(description, 500)
+  return { name: title, description: lede, body: `# ${title}\n\n${lede}\n\n${text.trim()}\n` }
+}

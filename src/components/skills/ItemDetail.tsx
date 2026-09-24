@@ -107,6 +107,12 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const bodySlug = pack?.id ?? shared?.slug ?? mine?.slug ?? null
   const body = useSWR(bodySlug ? ['/api/skills', companyId, bodySlug] : null, ([url, , slug]) => readBody(`${url}?slug=${encodeURIComponent(slug)}`))
   // Gone only once a fresh list says so: a cached one can predate an item just saved.
+  async function addMine(): Promise<void> {
+    const installation = mine?.installations[0]
+    if (!installation) return
+    const response = await fetch(`/api/skills/${installation.installation_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add' }) })
+    if (response.ok) await catalog.mutate()
+  }
   async function deleteMine(): Promise<boolean> {
     const installation = mine?.installations[0]
     if (!installation) return false
@@ -139,7 +145,8 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const back = item.own ? `${listHref}${listHref.includes('?') ? '&' : '?'}vy=egna` : listHref
   const isFlow = item.kind === 'workflow' && !!item.community
   // Flows and analyses run in the company's AI; knowledge is given to flows instead.
-  const runnable = isFlow || item.kind === 'analysis'
+  // An AI-saved draft is not loadable until it is added, so it cannot run yet.
+  const runnable = (isFlow || item.kind === 'analysis') && !mine?.draft
   const steps = isFlow && body.data ? ownSkillSteps(body.data) : []
   function runShared() {
     // A shared item's text carries what its author wrote, so the prompt is copied rather than typed into the chat.
@@ -217,6 +224,9 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                     {body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{body.error ? t('body_failed_pack') : t('loading_short')}</span>}
                   </div>
                 </Field>}
+                {mine?.draft && (
+                  <div><Button disabled={!canWrite} onClick={() => void addMine()}><Plus className="h-4 w-4" aria-hidden />{t(`add_draft_${item.kind}`)}</Button></div>
+                )}
                 {mine?.installations[0] && (mine.shareStatus ?? 'private') === 'private' && (
                   <div className={styles.alist}><DeleteOwn kind={item.kind} canWrite={canWrite} onDelete={deleteMine} /></div>
                 )}

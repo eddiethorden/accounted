@@ -210,7 +210,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
               </Field>
 
               {own?.draft && (
-                <div><Button disabled={!canWrite} onClick={() => void patchOwn({ action: 'add' })}><Plus className="h-4 w-4" aria-hidden />{t('add_draft')}</Button></div>
+                <div><Button disabled={!canWrite} onClick={() => void patchOwn({ action: 'add' })}><Plus className="h-4 w-4" aria-hidden />{t('add_draft_workflow')}</Button></div>
               )}
 
               <div className={styles.rows}>

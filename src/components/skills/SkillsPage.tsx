@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { Catalog } from './Catalog'
 import { KindsIntro } from './KindsIntro'
+import type { ItemKind } from './hues'
 import { fetchConnections, readAgents, readCatalog, readOptions, readUsage, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -101,9 +102,9 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       setAddressCopy('failed')
     }
   }
-  function createAgent() {
+  function createAgent(kind: ItemKind) {
     if (!isConnected) setCreator({ kind: 'gate' })
-    else openAiConnector(aiPrefilledChatLink(client, t('create_prompt')))
+    else openAiConnector(aiPrefilledChatLink(client, t(`create_prompt_${kind}`)))
   }
 
   const rowsLocked = state === 'locked' || state === 'waiting'

@@ -585,7 +585,7 @@ describe('gnubok_create_skill tool', () => {
     const result = await tool().execute(args, 'company-1', 'user-1', supabase as never, { type: 'api_key' })
     expect(result).toEqual({ company_skill_id: 'skill-1', slug: 'own/skill-1' })
     const row = (insert.mock.calls[0] as unknown[])[0] as Record<string, string | null>
-    expect(row).toMatchObject({ company_id: 'company-1', team_id: null, created_by: 'user-1', atom_id: null, name: 'Månadens fakturor', draft: true })
+    expect(row).toMatchObject({ company_id: 'company-1', team_id: null, created_by: 'user-1', atom_id: null, kind: 'workflow', name: 'Månadens fakturor', draft: true })
     expect(row.body).toContain('1. Hämta fakturorna.\n2. Kolla momsen.')
     expect(row.body).toContain('- Inget bokförs, skickas eller lämnas in utan att användaren godkänt det i Accounted.')
   })
@@ -602,8 +602,27 @@ describe('gnubok_create_skill tool', () => {
     expect(insert).not.toHaveBeenCalled()
   })
 
+  it('saves knowledge and an analysis as text, with their kind', async () => {
+    for (const kind of ['rules', 'analysis'] as const) {
+      const { supabase, insert } = insertMock()
+      await tool().execute({ kind, name: 'Kundluncher', description: 'Hur vi bokför luncher med kunder.', text: 'Bokas på 6072.\n\nSkriv deltagarna i texten.' }, 'company-1', 'user-1', supabase as never, { type: 'api_key' })
+      const row = (insert.mock.calls[0] as unknown[])[0] as Record<string, string | boolean | null>
+      expect(row).toMatchObject({ kind, name: 'Kundluncher', draft: true })
+      expect(row.body).toBe('# Kundluncher\n\nHur vi bokför luncher med kunder.\n\nBokas på 6072.\n\nSkriv deltagarna i texten.\n')
+    }
+  })
+
+  it('rejects knowledge without text, and unknown fields, and writes nothing', async () => {
+    const { supabase, insert } = insertMock()
+    await expect(tool().execute({ kind: 'rules', name: 'Tom', description: 'Inget här.' }, 'company-1', 'user-1', supabase as never, { type: 'api_key' })).rejects.toThrow()
+    await expect(tool().execute({ ...args, extra: true }, 'company-1', 'user-1', supabase as never, { type: 'api_key' })).rejects.toThrow()
+    expect(insert).not.toHaveBeenCalled()
+  })
+
   it('is loadable as the create-skill workflow', async () => {
-    expect((await findSkill('create-skill'))?.body).toContain('gnubok_create_skill')
+    const body = (await findSkill('create-skill'))?.body
+    expect(body).toContain('gnubok_create_skill')
+    expect(body).toContain('`kind`')
   })
 })
 

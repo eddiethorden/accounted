@@ -188,7 +188,7 @@ import { prompts, findPrompt } from './prompts'
 import { findSkill, loadAllSkills, toSummary, SKILL_MIME_TYPE, SKILL_URI_PREFIX, skillUri, skillSlugFromUri } from './skills'
 import { loadSkillProvenance, skillBodyHash, oauthActorLabel } from '@/lib/agent-skills/provenance'
 import { loadCompanySkillRows, ownSkill } from '@/lib/agent-skills/company-skills'
-import { buildOwnSkill, OWN_SKILL_COPY } from '@/lib/agent-skills/own-skill-body'
+import { buildOwnSkill, buildOwnText, OWN_SKILL_COPY } from '@/lib/agent-skills/own-skill-body'
 import { SkillBodySchema } from '@/lib/agent-skills/validation'
 import { recordCommunityFeedback } from '@/lib/agent-skills/community'
 import type { SkillTier } from './skills'
@@ -609,13 +609,18 @@ export interface McpToolAnnotations {
 // mutates a tool's annotations after registration. Tools whose hints need
 // a per-tool explanation keep an inline block with comments.
 const CreateSkillArgsSchema = z.object({
+  // What the user makes: a flow is steps, knowledge and an analysis are text.
+  kind: z.enum(['workflow', 'rules', 'analysis']).default('workflow'),
   name: z.string().min(1).max(120),
   description: z.string().min(1).max(500),
-  steps: z.array(z.string().min(1).max(200)).min(1).max(12),
+  steps: z.array(z.string().min(1).max(200)).max(12).default([]),
+  text: z.string().max(20000).default(''),
   rules: z.array(z.string().min(1).max(200)).max(10).default([]),
   told: z.string().max(4000).default(''),
   language: z.enum(['sv', 'en']).default('sv'),
-}).strict()
+}).strict().refine((input) => input.kind === 'workflow' ? input.steps.length > 0 : input.text.trim().length > 0, {
+  message: 'A workflow needs steps; knowledge and an analysis need text',
+})
 
 const ANNOTATIONS_READ_ONLY = {
   readOnlyHint: true,
@@ -5318,20 +5323,22 @@ export const tools: McpTool[] = [
 
   {
     name: 'gnubok_create_skill',
-    title: 'Create Own Skill',
-    description: 'Save the confirmed own skill as a draft the user adds in Accounted.',
+    title: 'Create Own Item',
+    description: 'Save a confirmed item as a draft.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        kind: { type: 'string', enum: ['workflow', 'rules', 'analysis'] },
         name: { type: 'string' },
         description: { type: 'string' },
         steps: { type: 'array', items: { type: 'string' } },
+        text: { type: 'string' },
         rules: { type: 'array', items: { type: 'string' } },
         told: { type: 'string' },
         language: { type: 'string', enum: ['sv', 'en'] },
       },
-      required: ['name', 'description', 'steps'],
+      required: ['name', 'description'],
     },
     outputSchema: {
       type: 'object',
@@ -5344,16 +5351,18 @@ export const tools: McpTool[] = [
     annotations: ANNOTATIONS_STAGED_WRITE,
     async execute(args, companyId, userId, supabase) {
       const input = CreateSkillArgsSchema.parse(args)
-      const skill = buildOwnSkill(
-        { kind: 'summary', name: input.name, lede: input.description, steps: input.steps, rules: input.rules, facts: [] },
-        { description: input.told, turns: [], extra: [] },
-        OWN_SKILL_COPY[input.language],
-      )
+      const skill = input.kind === 'workflow'
+        ? buildOwnSkill(
+          { kind: 'summary', name: input.name, lede: input.description, steps: input.steps, rules: input.rules, facts: [] },
+          { description: input.told, turns: [], extra: [] },
+          OWN_SKILL_COPY[input.language],
+        )
+        : buildOwnText(input.name, input.description, input.text)
       if (!skill.name || !skill.description) throw new Error('name and description are required')
       SkillBodySchema.parse(skill.body)
       const { data, error } = await supabase
         .from('company_skills')
-        .insert({ company_id: companyId, team_id: null, created_by: userId, atom_id: null, name: skill.name, description: skill.description, body: skill.body, draft: true })
+        .insert({ company_id: companyId, team_id: null, created_by: userId, atom_id: null, kind: input.kind, name: skill.name, description: skill.description, body: skill.body, draft: true })
         .select('id')
         .single()
       if (error) throw error

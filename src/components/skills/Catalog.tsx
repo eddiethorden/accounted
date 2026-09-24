@@ -96,7 +96,8 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   aiReady: boolean
   canWrite: boolean
   /** Create with the company's AI. */
-  onCreate: () => void
+  /** Create with the company's AI: the prompt says which kind of item to make. */
+  onCreate: (kind: ItemKind) => void
   /** Shown in the featured slot while no AI is connected. */
   gate: ReactNode
 }) {
@@ -224,7 +225,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
               <Button size="sm" className="gap-1.5" disabled={!canWrite}><Plus className="h-4 w-4" aria-hidden />{t('create_button')}<ChevronDown className="h-3.5 w-3.5" aria-hidden /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem className="gap-2" onSelect={onCreate}>
+              <DropdownMenuItem className="gap-2" onSelect={() => onCreate(kind)}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={AI_CLIENTS.find((c) => c.id === client)!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
                 {t('create_with', { client: clientName })}
@@ -239,7 +240,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
         <section className={styles.catSection}>
           <div className={styles.catHead}><h2>{t(`own_${kind}_title`)}</h2></div>
           {listed.length === 0
-            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`own_${kind}_empty`, { client: clientName })}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} /></div>
+            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`own_${kind}_empty`, { client: clientName })}</span><CreateButtons client={client} canWrite={canWrite} onCreate={() => onCreate(kind)} onWrite={write} /></div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
       )}
@@ -259,7 +260,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           {listed.length === 0
             ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}>
                 <span>{category && COMMUNITY_OPEN ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
-                {category && COMMUNITY_OPEN && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} />}
+                {category && COMMUNITY_OPEN && <CreateButtons client={client} canWrite={canWrite} onCreate={() => onCreate(kind)} onWrite={write} />}
               </div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
@@ -276,7 +277,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
             </div>
             {top.length === 0 ? (COMMUNITY_OPEN
               ? <div className={styles.placeEmpty}>{t(`community_empty_${kind}`)}</div>
-              : <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`accounted_empty_${kind}`)}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} /></div>) : <ul className={styles.agrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+              : <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`accounted_empty_${kind}`)}</span><CreateButtons client={client} canWrite={canWrite} onCreate={() => onCreate(kind)} onWrite={write} /></div>) : <ul className={styles.agrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
           </section>
 
           {categories.length > 0 && (
