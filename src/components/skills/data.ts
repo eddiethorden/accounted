@@ -7,6 +7,7 @@ import { isCheckable } from '@/lib/agent-skills/agents'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
 import type { ItemKind, Presence } from './hues'
+import type { Area } from './filters'
 
 /** Reads shared by the Agenter list and an agent's page. */
 export type SkillSummary = Omit<CatalogSkill, 'body'>
@@ -122,6 +123,15 @@ export interface CommunityMeta {
   not_works: number
   feedback: 'works' | 'not_works' | null
   reviewed_at: string | null
+  /** An accounting firm (team kind byrå) rather than a company. */
+  author_verified: boolean
+  area: Area | null
+  /** Vertical pack ids it is made for; empty fits every industry. */
+  industries: string[]
+  /** What it works with: bank, skatteverket, mail and so on, or an app such as shopify. */
+  uses: string[]
+  /** Companies that ran it; null when not counted. */
+  used_by: number | null
 }
 export function communityMeta(skill: SkillSummary): CommunityMeta | null {
   return (skill as SkillSummary & { community?: CommunityMeta }).community ?? null

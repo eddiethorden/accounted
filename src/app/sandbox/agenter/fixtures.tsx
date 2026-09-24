@@ -45,6 +45,8 @@ const OPTIONS: KnowledgeOption[] = [
   { id: 'vertical/e-handel', tier: 'vertical', title: 'E-handel & näthandel (SNI 47.91 / 47.99)', summary: 'OSS, marknadsplatser och betalleverantörer.', version: 3, reviewed_at: null },
   { id: 'vertical/konsult-it', tier: 'vertical', title: 'IT-konsult & systemutvecklare (SNI 62)', summary: '3:12, konsult eller anställd, elektroniska tjänster.', version: 3, reviewed_at: null },
   { id: 'vertical/reklambyra-marknadsforing', tier: 'vertical', title: 'Reklambyrå & marknadsföring', summary: 'Vidarefakturering och mediainköp.', version: 3, reviewed_at: null },
+  { id: 'vertical/restaurang-cafe', tier: 'vertical', title: 'Restaurang & café (SNI 56)', summary: 'Moms på servering och avhämtning, kassaregister och personalliggare.', version: 1, reviewed_at: null },
+  { id: 'vertical/vard-halsa', tier: 'vertical', title: 'Vård, tandvård & skönhet (SNI 86)', summary: 'Momsfri vård, blandad verksamhet och frisörer.', version: 1, reviewed_at: null },
   { id: 'vertical/software-saas-ai', tier: 'vertical', title: 'Software, SaaS & AI-produktbolag', summary: 'Prenumerationsintäkter och aktivering av utveckling.', version: 2, reviewed_at: null },
   { id: 'modifier/holding-ab', tier: 'modifier', title: 'Holdingbolag (rena ägar-/förvaltningsbolag)', summary: 'Koncernbidrag, näringsbetingade andelar, moms för holding.', version: 3, reviewed_at: null },
   { id: 'modifier/mixed-verksamhet', tier: 'modifier', title: 'Blandad verksamhet (moms-split)', summary: 'Fördelningsnyckel och jämkning.', version: 3, reviewed_at: null },
@@ -118,19 +120,28 @@ const OWN_BODY = [
 ].join('\n')
 
 // Example community items (names, handles and counts are made up for the demo), one or more per kind.
-const shared = (slug: string, name: string, summary: string, kind: 'workflow' | 'rules' | 'analysis', author: string, authorShared: number, votes: number, works: number, notWorks: number) => ({
+type Shared = { kind: 'workflow' | 'rules' | 'analysis'; author: string; shared: number; verified?: boolean; votes: number; works: number; notWorks: number; area: string | null; industries?: string[]; uses?: string[]; usedBy?: number }
+const shared = (slug: string, name: string, summary: string, m: Shared) => ({
   slug: `community/${slug}`, name, summary, tags: ['community'], tier: 'community', source: 'community', active: false, installations: [],
-  community: { kind, author, author_shared: authorShared, votes, voted: false, works, not_works: notWorks, feedback: null, reviewed_at: '2026-09-18T10:00:00Z' },
+  community: {
+    kind: m.kind, author: m.author, author_shared: m.shared, author_verified: !!m.verified, votes: m.votes, voted: false, works: m.works, not_works: m.notWorks,
+    feedback: null, reviewed_at: '2026-09-18T10:00:00Z', area: m.area, industries: m.industries ?? [], uses: m.uses ?? [], used_by: m.usedBy ?? null,
+  },
 })
+const KONSULT = 'vertical/konsult-it'
+const RESTAURANG = 'vertical/restaurang-cafe'
 
 const CATALOG = [
-  shared('stang-dagskassan', 'Stäng dagskassan', 'Z-rapporten till ett verifikat, med kort, Swish och kontant var för sig.', 'workflow', 'kafe-norr', 4, 48, 31, 2),
-  shared('styrelserapport', 'Månadsrapport till styrelsen', 'Resultat, likviditet och avvikelser mot budget på en sida.', 'workflow', 'byra-lind', 7, 22, 14, 1),
-  shared('dricks-kort', 'Dricks via kort till personalen', 'Hur dricks som kommer in via kortinlösen hanteras fram till lönen, med källor.', 'rules', 'bistro-ost', 2, 17, 9, 1),
-  shared('konsult-vidarefakturering', 'Vidarefakturering av utlägg', 'När ett utlägg för kundens räkning ska med moms och när det inte ska det, med källor.', 'rules', 'byra-lind', 7, 11, 6, 0),
-  shared('ravaruprocent', 'Råvaruprocent per månad', 'Varuinköp mot försäljning, och vad som är normalt för en restaurang.', 'analysis', 'lunchkrogen', 3, 64, 40, 3),
-  shared('kassaflode-13', 'Kassaflöde 13 veckor framåt', 'Kända in- och utbetalningar vecka för vecka, med varning när saldot blir lågt.', 'analysis', 'byra-lind', 7, 41, 25, 2),
-  shared('personalkostnad', 'Personalkostnad per omsättningskrona', 'Löner och avgifter mot omsättning, månad för månad.', 'analysis', 'kafe-norr', 4, 29, 18, 4),
+  shared('tid-till-faktura', 'Tidrapport till faktura', 'Månadens rapporterade timmar per kund blir fakturautkast, med rätt moms för tjänster till utlandet.', { kind: 'workflow', author: 'byra-lind', shared: 7, verified: true, votes: 57, works: 38, notWorks: 2, area: 'fakturering', industries: [KONSULT], uses: ['mail'], usedBy: 212 }),
+  shared('stang-dagskassan', 'Stäng dagskassan', 'Z-rapporten till ett verifikat, med kort, Swish och kontant var för sig.', { kind: 'workflow', author: 'kafe-norr', shared: 4, votes: 48, works: 31, notWorks: 2, area: 'lopande', industries: [RESTAURANG], uses: ['zettle', 'bank'], usedBy: 96 }),
+  shared('styrelserapport', 'Månadsrapport till styrelsen', 'Resultat, likviditet och avvikelser mot budget på en sida.', { kind: 'workflow', author: 'byra-lind', shared: 7, verified: true, votes: 22, works: 14, notWorks: 1, area: 'bokslut', usedBy: 41 }),
+  shared('shopify-underlag', 'Shopify-order som underlag', 'Ordrar och utbetalningar från Shopify blir underlag i bokföringen.', { kind: 'workflow', author: 'butiken', shared: 1, votes: 12, works: 7, notWorks: 2, area: 'lopande', industries: ['vertical/e-handel'], uses: ['shopify', 'bank'], usedBy: 18 }),
+  shared('dricks-kort', 'Dricks via kort till personalen', 'Hur dricks som kommer in via kortinlösen hanteras fram till lönen, med källor.', { kind: 'rules', author: 'bistro-ost', shared: 2, votes: 17, works: 9, notWorks: 1, area: 'lon', industries: [RESTAURANG] }),
+  shared('konsult-vidarefakturering', 'Vidarefakturering av utlägg', 'När ett utlägg för kundens räkning ska med moms och när det inte ska det, med källor.', { kind: 'rules', author: 'byra-lind', shared: 7, verified: true, votes: 31, works: 19, notWorks: 0, area: 'fakturering', industries: [KONSULT] }),
+  shared('ravaruprocent', 'Råvaruprocent per månad', 'Varuinköp mot försäljning, och vad som är normalt för en restaurang.', { kind: 'analysis', author: 'lunchkrogen', shared: 3, votes: 64, works: 40, notWorks: 3, area: 'analys', industries: [RESTAURANG], usedBy: 133 }),
+  shared('debiteringsgrad', 'Debiteringsgrad och timpris', 'Fakturerade timmar mot arbetade, och vad det betyder för timpriset.', { kind: 'analysis', author: 'byra-lind', shared: 7, verified: true, votes: 44, works: 29, notWorks: 1, area: 'analys', industries: [KONSULT], usedBy: 87 }),
+  shared('kassaflode-13', 'Kassaflöde 13 veckor framåt', 'Kända in- och utbetalningar vecka för vecka, med varning när saldot blir lågt.', { kind: 'analysis', author: 'byra-lind', shared: 7, verified: true, votes: 41, works: 25, notWorks: 2, area: 'analys', uses: ['bank'], usedBy: 154 }),
+  shared('personalkostnad', 'Personalkostnad per omsättningskrona', 'Löner och avgifter mot omsättning, månad för månad.', { kind: 'analysis', author: 'kafe-norr', shared: 4, votes: 29, works: 18, notWorks: 4, area: 'analys' }),
   { slug: 'own/00000000-0000-4000-8000-000000000001', name: 'Påminnelse om leverantörsfakturor', summary: 'Listar obetalda leverantörsfakturor som förfaller inom en vecka.', tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: '00000000-0000-4000-8000-000000000001', scope: 'company' }] },
 ]
 
