@@ -10415,6 +10415,7 @@
     "viewer_note": "You have read access in this company and cannot create or delete agents.",
     "skills": {
       "bookkeep": {
+        "role": "Bookkeeper",
         "name": "Book transactions",
         "short": "Proposes account and VAT. You approve.",
         "desc": "Works through unbooked bank transactions, proposes account and VAT and waits for your approval.",
@@ -10428,6 +10429,7 @@
         "say": "Book my unbooked transactions."
       },
       "kvittojakten": {
+        "role": "Receipt hunter",
         "name": "Kvittojakten",
         "short": "Finds missing receipts.",
         "desc": "Finds the receipts and invoices missing from your books in your mail and links them to the right voucher.",
@@ -10442,6 +10444,7 @@
         "note": "Using Claude in Chrome? Kvittojakten then also fetches invoices from portals like AWS, Google Ads and OpenAI, and can set them up to arrive in Accounted automatically."
       },
       "reconcile-month": {
+        "role": "Reconciliation",
         "name": "Reconcile the month",
         "short": "Compares bank and books.",
         "desc": "Compares bank and books account by account and shows what differs.",
@@ -10454,6 +10457,7 @@
         "say": "Reconcile last month for me."
       },
       "month-end-close": {
+        "role": "Month-end close",
         "name": "Month-end close",
         "short": "Finishes the books and locks the month.",
         "desc": "Finishes booking, reconciles, checks the voucher series and locks the period.",
@@ -10466,6 +10470,7 @@
         "say": "Close last month."
       },
       "quarterly-vat-review": {
+        "role": "VAT",
         "name": "VAT return",
         "short": "Reviews VAT box by box.",
         "desc": "Reviews VAT box by box and prepares the return.",
@@ -10478,6 +10483,7 @@
         "say": "Prepare the VAT return."
       },
       "payroll-monthly": {
+        "role": "Payroll",
         "name": "Payroll and AGI",
         "short": "Salary, fees and AGI.",
         "desc": "Computes salary, employer contributions and vacation liability, and produces the AGI.",
@@ -10490,6 +10496,7 @@
         "say": "Run this month's payroll."
       },
       "invoicing-rules": {
+        "role": "Invoicing",
         "name": "Invoice correctly",
         "short": "Checks the invoice before it is sent.",
         "desc": "Checks mandatory details, VAT and ROT/RUT before the invoice is sent.",
@@ -10502,6 +10509,7 @@
         "say": "Help me create an invoice."
       },
       "kreditfaktura-process": {
+        "role": "Credit notes",
         "name": "Credit note",
         "short": "Corrects a sent invoice the right way.",
         "desc": "Picks the right path when a sent invoice must be corrected or credited.",
@@ -10514,6 +10522,7 @@
         "say": "An invoice was wrong. Help me credit it."
       },
       "year-end-close": {
+        "role": "Year-end",
         "name": "Year-end close",
         "short": "Closes the year when everything is ready.",
         "desc": "Closing entries, a check that everything is ready, and closing the year.",
@@ -10526,6 +10535,7 @@
         "say": "Do the year-end close."
       },
       "tax-planning": {
+        "role": "Tax planning",
         "name": "Tax planning",
         "short": "Works out the options before year end.",
         "desc": "Tax allocation reserve, salary or dividend: works out the options before year end.",
@@ -10584,6 +10594,38 @@
     "share_status_published": "Published in the community",
     "share_status_withdrawn": "Sharing withdrawn",
     "share_withdraw": "Withdraw",
+    "status_ai_missing": "Waiting for your AI",
+    "status_needs": "Needs {conn}",
+    "status_last": "Last worked {date}",
+    "status_ready": "Ready",
+    "run_agent": "Ask {name} to start in {client}",
+    "knowledge_add": "Add knowledge",
+    "knowledge_add_one": "Add",
+    "knowledge_remove": "Remove {name}",
+    "knowledge_reset": "Reset to default",
+    "knowledge_added_tag": "added",
+    "knowledge_group_horizontal": "Swedish rules",
+    "knowledge_group_vertical": "Industries",
+    "knowledge_group_modifier": "Company set-up",
+    "knowledge_group_community": "Community",
+    "knowledge_picker_done": "Done",
+    "knowledge_save_failed": "Could not change the knowledge. Try again.",
+    "knowledge_all_added": "The agent already has everything.",
+    "knowledge_hint": "Choose what the agent knows. The defaults come from Accounted; the rest is your choice.",
+    "knowledge_descs": {
+      "swedish-accounting-compliance": "The Bookkeeping Act, BFN guidance, the BAS chart of accounts and voucher rules.",
+      "swedish-vat": "VAT: rates, reverse charge, EU trade and the return's boxes.",
+      "swedish-payroll": "Salaries, employer contributions, tax deductions, benefits, holiday pay and AGI.",
+      "swedish-invoice-compliance": "What an invoice must contain, credit notes and ROT/RUT.",
+      "swedish-e-invoicing": "E-invoicing and Peppol, requirements for invoices to the public sector.",
+      "swedish-year-end-closing": "Year-end: accruals, appropriations, tax and closing the year.",
+      "swedish-asset-accounting": "Equipment and depreciation, leasing and selling assets.",
+      "swedish-financial-reporting": "Annual reports under K2/K3, filing with Bolagsverket, and INK2.",
+      "swedish-tax-planning": "Tax allocation reserves, excess depreciation, 3:12 and salary or dividend.",
+      "swedish-sru-filing": "SRU codes and the files filed with Skatteverket.",
+      "swedish-sie-import-export": "SIE files when moving between accounting programs.",
+      "swedish-project-accounting": "Projects, work in progress, revenue recognition and grants."
+    },
     "knowledge_names": {
       "swedish-accounting-compliance": "Bookkeeping Act",
       "swedish-vat": "VAT",
