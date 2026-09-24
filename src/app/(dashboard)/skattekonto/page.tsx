@@ -660,7 +660,7 @@ export default function SkattekontoPage() {
             layout="side-right"
             title={tStart('skattekonto_title')}
             body={tStart('skattekonto_body')}
-            primary={{ label: tStart('skattekonto_primary'), href: '/settings/tax' }}
+            primary={{ label: tStart('skattekonto_primary'), href: '/settings/skatteverket' }}
             secondary={{ label: t('import_statement_action'), href: '/import?mode=skattekonto' }}
           />
         </div>
@@ -725,7 +725,7 @@ export default function SkattekontoPage() {
           shortfall line under convention 6's 2026-08-19 addendum (one
           lib/notices notice plus one page-domain attn line). */}
       {showReconnect ? (
-        <AttnLine action={{ label: t('attn_reconnect_action'), href: '/settings/tax' }}>
+        <AttnLine action={{ label: t('attn_reconnect_action'), href: '/settings/skatteverket' }}>
           {reconnectBody}
         </AttnLine>
       ) : notConnected ? (
@@ -733,7 +733,7 @@ export default function SkattekontoPage() {
         // booking/matching flows below work on the local table. One ochre
         // sentence with the connect action, per the attn convention.
         <AttnLine
-          action={{ label: tStart('skattekonto_primary'), href: '/settings/tax' }}
+          action={{ label: tStart('skattekonto_primary'), href: '/settings/skatteverket' }}
         >
           {t('imported_not_connected_attn')}
         </AttnLine>

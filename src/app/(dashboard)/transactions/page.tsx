@@ -4268,7 +4268,7 @@ export default function TransactionsPage() {
         // Konton row (lib/notices predicate), so a line on every visit to the
         // bank list was noise (founder feedback 2026-09-09). The line still
         // renders only while the connection is actually broken.
-        <AttnLine action={{ label: t('skv_reconnect_cta'), href: '/settings/tax' }}>
+        <AttnLine action={{ label: t('skv_reconnect_cta'), href: '/settings/skatteverket' }}>
           {t('skv_reconnect_body')}
         </AttnLine>
       ) : suggestionItems.length > 0 && mode !== 'review' ? (

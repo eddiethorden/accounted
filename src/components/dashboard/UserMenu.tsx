@@ -380,7 +380,7 @@ export default function UserMenu({
                 {tNav('settings')}
               </Link>
               <Link
-                href={cockpitMode ? '/settings/team?ctx=byra' : '/settings/company#members'}
+                href={cockpitMode ? '/settings/team?ctx=byra' : '/settings/members'}
                 onClick={close}
                 className={menuRow}
               >

@@ -72,12 +72,8 @@ const MAIN_PANEL_CLASS =
 
 export default async function DashboardLayout({
   children,
-  settingsModal,
 }: {
   children: React.ReactNode
-  // `@settingsModal` parallel slot: renders the routed settings modal over the
-  // current page on in-app navigation to /settings/*; null otherwise.
-  settingsModal: React.ReactNode
 }) {
   const { supabase, user } = await getDashboardAuthContext()
 
@@ -245,7 +241,6 @@ export default async function DashboardLayout({
                 {children}
               </MainContainer>
             </main>
-            {settingsModal}
             <SettingsHotkey />
           <Suspense fallback={null}>
             <SupportDialogHost />
@@ -404,7 +399,6 @@ export default async function DashboardLayout({
                 {children}
               </MainContainer>
             </main>
-            {settingsModal}
             <SettingsHotkey />
           </div>
         </AgentSheetProvider>
@@ -630,7 +624,6 @@ export default async function DashboardLayout({
           )}
           <LazyCommandPalette />
           <SettingsHotkey />
-          {settingsModal}
         </div>
         {/* Outside #dash-shell on purpose: non-modal dialogs (booking,
             invoice) set `inert` on the shell while open, and the assistant
