@@ -10,7 +10,6 @@ import { SlidingTabs } from './SlidingTabs'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
-import { forIndustry, matches, packArea, type Facets, type Filters } from './filters'
 import styles from './skills.module.css'
 
 type Source = 'accounted' | 'community' | 'own'
@@ -23,21 +22,7 @@ const LEVELS = ['horizontal', 'modifier', 'vertical'] as const
  * sources in tabs. Kunskap is the reviewed packs, grouped general to
  * specific; a pack never runs on its own, it is given to flows.
  */
-/** A shared item's facets for the filter row. */
-export function communityFacets(skill: SkillSummary): Facets {
-  const meta = communityMeta(skill)
-  return { title: skill.name, desc: skill.summary, area: meta?.area ?? null, industries: meta?.industries ?? [], uses: meta?.uses ?? [] }
-}
-/** A knowledge pack's facets: an industry pack is made for its own industry, the rest fit all. */
-export function packFacets(option: KnowledgeOption, title: string, desc: string): Facets {
-  return { title, desc, area: packArea(option.id), industries: option.tier === 'vertical' ? [option.id] : [], uses: [] }
-}
-/** Made for the chosen industry first, then the rest in their order. */
-export function industryFirst<T>(items: T[], filters: Filters, facets: (item: T) => Facets): T[] {
-  return [...items.filter((i) => forIndustry(filters, facets(i))), ...items.filter((i) => !forIndustry(filters, facets(i)))]
-}
-
-export function KindView({ kind, hrefBase, catalog, options, overview, clientName, remembered, filters, industryName }: {
+export function KindView({ kind, hrefBase, catalog, options, overview, clientName, remembered }: {
   kind: Exclude<ItemKind, 'workflow'>
   hrefBase: string
   catalog: SkillSummary[]
@@ -45,23 +30,18 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
   overview: AgentsOverview | null | undefined
   clientName: string
   remembered: number
-  filters: Filters
-  industryName: string | null
 }) {
   const t = useTranslations('skills_registry')
   const knowledgeName = useKnowledgeName()
   const knowledgeDesc = useKnowledgeDesc()
   const [source, setSource] = useState<Source>('accounted')
   // Most voted first: what others found useful is what a newcomer should see.
-  const community = industryFirst(catalog.filter((s) => s.tier === 'community' && kindOf(s) === kind && matches(filters, communityFacets(s)))
-    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0)), filters, communityFacets)
-  const badge = (facets: Facets) => forIndustry(filters, facets) && industryName ? <span className={styles.forIndustry}>{t('for_industry')}</span> : undefined
+  const community = catalog.filter((s) => s.tier === 'community' && kindOf(s) === kind)
+    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
   const usedBy = (atomId: string) => overview?.agents.filter((a) => a.knowledge.some((k) => k.id === atomId)).length ?? 0
 
   const count = (s: Source) => s === 'community' ? community.length : 0
-  const facetsOf = (o: KnowledgeOption) => packFacets(o, knowledgeName(o.id, o.title), knowledgeDesc(o.id, o.summary))
-  const packs = options.filter((o) => o.tier !== 'community' && matches(filters, facetsOf(o)))
-  const nothing = kind === 'rules' && source === 'accounted' && packs.length === 0
+  const packs = options.filter((o) => o.tier !== 'community')
 
   return (
     <section className={styles.lower} aria-label={t(`kind_${kind}`)}>
@@ -80,7 +60,7 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
           ? <Empty title={t('community_empty_title')} body={t(`community_empty_${kind}`)} />
           : <ul className={styles.agrid}>{community.map((skill) => (
             <li key={skill.slug}>
-              <AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind={kind} symbolKey={skill.slug} hue={itemHue(kind, skill.slug)} badge={badge(communityFacets(skill))} foot={<CommunityFoot meta={communityMeta(skill)} />} />
+              <AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind={kind} symbolKey={skill.slug} hue={itemHue(kind, skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} />
             </li>
           ))}</ul>)}
 
@@ -99,7 +79,6 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
                     kind="rules"
                     symbolKey={o.id}
                     hue={itemHue('rules', o.id)}
-                    badge={badge(facetsOf(o))}
                     foot={<span className={styles.metaLine}>{[o.version ? t('version_short', { version: o.version }) : null, usedBy(o.id) > 0 ? t('used_by', { count: usedBy(o.id) }) : null].filter(Boolean).join(' · ')}</span>}
                   />
                 </li>
@@ -107,7 +86,6 @@ export function KindView({ kind, hrefBase, catalog, options, overview, clientNam
             </div>
           )
         })}
-        {nothing && <Empty title={t('filters_none_title')} body={t('filters_none_body')} />}
         {kind === 'rules' && source === 'own' && <Empty title={t('rules_own_title')} body={remembered > 0 ? t('rules_own_body_count', { count: remembered }) : t('rules_own_body')} />}
 
         {kind === 'analysis' && source === 'accounted' && <Empty title={t('analysis_accounted_title')} body={t('analysis_accounted_body')} />}

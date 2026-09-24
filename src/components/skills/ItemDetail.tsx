@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
@@ -21,6 +22,15 @@ import { itemHue, kindHref, seedOf, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { communityMeta, communitySegment, kindOf, readAgents, readCatalog, readOptions, rulesSegment, type CommunityMeta } from './data'
 import styles from './skills.module.css'
+
+// The Markdown parser loads with the first pack that is opened, not with the list.
+const Markdown = dynamic(() => import('@/components/agent/MarkdownMessage'))
+
+async function readBody(url: string): Promise<string> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Item body request failed')
+  return ((await response.json()).data as { body: string }).body
+}
 
 type Item = {
   kind: ItemKind
@@ -71,6 +81,9 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
     version: shared.version ?? null, reviewedAt: communityMeta(shared)?.reviewed_at ?? shared.reviewedAt ?? null, level: null, community: communityMeta(shared),
   } : null
 
+  // What the AI actually reads: the pack's own text from the registry, fetched when the page opens.
+  const bodySlug = pack?.id ?? shared?.slug ?? null
+  const body = useSWR(bodySlug ? ['/api/skills', companyId, bodySlug] : null, ([url, , slug]) => readBody(`${url}?slug=${encodeURIComponent(slug)}`))
   const loaded = isRules ? !!options.data : !!catalog.data
   if (!item) {
     return (
@@ -123,9 +136,6 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   <div className={styles.fieldBox} data-ph-mask={item.community ? '' : undefined}>{item.name}</div>
                   <span className={styles.fieldHint}>{item.desc}</span>
                 </Field>
-                {item.body && item.body !== item.desc && <Field label={t('field_contents')}>
-                  <div className={styles.instrBox}><p data-ph-mask={item.community ? '' : undefined}>{item.body}</p></div>
-                </Field>}
                 <div className={styles.rows}>
                   <Row label={t('row_source')}><span className={styles.muted}>{[item.community ? t('source_community') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>
                   {item.level && <Row label={t('row_level')}><span className={styles.muted}>{t(`level_${item.level}`)}</span></Row>}
@@ -140,6 +150,11 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   )}
                   {item.community && <Works meta={item.community} slug={item.key} />}
                 </div>
+                <Field label={t('field_contents')} note={t('contents_note')}>
+                  <div className={styles.mdBody} data-ph-mask={item.community ? '' : undefined}>
+                    {body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{body.error ? t('body_failed_pack') : t('loading_short')}</span>}
+                  </div>
+                </Field>
               </>
             )}
             {view === 'give' && item.atomId && (
