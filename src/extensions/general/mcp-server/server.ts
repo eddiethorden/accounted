@@ -5539,9 +5539,9 @@ export const tools: McpTool[] = [
           type: 'string',
           description: 'Skill it concerns.',
         },
-        works: {
+        upvote: {
           type: 'boolean',
-          description: 'For a community/ skill_slug: did it work for the user?',
+          description: 'true: the user said the community/ skill_slug worked.',
         },
       },
       required: ['context'],
@@ -5573,12 +5573,14 @@ export const tools: McpTool[] = [
       const toolName = (args.tool_name as string | undefined)?.trim() || null
       const skillSlug = (args.skill_slug as string | undefined)?.trim() || null
 
-      // "Fungerade det?" at the end of a community flow: the user's answer is
-      // saved like the one on the Skills page, before the telemetry rate limit
-      // (the upsert is idempotent, and the answer must not be lost to it).
-      if (typeof args.works === 'boolean') {
-        if (!skillSlug?.startsWith('community/')) throw codedError('VALIDATION_ERROR', 'works needs the community/ skill_slug it answers for')
-        const saved = await recordCommunityFeedback(supabase, { companyId, userId, slug: skillSlug, feedback: args.works ? 'works' : 'not_works' })
+      // "Fungerade det?" at the end of a community flow: a yes is the user's
+      // upvote, saved like the one on the Agentinstruktioner page, before the
+      // telemetry rate limit (the upsert is idempotent, and the vote must not
+      // be lost to it). A no records nothing: there is no "does not work" score.
+      const upvote = args.upvote === true
+      if (upvote) {
+        if (!skillSlug?.startsWith('community/')) throw codedError('VALIDATION_ERROR', 'upvote needs the community/ skill_slug it is for')
+        const saved = await recordCommunityFeedback(supabase, { companyId, userId, slug: skillSlug, vote: true })
         if (!saved) throw codedError('NOT_FOUND', `Community skill not found: ${skillSlug}`)
       }
 
@@ -5590,7 +5592,7 @@ export const tools: McpTool[] = [
       const now = Date.now()
       const last = feedbackRateLimit.get(rateKey)
       if (last && now - last < FEEDBACK_RATE_LIMIT_MS) {
-        if (typeof args.works === 'boolean') return { recorded: true, message: 'The user\'s answer is saved on the community skill.' }
+        if (upvote) return { recorded: true, message: 'The user\'s upvote is saved on the community skill.' }
         const waitSec = Math.ceil((FEEDBACK_RATE_LIMIT_MS - (now - last)) / 1000)
         throw new Error(`gnubok_feedback is rate-limited. Try again in ${waitSec}s.`)
       }

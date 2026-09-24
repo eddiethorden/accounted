@@ -4,8 +4,8 @@ import { validateBody } from '@/lib/api/validate'
 import { CommunityFeedbackSchema, recordCommunityFeedback } from '@/lib/agent-skills/community'
 
 /**
- * A vote and/or a "fungerar det?" answer on a community item, one per person.
- * Open to every member, viewers included: rating a shared item changes
+ * An upvote on a community item, one per person; `vote: false` takes it back.
+ * Open to every member, viewers included: voting on a shared item changes
  * nothing in the company's books.
  */
 export const POST = withRouteContext('agents.community.feedback', async (request, { supabase, companyId, user }) => {

@@ -1,5 +1,5 @@
--- Rollback-only fixture: community votes and answers (community_feedback),
--- the kind of a submission and community_item_stats().
+-- Rollback-only fixture: community upvotes (community_feedback), the frozen
+-- kind of a submission and community_item_stats().
 BEGIN;
 DO $test$
 DECLARE
@@ -55,31 +55,28 @@ BEGIN
   UPDATE public.company_skills SET share_status = 'published', published_atom_id = 'community/feedback-test-live', reviewed_at = now()
     WHERE id = skill_id;
 
-  -- A member votes and answers from their company.
+  -- A member votes from their company, takes it back and votes again.
   PERFORM set_config('request.jwt.claim.sub', voter_id::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', voter_id, 'role', 'authenticated')::text, true);
   SET LOCAL ROLE authenticated;
   INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
     VALUES ('community/feedback-test-live', company_a, voter_id, true) RETURNING id INTO row_id;
-  UPDATE public.community_feedback SET feedback = 'works' WHERE id = row_id;
+  UPDATE public.community_feedback SET vote = false WHERE id = row_id;
+  UPDATE public.community_feedback SET vote = true WHERE id = row_id;
   BEGIN
     INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
       VALUES ('community/feedback-test-live', company_a, voter_id, true);
     RAISE EXCEPTION 'A second row for the same person and item was accepted';
   EXCEPTION WHEN unique_violation THEN NULL; END;
   BEGIN
-    UPDATE public.community_feedback SET feedback = 'maybe' WHERE id = row_id;
-    RAISE EXCEPTION 'An unknown answer was accepted';
-  EXCEPTION WHEN check_violation THEN NULL; END;
-  BEGIN
     INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
       VALUES ('community/feedback-test-off', company_a, voter_id, true);
-    RAISE EXCEPTION 'A withdrawn item was rated';
+    RAISE EXCEPTION 'A withdrawn item was voted on';
   EXCEPTION WHEN check_violation THEN NULL; END;
   BEGIN
     INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
       VALUES ('vertical/feedback-test-pack', company_a, voter_id, true);
-    RAISE EXCEPTION 'A non-community item was rated';
+    RAISE EXCEPTION 'A non-community item was voted on';
   EXCEPTION WHEN check_violation THEN NULL; END;
   BEGIN
     INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
@@ -95,15 +92,16 @@ BEGIN
     RAISE EXCEPTION 'A vote moved to another item';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 
-  -- A viewer may rate too: rating is not a change to the company's books.
+  -- A viewer may vote too: voting is not a change to the company's books.
+  -- A row without a vote does not count.
   PERFORM set_config('request.jwt.claim.sub', viewer_id::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', viewer_id, 'role', 'authenticated')::text, true);
-  INSERT INTO public.community_feedback(atom_id, company_id, user_id, feedback)
-    VALUES ('community/feedback-test-live', company_a, viewer_id, 'not_works');
+  INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
+    VALUES ('community/feedback-test-live', company_a, viewer_id, false);
   SELECT count(*) INTO seen FROM public.community_feedback;
   IF seen <> 1 THEN RAISE EXCEPTION 'A person saw % feedback rows, expected only their own', seen; END IF;
 
-  -- Another company's user rates from their own company, sees none of the
+  -- Another company's user votes from their own company, sees none of the
   -- others' rows, but reads the counts.
   PERFORM set_config('request.jwt.claim.sub', other_id::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', other_id, 'role', 'authenticated')::text, true);
@@ -112,14 +110,14 @@ BEGIN
       VALUES ('community/feedback-test-live', company_a, other_id, true);
     RAISE EXCEPTION 'A vote was given from a company the voter is not in';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
-  INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote, feedback)
-    VALUES ('community/feedback-test-live', company_b, other_id, true, 'works');
+  INSERT INTO public.community_feedback(atom_id, company_id, user_id, vote)
+    VALUES ('community/feedback-test-live', company_b, other_id, true);
   SELECT count(*) INTO seen FROM public.community_feedback;
   IF seen <> 1 THEN RAISE EXCEPTION 'Another tenant saw % feedback rows', seen; END IF;
   SELECT * INTO stats FROM public.community_item_stats() s WHERE s.atom_id = 'community/feedback-test-live';
   IF stats IS NULL THEN RAISE EXCEPTION 'The live item has no stats'; END IF;
-  IF stats.votes <> 2 OR stats.works <> 2 OR stats.not_works <> 1 THEN
-    RAISE EXCEPTION 'Wrong counts: % votes, % works, % not works', stats.votes, stats.works, stats.not_works;
+  IF stats.votes <> 2 THEN
+    RAISE EXCEPTION 'Wrong count: % votes, expected 2', stats.votes;
   END IF;
   IF stats.kind <> 'analysis' THEN
     RAISE EXCEPTION 'The kind did not reach the stats';
