@@ -27,7 +27,7 @@
  *                           properties (transition-colors, -opacity, ...).
  *   tailwind-shadow         shadow-sm..2xl are ~3x heavier than the design
  *                           tokens. Use POPOVER_SURFACE_CLASS or
- *                           shadow-[var(--shadow-*)] on overlays.
+ *                           shadow-[var(--shadow-md)] (or -sm, -lg) on overlays.
  *   faded-border            border-border/NN. The border token is calibrated
  *                           for full opacity.
  *   hover-tint              a hover background other than secondary/35 (table
@@ -236,7 +236,7 @@ export const UI_UNIFORMITY_HINTS = {
   'off-token-duration': 'use duration-150 for state changes, duration-300 for layout changes',
   'literal-easing': 'use ease-out, ease-emphasized or ease-drawer',
   'transition-all': 'name the animated properties: transition-colors, transition-opacity, transition-transform, ...',
-  'tailwind-shadow': 'use POPOVER_SURFACE_CLASS (components/ui/popover-surface.ts) or shadow-[var(--shadow-*)] on overlays',
+  'tailwind-shadow': 'use POPOVER_SURFACE_CLASS (components/ui/popover-surface.ts) or shadow-[var(--shadow-md)] (or -sm, -lg) on overlays',
   'faded-border': 'use full-opacity border-border',
   'hover-tint': 'use hover:bg-secondary/35 on table/list rows, hover:bg-secondary/60 elsewhere',
   'raw-palette': 'use theme tokens (foreground, muted-foreground, destructive, warning, success, ...)',
