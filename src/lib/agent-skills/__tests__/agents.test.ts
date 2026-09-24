@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { discoverAtoms } from '@/scripts/lib/atom-discovery'
 import { AGENTS, CONNECTION_SETTINGS, isCheckable } from '../agents'
 import { REGISTRY_SKILLS } from '../registry'
+import { predicateDef } from '@/lib/arkiv/facts/predicates'
 
 describe('AGENTS manifest', () => {
   it('defines every curated agent and nothing else', () => {
@@ -23,6 +24,12 @@ describe('AGENTS manifest', () => {
         expect(atom!.parent_atom_id, `${id}: ${r} must be a reference`).not.toBeNull()
         expect(atom!.audience, `${id}: ${r} is developer material`).toBe('agent')
       }
+    }
+  })
+
+  it('names only company facts that exist', () => {
+    for (const [id, def] of Object.entries(AGENTS)) {
+      for (const f of def.facts) expect(predicateDef(f), `${id}: fact ${f}`).not.toBeNull()
     }
   })
 

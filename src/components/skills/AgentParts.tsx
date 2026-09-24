@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
-import type { AgentOverview } from '@/lib/agent-skills/agent-bundle'
+import type { AgentOverview, AgentsOverview } from '@/lib/agent-skills/agent-bundle'
+import { AGENTS } from '@/lib/agent-skills/agents'
 import { formatDateLong } from '@/lib/utils'
 import styles from './skills.module.css'
 
@@ -26,11 +27,14 @@ export function useKnowledgeName() {
  * it acts (Kopplingar). Own agents have no declared knowledge or connections:
  * their AI loads the rules on demand.
  */
-export function AgentParts({ steps, agent, company, facts, own }: {
+/** What the company part counts: the agent's own view of the company, from GET /api/agents. */
+export type CompanyCounts = Pick<AgentsOverview, 'agreements' | 'remembered' | 'documents'>
+
+export function AgentParts({ steps, agent, company, counts, own }: {
   steps: string[]
   agent?: AgentOverview
   company: AgentOverview['company']
-  facts: number
+  counts: CompanyCounts
   own: boolean
 }) {
   const t = useTranslations('skills_registry')
@@ -74,13 +78,25 @@ export function AgentParts({ steps, agent, company, facts, own }: {
       </section>
 
       <section className={styles.part} aria-labelledby="agent-part-company">
-        <h3 id="agent-part-company" className={styles.partLabel}>{t('section_company')}</h3>
-        {company.length === 0 && facts === 0 ? <p className={styles.muted}>{t('company_none')}</p> : (
-          <ul className={styles.chips}>
-            {company.map((c) => <li key={c.id} className={`${styles.chip} ${styles.chipCompany}`}>{c.title}</li>)}
-            {facts > 0 && <li className={`${styles.chip} ${styles.chipCompany}`}>{t('company_facts', { count: facts })}</li>}
-          </ul>
-        )}
+        <div className={styles.partHead}>
+          <h3 id="agent-part-company" className={styles.partLabel}>{t('section_company')}</h3>
+          {!own && <span className={styles.partNote}>{t('company_given')}</span>}
+        </div>
+        {(() => {
+          const def = agent ? AGENTS[agent.id] : null
+          const chips = [
+            ...company.map((c) => ({ key: c.id, text: c.title })),
+            ...(def && agent && agent.facts_known > 0 ? [{ key: 'facts', text: t('company_facts_known', { known: agent.facts_known, total: def.facts.length }) }] : []),
+            ...(def?.agreements && counts.agreements > 0 ? [{ key: 'agreements', text: t('company_agreements', { count: counts.agreements }) }] : []),
+            ...(counts.remembered > 0 ? [{ key: 'remembered', text: t('company_remembered', { count: counts.remembered }) }] : []),
+            ...(counts.documents > 0 ? [{ key: 'documents', text: t('company_documents', { count: counts.documents }) }] : []),
+          ]
+          return chips.length === 0 ? <p className={styles.muted}>{t('company_none')}</p> : (
+            <ul className={styles.chips}>
+              {chips.map((c) => <li key={c.key} className={`${styles.chip} ${styles.chipCompany}`}>{c.text}</li>)}
+            </ul>
+          )
+        })()}
       </section>
 
       {!own && agent && (
