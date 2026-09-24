@@ -219,6 +219,12 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                     <KnowledgeChip key={k.id} knowledge={k} href={`${backHref}/${rulesSegment(k.id)}`} canEdit={canEdit} onRemove={() => changeKnowledge('remove', k.id)} />
                   ))} />}
                 </Row>
+                {/* The company's own industry sections for this flow's area, sent in full when the flow starts. */}
+                {(overview?.industry_sections.length ?? 0) > 0 && (
+                  <Row label={t('section_industry')}>
+                    <Capped items={overview!.industry_sections.map((s) => <span key={s.id} className={`${styles.chip} ${styles.chipCompany}`} title={s.title}>{s.title}</span>)} />
+                  </Row>
+                )}
                 <Row label={t('section_company')} onOpen={() => setView('company')}>
                   <span className={styles.muted}>{[
                     overview && overview.facts_known > 0 ? t('company_facts_known', { known: overview.facts_known, total: AGENTS[curated!].facts.length }) : null,
