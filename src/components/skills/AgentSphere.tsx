@@ -18,6 +18,13 @@ export type Presence = 'ready' | 'busy' | 'blocked' | 'idle'
  */
 const N = 220
 
+/** A stable number from a string, so every agent's sphere turns its own way every visit. */
+export function seedOf(key: string): number {
+  let h = 2166136261
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619)
+  return (h >>> 0) % 10000
+}
+
 function buildSphere(seed: number) {
   const pts: { x: number; y: number; z: number; ph: number }[] = []
   for (let i = 0; i < N; i++) {

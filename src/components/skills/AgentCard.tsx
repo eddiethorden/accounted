@@ -3,8 +3,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
-import { AgentSphere, type Presence } from './AgentSphere'
-import { seedOf } from './AgentArt'
+import { AgentSphere, seedOf, type Presence } from './AgentSphere'
 import styles from './skills.module.css'
 
 /**

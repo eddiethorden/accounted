@@ -522,14 +522,13 @@ a.chip:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset
 .apage { display: flex; flex-direction: column; gap: 16px; }
 .agrid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: stretch; }
 @media (max-width: 960px) { .agrid2 { grid-template-columns: 1fr; } }
-.stage { position: sticky; top: 16px; align-self: start; height: 560px; border: 1px solid hsl(var(--border)); border-radius: 16px; overflow: hidden; background: hsl(var(--frame)); color: hsl(var(--foreground)); }
+.stage { position: sticky; top: 16px; align-self: start; height: 560px; border-radius: 16px; overflow: hidden; color: hsl(var(--foreground)); }
 @media (max-width: 960px) { .stage { position: relative; top: 0; height: 380px; } }
-.art { position: absolute; inset: 0; }
-.art canvas { display: block; }
-.stageTile { position: absolute; left: 16px; top: 16px; display: flex; align-items: center; gap: 14px; padding: 10px 18px 10px 10px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background) / 0.94); }
-.stageWho { display: flex; flex-direction: column; gap: 2px; }
-.stageWho b { font-size: 15px; font-weight: 500; line-height: 21px; }
-.stageWho small { font-size: 12.5px; color: hsl(var(--muted-foreground)); }
+.stageImg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* the agent sits in the middle of its stage, as a small white card */
+.stageTile { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -54%); display: flex; flex-direction: column; align-items: center; gap: 12px; width: 220px; padding: 26px 20px 22px; border-radius: 20px; background: hsl(var(--background)); box-shadow: var(--shadow-lg); text-align: center; color: hsl(var(--foreground)); }
+.stageTile b { font-size: 15px; font-weight: 500; line-height: 21px; }
+.stageTile small { font-size: 12.5px; color: hsl(var(--muted-foreground)); }
 .stageFoot { position: absolute; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .stageStatus { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid hsl(var(--border)); border-radius: 9999px; background: hsl(var(--background) / 0.94); font-size: 12.5px; }
 .apanel { display: flex; flex-direction: column; gap: 20px; min-height: 560px; padding: 24px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--background)); }
