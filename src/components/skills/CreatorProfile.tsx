@@ -25,8 +25,6 @@ export function CreatorProfile({ handle, backHref }: { handle: string; backHref:
     .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
   const metas = items.map((s) => communityMeta(s)!)
   const votes = metas.reduce((sum, m) => sum + m.votes, 0)
-  const works = metas.reduce((sum, m) => sum + m.works, 0)
-  const rated = works + metas.reduce((sum, m) => sum + m.not_works, 0)
   const usedBy = metas.reduce((sum, m) => sum + (m.used_by ?? 0), 0)
   const verified = metas.some((m) => m.author_verified)
   const hue = seedOf(handle) % 360
@@ -45,7 +43,6 @@ export function CreatorProfile({ handle, backHref }: { handle: string; backHref:
                 <div><dt>{t('creator_shared')}</dt><dd>{items.length}</dd></div>
                 <div><dt>{t('creator_votes')}</dt><dd>{votes}</dd></div>
                 {usedBy > 0 && <div><dt>{t('creator_used_by')}</dt><dd>{usedBy}</dd></div>}
-                {rated > 0 && <div><dt>{t('creator_works')}</dt><dd>{Math.round((works / rated) * 100)} %</dd></div>}
               </dl>
             </div>
           </section>

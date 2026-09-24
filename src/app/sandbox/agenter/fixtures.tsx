@@ -185,6 +185,8 @@ function installFixtures() {
         const slug = url.searchParams.get('slug')
         if (!slug) return json(CATALOG)
         if (slug === 'own/00000000-0000-4000-8000-000000000001') return json({ body: OWN_BODY })
+        const real = PACK_TEXTS.get(slug)
+        if (real) return json({ body: real })
         if (slug === 'vertical/konsult-it') return json({ body: PACK_BODY })
         const pack = OPTIONS.find((o) => o.id === slug)
         if (pack) return json({ body: `# ${pack.title}\n\nI appen visas packets egen text här, samma text som din AI läser.` })
@@ -219,6 +221,12 @@ const MAIN_PANEL_CLASS =
   'safe-area-main-padding md:!pb-0 relative bg-background min-h-dvh ' +
   'md:min-h-0 md:ml-[var(--nav-w)] md:mt-[10px] md:mr-[var(--agent-dock-w)] md:h-[calc(100vh-20px)] ' +
   'md:overflow-y-auto md:rounded-xl md:border md:border-border'
+
+// The real texts of packs, read from the repo by the item page on the server.
+const PACK_TEXTS = new Map<string, string>()
+export function providePackBody(id: string, body: string) {
+  PACK_TEXTS.set(id, body)
+}
 
 export function SandboxShell({ children }: { children: ReactNode }) {
   useState(() => { if (typeof window !== 'undefined' && !installed) { installFixtures(); installed = true } })
