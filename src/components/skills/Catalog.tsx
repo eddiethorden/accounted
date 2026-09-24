@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Check, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpDown, PenLine, Briefcase, Check, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
 import type { AgentConnectionState, AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
@@ -13,8 +13,9 @@ import type { SkillUsage } from '@/lib/agent-skills/usage'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ItemSymbol } from './ItemSymbol'
+import { WriteYourself } from './WriteYourself'
 import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
@@ -82,7 +83,7 @@ interface Item {
  * categories (industries and company forms) with counts; a category or a
  * search shows the full list. Egna is what the company made or uses.
  */
-export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, client, aiReady, canWrite, onCreate, gate }: {
+export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, client, aiReady, canWrite, onCreate, onSaved, gate }: {
   hrefBase: string
   catalog: SkillSummary[]
   options: KnowledgeOption[]
@@ -94,7 +95,10 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   client: AiClient
   aiReady: boolean
   canWrite: boolean
+  /** Create with the company's AI. */
   onCreate: () => void
+  /** After something was written by hand: reload the catalogue. */
+  onSaved: () => void
   /** Shown in the featured slot while no AI is connected. */
   gate: ReactNode
 }) {
@@ -112,6 +116,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const [sort, setSort] = useState<'popular' | 'name'>('popular')
   const [showAll, setShowAll] = useState(false)
   const [allCategories, setAllCategories] = useState(false)
+  const [writing, setWriting] = useState(false)
 
   function go(next: { typ?: ItemKind; vy?: 'discover' | 'own'; kategori?: string | null }) {
     const sp = new URLSearchParams(params.toString())
@@ -140,13 +145,18 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
     key: o.id, kind: 'rules', title: knowledgeName(o.id, o.title), desc: knowledgeDesc(o.id, o.summary), href: `${hrefBase}/${rulesSegment(o.id)}`,
     source: 'accounted', meta: null, categories: o.tier === 'vertical' || o.tier === 'modifier' ? [o.id] : [], popularity: usedByFlows(o.id), usedByFlows: usedByFlows(o.id),
   }))
-  const ownFlows: Item[] = own.map((s) => ({ key: s.slug, kind: 'workflow', title: s.name, desc: s.summary, href: `${hrefBase}/${agentSegment(s.slug)}`, source: 'own', meta: null, categories: [], popularity: 0 }))
+  // Own items: a flow opens the flow page; own knowledge and analyses open the item page (egen.<id>).
+  const ownItems: Item[] = own.map((s) => {
+    const k = s.itemKind ?? 'workflow'
+    return { key: s.slug, kind: k, title: s.name, desc: s.summary, href: k === 'workflow' ? `${hrefBase}/${agentSegment(s.slug)}` : `${hrefBase}/egen.${s.slug.slice(4)}`, source: 'own', meta: null, categories: [], popularity: 0 }
+  })
   const all = [...flows, ...packs, ...shared]
   const ofKind = all.filter((i) => i.kind === kind)
 
   // Egna: for flows, what the company made; for knowledge, what the company's flows carry.
   const carried = new Set(overview?.agents.flatMap((a) => a.knowledge.map((k) => k.id)) ?? [])
-  const mine = kind === 'workflow' ? ownFlows : kind === 'rules' ? packs.filter((p) => carried.has(p.key)) : []
+  const mine = ownItems.filter((i) => i.kind === kind)
+  const carriedPacks = kind === 'rules' ? packs.filter((p) => carried.has(p.key)) : []
 
   // Every industry and company form, empty ones too: an empty category asks for the first contribution.
   const categories = CATEGORY_IDS
@@ -208,7 +218,19 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button size="sm" className="gap-1.5" disabled={!canWrite} onClick={onCreate}><Plus className="h-4 w-4" aria-hidden />{t('create_button')}</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="gap-1.5" disabled={!canWrite}><Plus className="h-4 w-4" aria-hidden />{t('create_button')}<ChevronDown className="h-3.5 w-3.5" aria-hidden /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="gap-2" onSelect={onCreate}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={AI_CLIENTS.find((c) => c.id === client)!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
+                {t('create_with', { client: clientName })}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onSelect={() => setWriting(true)}><PenLine className="h-4 w-4" aria-hidden />{t('create_manual')}</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -216,8 +238,14 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
         <section className={styles.catSection}>
           <div className={styles.catHead}><h2>{t(`own_${kind}_title`)}</h2></div>
           {listed.length === 0
-            ? <div className={styles.placeEmpty}>{t(`own_${kind}_empty`, { client: clientName })}</div>
+            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`own_${kind}_empty`, { client: clientName })}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={() => setWriting(true)} /></div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+        </section>
+      )}
+      {view === 'own' && carriedPacks.length > 0 && (
+        <section className={styles.catSection}>
+          <div className={styles.catHead}><h2>{t('own_rules_carried')}</h2></div>
+          <ul className={styles.agrid}>{sorted(carriedPacks).map((i) => <CatalogCard key={i.key} item={i} />)}</ul>
         </section>
       )}
 
@@ -230,7 +258,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           {listed.length === 0
             ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}>
                 <span>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
-                {category && <Button size="sm" variant="outline" disabled={!canWrite} onClick={onCreate}>{t('share_first_cta', { client: clientName })}</Button>}
+                {category && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={() => setWriting(true)} />}
               </div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
@@ -277,7 +305,30 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           )}
         </>
       )}
+      <WriteYourself
+        key={`${writing}:${kind}`}
+        open={writing}
+        onOpenChange={setWriting}
+        initialKind={kind}
+        onSaved={(saved) => { setWriting(false); onSaved(); go({ typ: saved.kind, vy: 'own', kategori: null }) }}
+      />
     </div>
+  )
+}
+
+/** The two ways to make something: with the company's AI, or by hand. */
+function CreateButtons({ client, canWrite, onCreate, onWrite }: { client: AiClient; canWrite: boolean; onCreate: () => void; onWrite: () => void }) {
+  const t = useTranslations('skills_registry')
+  const ai = AI_CLIENTS.find((c) => c.id === client)!
+  return (
+    <span className={styles.createPair}>
+      <Button size="sm" className="gap-2" disabled={!canWrite} onClick={onCreate}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={ai.logo} alt="" width={14} height={14} className={styles.btnLogo} />
+        {t('create_with', { client: ai.name })}
+      </Button>
+      <Button size="sm" variant="outline" className="gap-1.5" disabled={!canWrite} onClick={onWrite}><PenLine className="h-4 w-4" aria-hidden />{t('create_manual')}</Button>
+    </span>
   )
 }
 

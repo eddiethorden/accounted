@@ -49,6 +49,8 @@ type Item = {
   reviewedAt: string | null
   level: string | null
   community: CommunityMeta | null
+  /** Written by the company itself. */
+  own?: boolean
 }
 
 /**
@@ -86,7 +88,11 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
 
   const pack: KnowledgeOption | undefined = options.data?.find((o) => rulesSegment(o.id) === segment)
   const shared = catalog.data?.find((s) => s.tier === 'community' && communitySegment(s.slug) === segment)
-  const item: Item | null = pack ? {
+  const mine = segment.startsWith('egen.') ? catalog.data?.find((s) => s.tier === 'own' && s.slug === `own/${segment.slice(5)}`) : undefined
+  const item: Item | null = mine ? {
+    kind: mine.itemKind ?? 'rules', key: mine.slug, name: mine.name, desc: mine.summary, body: mine.summary,
+    atomId: null, version: null, reviewedAt: null, level: null, community: null, own: true,
+  } : pack ? {
     kind: 'rules', key: pack.id, name: knowledgeName(pack.id, pack.title), desc: knowledgeDesc(pack.id, pack.summary), body: pack.summary,
     atomId: pack.id, version: pack.version, reviewedAt: pack.reviewed_at, level: pack.tier === 'community' ? null : pack.tier, community: null,
   } : shared ? {
@@ -96,7 +102,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   } : null
 
   // What the AI actually reads: the pack's own text from the registry, fetched when the page opens.
-  const bodySlug = pack?.id ?? shared?.slug ?? null
+  const bodySlug = pack?.id ?? shared?.slug ?? mine?.slug ?? null
   const body = useSWR(bodySlug ? ['/api/skills', companyId, bodySlug] : null, ([url, , slug]) => readBody(`${url}?slug=${encodeURIComponent(slug)}`))
   const loaded = isRules ? !!options.data : !!catalog.data
   if (!item) {
@@ -112,12 +118,16 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const hue = itemHue(item.kind, item.key)
   // Back to where the item lives: its industry or company form, or the general list.
   const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : item.community?.industries[0] ?? null
-  const back = catalogHref(backHref, item.kind, home)
+  const listHref = catalogHref(backHref, item.kind, home)
+  // Own items live under Egna.
+  const back = item.own ? `${listHref}${listHref.includes('?') ? '&' : '?'}vy=egna` : listHref
   const isFlow = item.kind === 'workflow' && !!item.community
+  // Flows and analyses run in the company's AI; knowledge is given to flows instead.
+  const runnable = isFlow || item.kind === 'analysis'
   const steps = isFlow && body.data ? ownSkillSteps(body.data) : []
   function runShared() {
     // A shared item's text carries what its author wrote, so the prompt is copied rather than typed into the chat.
-    void copyPromptAndOpen(t('shared_prompt', { name: item!.name, slug: item!.key, client }), client, false).then(() => setRan(true))
+    void copyPromptAndOpen(t('skill_prompt', { name: item!.name, slug: item!.key, client }), client, false).then(() => setRan(true))
   }
   const flowsWith = (atomId: string) => SHOWN_FLOWS.map((id) => ({ id })).filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
   const holders = item.atomId ? flowsWith(item.atomId) : []
@@ -142,7 +152,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
             <small>{t(`kind_one_${item.kind}`)}{item.community ? ` · @${item.community.author}` : ''}</small>
           </div>
           <div className={styles.stageFoot}>
-            {isFlow ? (
+            {runnable ? (
               <Button size="lg" className="gap-2 pl-4" onClick={runShared}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={ai.logo} alt="" width={16} height={16} className={styles.btnLogo} />
@@ -164,7 +174,6 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                 <div className={styles.apAvatar}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={60} /></div>
                 <Field label={t('field_name')}>
                   <div className={styles.fieldBox} data-ph-mask={item.community ? '' : undefined}>{item.name}</div>
-                  <span className={styles.fieldHint}>{item.desc}</span>
                 </Field>
                 {isFlow && (
                   <Field label={t('section_instructions')} note={t('source_community')} copy={<CopyIcon text={body.data} label={t('copy_instructions')} />}>
@@ -174,11 +183,11 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   </Field>
                 )}
                 <div className={styles.rows}>
-                  {!item.community && <Row label={t('row_source')}><span className={styles.muted}>{[item.community ? t('source_community') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>}
+                  {!item.community && <Row label={t('row_source')}><span className={styles.muted}>{[item.own ? t('source_own_item') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>}
                   {isFlow && <Row label={t('section_knowledge')}><span className={styles.muted}>{t('shared_flow_knowledge')}</span></Row>}
                   {item.level && <Row label={t('row_level')}><span className={styles.muted}>{t(`level_${item.level}`)}</span></Row>}
                   {item.community && <Row label={t('row_shared_by')}><Link href={`${backHref}/av.${item.community.author}`} className={styles.authorLink}>@{item.community.author}{item.community.author_verified && ` · ${t('author_verified')}`} · {t('author_shared', { count: item.community.author_shared })}</Link></Row>}
-                  <Row label={t('row_reviewed')}><span className={styles.muted}>{reviewed ?? t('reviewed_accounted')}</span></Row>
+                  {!item.own && <Row label={t('row_reviewed')}><span className={styles.muted}>{reviewed ?? t('reviewed_accounted')}</span></Row>}
                   {item.atomId && (
                     <Row label={t('row_used_by')} onAdd={canWrite ? () => setView('give') : undefined} addLabel={t('give_to_flow')}>
                       {holders.length === 0 ? <span className={styles.muted}>{t('used_by_none')}</span> : (
