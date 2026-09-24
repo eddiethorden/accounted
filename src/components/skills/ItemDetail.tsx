@@ -14,7 +14,8 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Field, Row, SubView } from './AgentDetail'
-import { Folder } from './Folder'
+import { FlowOrb } from './FlowOrb'
+import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
 import { itemHue, kindHref, seedOf, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
@@ -101,7 +102,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
         <section className={styles.stage} aria-label={item.name}>
           <StrataField seed={seedOf(item.key)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
-            <Folder hue={hue} size={104} open drift />
+            <ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={104} open />
             <b data-ph-mask={item.community ? '' : undefined}>{item.name}</b>
             <small>{t(`kind_one_${item.kind}`)}{item.community ? ` · @${item.community.author}` : ''}</small>
           </div>
@@ -117,7 +118,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
           <div key={view} className={styles.viewIn}>
             {view === 'main' && (
               <>
-                <div className={styles.apAvatar}><Folder hue={hue} size={60} /></div>
+                <div className={styles.apAvatar}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={60} /></div>
                 <Field label={t('field_name')}>
                   <div className={styles.fieldBox} data-ph-mask={item.community ? '' : undefined}>{item.name}</div>
                   <span className={styles.fieldHint}>{item.desc}</span>
@@ -128,7 +129,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                 <div className={styles.rows}>
                   <Row label={t('row_source')}><span className={styles.muted}>{[item.community ? t('source_community') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>
                   {item.level && <Row label={t('row_level')}><span className={styles.muted}>{t(`level_${item.level}`)}</span></Row>}
-                  {item.community && <Row label={t('row_shared_by')}><span className={styles.muted}>@{item.community.author} · {t('author_shared', { count: item.community.author_shared })}</span></Row>}
+                  {item.community && <Row label={t('row_shared_by')}><Link href={`${backHref}/av.${item.community.author}`} className={styles.authorLink}>@{item.community.author}{item.community.author_verified && ` · ${t('author_verified')}`} · {t('author_shared', { count: item.community.author_shared })}</Link></Row>}
                   <Row label={t('row_reviewed')}><span className={styles.muted}>{reviewed ?? t('reviewed_accounted')}</span></Row>
                   {item.atomId && (
                     <Row label={t('row_used_by')} onAdd={canWrite ? () => setView('give') : undefined} addLabel={t('give_to_flow')}>
@@ -169,7 +170,7 @@ function GiveCard({ name, task, hue, has, note, disabled, onToggle }: { name: st
   const [busy, setBusy] = useState(false)
   return (
     <div className={styles.giveCard} data-held={has ? "" : undefined}>
-      <Folder hue={hue} size={34} />
+      <FlowOrb hue={hue} seedKey={name} size={34} />
       <span className={styles.giveText}><b>{name}</b><span>{note ? `${task} · ${note}` : task}</span></span>
       <Button variant={has ? 'default' : 'outline'} size="icon" className={styles.sqBtn} aria-pressed={has} aria-label={has ? t('knowledge_remove', { name }) : t('give_to_named', { name })} disabled={disabled} loading={busy}
         onClick={() => { setBusy(true); void onToggle().finally(() => setBusy(false)) }}>

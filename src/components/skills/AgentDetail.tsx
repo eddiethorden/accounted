@@ -19,7 +19,7 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
-import { Folder } from './Folder'
+import { FlowOrb } from './FlowOrb'
 import { itemHue, seedOf } from './hues'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
@@ -172,7 +172,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
         <section className={styles.stage} aria-label={name}>
           <StrataField seed={seedOf(agentId)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
-            <Folder hue={hue} size={104} open drift />
+            <FlowOrb hue={hue} seedKey={agentId} size={96} lively />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
@@ -191,7 +191,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           <div key={view} className={styles.viewIn}>
           {view === 'main' && (
             <>
-              <div className={styles.apAvatar}><Folder hue={hue} size={60} /></div>
+              <div className={styles.apAvatar}><FlowOrb hue={hue} seedKey={agentId} size={56} /></div>
 
               <Field label={t('field_name')}>
                 <div className={styles.fieldBox} data-ph-mask={own ? '' : undefined}>{name}</div>

@@ -20,10 +20,13 @@ import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { SourceMarks } from './ConnectionMark'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
-import { CommunityFoot, KindView } from './KindViews'
+import { CommunityFoot, communityFacets, industryFirst, KindView } from './KindViews'
+import { FilterBar } from './FilterBar'
+import { FLOW_AREAS, forIndustry, matches, narrowed, NO_FILTERS, type Facets, type Filters } from './filters'
+import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { itemHue, KINDS, kindFromParam, kindHref, type ItemKind } from './hues'
 import { SlidingTabs } from './SlidingTabs'
-import { agentSegment, agentStatus, communityMeta, communitySegment, fetchConnections, kindOf, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
+import { agentSegment, agentStatus, communityMeta, communitySegment, fetchConnections, kindOf, rulesSegment, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
 type Tab = 'accounted' | 'own' | 'community'
@@ -53,15 +56,17 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const kind = kindFromParam(useSearchParams().get('typ'))
   const setKind = (next: ItemKind) => router.replace(kindHref(pathname, next), { scroll: false })
   const catalog = useSWR(['/api/skills', companyId], ([url]) => readCatalog(url))
-  const options = useSWR(kind === 'rules' ? ['/api/agents/knowledge', companyId] : null, ([url]) => readOptions(url))
+  const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
+  const knowledgeName = useKnowledgeName()
+  const knowledgeDesc = useKnowledgeDesc()
+  const [baseFilters, setFilters] = useState<Filters>(NO_FILTERS)
+  const [industryChoice, setIndustryChoice] = useState<string | null>(null)
   const worklist = useSWR(['/api/worklist/counts', companyId], ([url]) => readWorklist(url))
   const usage = useSWR(['/api/skills/usage', companyId], ([url]) => readUsage(url))
   const doNow = skillsToDoNow(worklist.data ?? {})
   const own = (catalog.data ?? []).filter((skill): skill is SkillSummary & { installations: [{ installation_id: string }] } =>
     skill.tier === 'own' && skill.shareStatus !== 'withdrawn' && !!skill.installations[0])
   // Reviewed community agents and knowledge: published atoms of the community tier.
-  const community = (catalog.data ?? []).filter((skill) => skill.tier === 'community' && kindOf(skill) === 'workflow')
-    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
 
   // ── connection: asked on load and whenever the user comes back to the tab ──
   const [connected, setConnected] = useState<AiClient[] | null>(null)
@@ -94,6 +99,29 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const client = pickConnectedAiClient(connected ?? [], waitingFor ?? undefined) ?? waitingFor ?? 'claude'
   const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
   const agents = useSWR(['/api/agents', companyId, client], ([url, , c]) => readAgents(`${url}?client=${c}`))
+
+  // ── filters: search, area, what it works with, and the industry (the company's own until another is picked) ──
+  const companyIndustry = agents.data?.agents[0]?.company.find((c) => c.tier === 'vertical')?.id ?? null
+  const filters: Filters = { ...baseFilters, industry: industryChoice ?? companyIndustry ?? 'all' }
+  const onFilters = (next: Filters) => { setIndustryChoice(next.industry); setFilters(next) }
+  const verticals = (options.data ?? []).filter((o) => o.tier === 'vertical')
+  const industries = verticals.map((o) => ({ id: o.id, label: knowledgeName(o.id, o.title) }))
+  const industryName = industries.find((i) => i.id === filters.industry)?.label ?? null
+  const shared = (catalog.data ?? []).filter((skill) => skill.tier === 'community')
+  const flowFacets = (id: RegistrySkillId): Facets => ({ title: t(`skills.${id}.name`), desc: t(`skills.${id}.short`), area: FLOW_AREAS[id], industries: [], uses: AGENTS[id].connections })
+  const byVotes = (a: SkillSummary, b: SkillSummary) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0)
+  const community = industryFirst(shared.filter((skill) => kindOf(skill) === 'workflow' && matches(filters, communityFacets(skill))).sort(byVotes), filters, communityFacets)
+  const ownShown = own.filter((skill) => matches(filters, { title: skill.name, desc: skill.summary, area: null, industries: [], uses: [] }))
+  const usesFor = (k: ItemKind) => [...new Set([
+    ...(k === 'workflow' ? REGISTRY_SKILLS.flatMap((s) => AGENTS[s.id].connections) : []),
+    ...shared.filter((skill) => kindOf(skill) === k).flatMap((skill) => communityMeta(skill)?.uses ?? []),
+  ])]
+  const industryBadge = (facets: Facets) => forIndustry(filters, facets) && industryName ? <span className={styles.forIndustry}>{t('for_industry')}</span> : undefined
+  // Everything made for the chosen industry, whatever its kind: the industry's own pack first, then the most voted.
+  const forThisIndustry = filters.industry === 'all' ? [] : [
+    ...verticals.filter((o) => o.id === filters.industry).map((o) => ({ key: o.id, kind: 'rules' as const, href: `${hrefBase}/${rulesSegment(o.id)}`, title: knowledgeName(o.id, o.title), desc: knowledgeDesc(o.id, o.summary), meta: null })),
+    ...shared.filter((skill) => forIndustry(filters, communityFacets(skill))).sort(byVotes).map((skill) => ({ key: skill.slug, kind: kindOf(skill), href: `${hrefBase}/${communitySegment(skill.slug)}`, title: skill.name, desc: skill.summary, meta: communityMeta(skill) })),
+  ]
   const [chosenTab, setTab] = useState<Tab | null>(null)
   // An own agent saved by the AI waits in its tab to be added, so that tab opens first.
   const tab: Tab = chosenTab ?? (own.some((skill) => skill.draft) ? 'own' : 'accounted')
@@ -145,6 +173,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       href={`${hrefBase}/${agentSegment(id)}`}
       title={t(`skills.${id}.name`)}
       desc={t(`skills.${id}.short`)}
+      kind="workflow"
+      symbolKey={id}
       hue={itemHue('workflow', id, id)}
       status={statusFor(id)}
       marks={<SourceMarks connections={AGENTS[id].connections} />}
@@ -154,6 +184,9 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   // agents with work waiting on Att göra come first
   const rest = REGISTRY_SKILLS.slice(FREE_SKILLS).map((s) => s.id)
   const ordered = [...rest.filter((id) => doNow.has(id)), ...rest.filter((id) => !doNow.has(id))]
+  // While the list is narrowed the start cards step aside and every flow is searched.
+  const isNarrowed = narrowed(filters)
+  const flows = (isNarrowed ? [...top, ...ordered] : ordered).filter((id) => matches(filters, flowFacets(id)))
   const rowsLocked = state === 'locked' || state === 'waiting'
   const pendingName = waitingFor ? AI_CLIENTS.find((c) => c.id === waitingFor)!.name : ''
   const address = waitingFor && waitingFor !== 'claude' ? connectAction(waitingFor).copy : null
@@ -166,6 +199,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         action={<SegmentedControl aria-label={t('kinds_label')} value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))} />}
       />
 
+      <FilterBar filters={filters} onChange={onFilters} industries={industries} companyIndustry={companyIndustry} showArea={kind !== 'analysis'} uses={usesFor(kind)} />
+
       {kind !== 'workflow' ? (
         <KindView
           key={kind}
@@ -176,9 +211,23 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           overview={agents.data}
           clientName={clientName}
           remembered={agents.data?.remembered ?? 0}
+          filters={filters}
+          industryName={industryName}
         />
       ) : (<>
-      <section className={styles.hero}>
+      {!isNarrowed && forThisIndustry.length > 0 && industryName && (
+        <section className={styles.hero}>
+          <div className={styles.intro}><h2>{t('industry_shelf', { industry: industryName })}</h2></div>
+          <ul className={styles.agrid}>
+            {forThisIndustry.map((item) => (
+              <li key={item.key}>
+                <AgentCard href={item.href} title={item.title} desc={item.desc} kind={item.kind} symbolKey={item.key} hue={itemHue(item.kind, item.key)} foot={item.meta ? <CommunityFoot meta={item.meta} /> : <span className={styles.metaLine}>{t(`kind_one_${item.kind}`)} · {t('source_accounted')}</span>} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {!isNarrowed && <section className={styles.hero}>
         <div className={styles.intro}><h2>{t('hero_title')}</h2></div>
         <ul className={styles.agrid}>
           {top.map((id) => <li key={id}>{card(id)}</li>)}
@@ -196,7 +245,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
             </button>
           </li>
         </ul>
-      </section>
+      </section>}
 
       <section className={styles.lower} aria-label={t('title')}>
         {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
@@ -208,29 +257,35 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           ids={{ prefix: 'agents-tab', controls: 'agents-panel' }}
           options={(['accounted', 'own', 'community'] as const).map((key) => ({
             value: key,
-            label: <>{t(`tab_${key}`)}{key === 'own' && own.length > 0 && <span className={styles.tabCount}>{own.length}</span>}{key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}</>,
+            label: <>{t(`tab_${key}`)}{key === 'own' && ownShown.length > 0 && <span className={styles.tabCount}>{ownShown.length}</span>}{key === 'community' && community.length > 0 && <span className={styles.tabCount}>{community.length}</span>}</>,
           }))}
         />
 
         <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-labelledby={`agents-tab-${tab}`}>
           {tab === 'accounted' && (
-            <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
-              {ordered.map((id) => <li key={id}>{card(id)}</li>)}
-            </ul>
+            flows.length === 0 ? (
+              <div className={styles.empty}><h3>{t('filters_none_title')}</h3><p>{t('filters_none_body')}</p></div>
+            ) : (
+              <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
+                {flows.map((id) => <li key={id}>{card(id)}</li>)}
+              </ul>
+            )
           )}
-          {tab === 'own' && (own.length === 0 ? (
+          {tab === 'own' && (ownShown.length === 0 ? (
             <div className={styles.empty}>
               <p>{t('own_empty', { client: clientName })}</p>
               <Button disabled={!canWrite} onClick={createAgent}>{t('create_card_cta', { client: clientName })}</Button>
             </div>
           ) : (
             <ul className={styles.agrid}>
-              {own.map((skill) => (
+              {ownShown.map((skill) => (
                 <li key={skill.slug}>
                   <AgentCard
                     href={`${hrefBase}/${agentSegment(skill.slug)}`}
                     title={skill.name}
                     desc={skill.summary}
+                    kind="workflow"
+                    symbolKey={skill.slug}
                     hue={itemHue('workflow', skill.slug)}
                     masked
                     badge={skill.draft ? <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span> : undefined}
@@ -248,7 +303,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
           ) : (
             <ul className={styles.agrid}>
               {community.map((skill) => (
-                <li key={skill.slug}><AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} hue={itemHue('workflow', skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} /></li>
+                <li key={skill.slug}><AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind="workflow" symbolKey={skill.slug} hue={itemHue('workflow', skill.slug)} badge={industryBadge(communityFacets(skill))} foot={<CommunityFoot meta={communityMeta(skill)} />} /></li>
               ))}
             </ul>
           ))}
