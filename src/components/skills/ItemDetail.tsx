@@ -9,7 +9,8 @@ import { ArrowLeft, Check, ChevronUp, Plus } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { AGENTS } from '@/lib/agent-skills/agents'
-import { REGISTRY_SKILLS, type RegistrySkillId } from '@/lib/agent-skills/registry'
+import type { RegistrySkillId } from '@/lib/agent-skills/registry'
+import { SHOWN_FLOWS } from './catalog-setup'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
@@ -99,7 +100,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   // Back to where the item lives: its industry or company form, or the general list.
   const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : item.community?.industries[0] ?? null
   const back = catalogHref(backHref, item.kind, home)
-  const flowsWith = (atomId: string) => REGISTRY_SKILLS.filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
+  const flowsWith = (atomId: string) => SHOWN_FLOWS.map((id) => ({ id })).filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
   const holders = item.atomId ? flowsWith(item.atomId) : []
   const reviewed = item.reviewedAt ? formatDateLong(item.reviewedAt, locale) : null
 
@@ -162,7 +163,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
               <SubView title={t('give_to_flow')} onBack={() => setView('main')}>
                 <p className={styles.muted}>{t('give_hint')}</p>
                 <ul className={styles.kgrid2}>
-                  {REGISTRY_SKILLS.map((s) => {
+                  {SHOWN_FLOWS.map((id) => ({ id })).map((s) => {
                     const has = holders.some((h) => h.id === s.id)
                     const isDefault = AGENTS[s.id].knowledge.includes(item.atomId!)
                     return (
