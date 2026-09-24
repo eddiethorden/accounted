@@ -17,6 +17,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Field, Row, SubView } from './AgentDetail'
 import { FlowSymbol } from './FlowSymbol'
+import { CopyIcon } from './CopyIcon'
 import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
 import { catalogHref, itemHue, seedOf, type ItemKind } from './hues'
@@ -152,7 +153,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                     </Row>
                   )}
                 </div>
-                <Field label={t('field_contents')} note={t('contents_note')}>
+                <Field label={t('field_contents')} note={t('contents_note')} copy={<CopyIcon text={body.data} label={t('copy_contents')} />}>
                   <div className={styles.mdBody} data-ph-mask={item.community ? '' : undefined}>
                     {body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{body.error ? t('body_failed_pack') : t('loading_short')}</span>}
                   </div>
