@@ -10557,6 +10557,8 @@
     "community_empty_body": "Agents and industry knowledge shared by other companies and firms. Accounted reviews everything before it is published here, and none of it carries customer data.",
     "community_share_cta": "Share one of yours",
     "section_instructions": "Instructions",
+    "field_name": "Name",
+    "section_advanced": "Advanced",
     "section_knowledge": "Knowledge",
     "section_company": "Your company",
     "section_connections": "Connections",

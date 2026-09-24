@@ -10557,6 +10557,8 @@
     "community_empty_body": "Agenter och branschkunskap som andra företag och byråer delar. Allt granskas av Accounted innan det publiceras här, och inget innehåller kunduppgifter.",
     "community_share_cta": "Dela en egen agent",
     "section_instructions": "Instruktioner",
+    "field_name": "Namn",
+    "section_advanced": "Avancerat",
     "section_knowledge": "Kunskap",
     "section_company": "Företaget",
     "section_connections": "Kopplingar",
