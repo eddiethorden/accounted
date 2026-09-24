@@ -317,10 +317,22 @@ export async function classifyUnclassifiedDocuments(
     .not('pages_read_at', 'is', null)
     .gt('page_count', 0)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .limit(limit * 10)
   if (error) throw new Error(`fetch unclassified failed: ${error.message}`)
+  // A document the model already classified keeps no type only when its row refuses the update (a locked
+  // period, an archived reset source). Asking again cannot change that: prod 2026-09-24, 29 such documents
+  // were classified about 300 times each in one day.
+  const candidates = ((data ?? []) as Array<{ id: string }>).map((r) => r.id)
+  let asked = new Set<string>()
+  if (candidates.length) {
+    const { data: prior, error: priorError } = await supabase.from('document_classifications').select('document_id').in('document_id', candidates)
+    if (priorError) throw new Error(`fetch prior classifications failed: ${priorError.message}`)
+    asked = new Set(((prior ?? []) as Array<{ document_id: string }>).map((r) => r.document_id))
+  }
+  const todo = candidates.filter((id) => !asked.has(id)).slice(0, limit)
+  if (todo.length === 0) return counts
   const company = await loadCompanyIdentity(supabase, companyId)
-  for (const row of (data ?? []) as Array<{ id: string }>) {
+  for (const row of todo.map((id) => ({ id }))) {
     const out = await classifyDocument(supabase, row.id, company)
     counts.processed++
     if (out.status === 'classified') { counts.classified++; if (out.admission === 'held') counts.held++ }
