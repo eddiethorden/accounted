@@ -752,7 +752,6 @@ export default function PendingOperationsPage() {
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs"
             onClick={() => {
               setConversationFilter(null)
               if (typeof window !== 'undefined') {
@@ -783,7 +782,7 @@ export default function PendingOperationsPage() {
           <Button
             size="sm"
             variant="ghost"
-            className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
+            className="gap-1.5 text-muted-foreground"
             onClick={toggleSortOrder}
             aria-pressed={sortOrder === 'asc'}
             title={sortOrder === 'asc' ? t('sort_oldest_first') : t('sort_newest_first')}
@@ -961,7 +960,7 @@ export default function PendingOperationsPage() {
                       </Badge>
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13.5px] leading-snug">{op.title}</div>
+                      <div className="text-[13px] leading-snug">{op.title}</div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {sub}
                         {op.status === 'rejected' && op.rejection_reason
@@ -979,7 +978,7 @@ export default function PendingOperationsPage() {
                     </div>
                     <ChevronRight
                       className={cn(
-                        'mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-all duration-200',
+                        'mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-opacity',
                         detailOpId === op.id ? 'opacity-100' : HOVER_REVEAL_CLASS,
                       )}
                     />
@@ -1040,7 +1039,7 @@ export default function PendingOperationsPage() {
                     <div className="pt-0.5 text-[11px] uppercase tracking-[0.07em] text-muted-foreground">
                       {sourceLine(op)}
                     </div>
-                    <div className="mt-1 text-[13.5px] leading-snug">{op.title}</div>
+                    <div className="mt-1 text-[13px] leading-snug">{op.title}</div>
                     {showHighRiskWarning && (
                       <p className="mt-1 flex items-start gap-1 text-xs text-destructive">
                         <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -1309,10 +1308,8 @@ export default function PendingOperationsPage() {
             <Button variant="outline" onClick={() => setRejectTarget(null)} disabled={isRejecting}>
               Avbryt
             </Button>
-            <Button variant="destructive" onClick={handleReject} disabled={isRejecting}>
-              {isRejecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : rejectTarget === 'bulk' ? (
+            <Button variant="destructive" onClick={handleReject} loading={isRejecting}>
+              {rejectTarget === 'bulk' ? (
                 t('reject_count', { count: selectedCount })
               ) : (
                 'Avvisa'

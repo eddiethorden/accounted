@@ -1202,7 +1202,7 @@ function SkattekontoRow({
               identical apart from ränteberäkningsdatum. Without this the rows
               read as duplicates from the automatic hämtning. */}
           {showInterestDate && row.ranteberakningsdatum && (
-            <span className="text-[12px] tabular-nums text-muted-foreground">
+            <span className="text-[12.5px] tabular-nums text-muted-foreground">
               {t('interest_from', { date: formatDate(row.ranteberakningsdatum) })}
             </span>
           )}
@@ -1225,7 +1225,7 @@ function SkattekontoRow({
             ) : (
               /* Plain fact, not an exception: quiet text, and the band
                  header carries the count once. */
-              <span className="text-[11.5px] text-muted-foreground">{t('chip_not_booked').toLowerCase()}</span>
+              <span className="text-[11px] text-muted-foreground">{t('chip_not_booked').toLowerCase()}</span>
             )
           )}
         </span>

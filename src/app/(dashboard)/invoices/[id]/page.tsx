@@ -1815,12 +1815,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           {isProforma && invoice.status !== 'cancelled' && (
             <Button
               onClick={convertToInvoice}
-              disabled={isConverting || !canWrite}
+              disabled={!canWrite}
+              loading={isConverting}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
             >
-              {isConverting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : !canWrite ? (
+              {isConverting ? null : !canWrite ? (
                 <Lock className="mr-2 h-4 w-4" />
               ) : (
                 <FileText className="mr-2 h-4 w-4" />
@@ -1832,26 +1831,22 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Button
               variant="outline"
               onClick={acceptQuote}
-              disabled={isDeciding || isConverting || !canWrite}
+              disabled={isConverting || !canWrite}
+              loading={isDeciding}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
             >
-              {isDeciding ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle className="mr-2 h-4 w-4" />
-              )}
+              {!isDeciding && <CheckCircle className="mr-2 h-4 w-4" />}
               {t('quote_accept')}
             </Button>
           )}
           {canConvertQuote && (
             <Button
               onClick={startQuoteConvert}
-              disabled={isConverting || isDeciding || !canWrite}
+              disabled={isDeciding || !canWrite}
+              loading={isConverting}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
             >
-              {isConverting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : !canWrite ? (
+              {isConverting ? null : !canWrite ? (
                 <Lock className="mr-2 h-4 w-4" />
               ) : (
                 <FileText className="mr-2 h-4 w-4" />
@@ -1903,12 +1898,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           {isDeliveryNote && invoice.status === 'draft' && (
             <Button
               onClick={() => updateStatus('sent')}
-              disabled={isUpdating || !canWrite}
+              disabled={!canWrite}
+              loading={isUpdating}
               title={!canWrite ? t('viewer_disabled_tooltip') : undefined}
             >
-              {isUpdating ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : canWrite ? (
+              {isUpdating ? null : canWrite ? (
                 <Send className="mr-2 h-4 w-4" />
               ) : (
                 <Lock className="mr-2 h-4 w-4" />
@@ -1932,10 +1926,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           {hasMenu && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label={tCommon('more_options')}>
-                  {isDownloading || isDownloadingPeppol || isPreparingPeppol || isCreatingOrder ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={tCommon('more_options')}
+                  loading={isDownloading || isDownloadingPeppol || isPreparingPeppol || isCreatingOrder}
+                >
+                  {isDownloading || isDownloadingPeppol || isPreparingPeppol || isCreatingOrder ? null : (
                     <MoreHorizontal className="h-4 w-4" />
                   )}
                 </Button>
@@ -2261,8 +2258,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <span className="flex flex-wrap items-center gap-3">
                 <span className="text-muted-foreground">{t('not_booked_yet')}</span>
                 {canWrite && (
-                  <Button size="sm" variant="outline" className="-my-1" onClick={openBookConfirm} disabled={isUpdating}>
-                    {isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Button size="sm" variant="outline" className="-my-1" onClick={openBookConfirm} loading={isUpdating}>
                     {t('book_action')}
                   </Button>
                 )}
@@ -2710,8 +2706,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             >
               {t('delete_dialog_cancel')}
             </Button>
-            <Button onClick={() => void sendViaPeppol()} disabled={isSendingPeppol}>
-              {isSendingPeppol && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button onClick={() => void sendViaPeppol()} loading={isSendingPeppol}>
               {isSendingPeppol ? t('peppol_sending') : t('peppol_send_confirm_action')}
             </Button>
           </DialogFooter>
@@ -2752,8 +2747,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)} disabled={isDeleting}>
               {t('delete_dialog_cancel')}
             </Button>
-            <Button variant="destructive" onClick={deleteInvoice} disabled={isDeleting}>
-              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button variant="destructive" onClick={deleteInvoice} loading={isDeleting}>
               {isCreditNote
                 ? t('remove_credit_dialog_confirm')
                 : invoice.invoice_number
@@ -2782,8 +2776,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <Button variant="outline" onClick={() => setShowFinalizeDialog(false)} disabled={isFinalizing}>
               {t('finalize_dialog_cancel')}
             </Button>
-            <Button onClick={finalizeInvoice} disabled={isFinalizing}>
-              {isFinalizing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button onClick={finalizeInvoice} loading={isFinalizing}>
               {t('finalize_dialog_confirm')}
             </Button>
           </DialogFooter>
@@ -2886,8 +2879,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 ? t('pdf_archive_issue_rerender_preview')
                 : t('pdf_archive_issue_rerender')}
             </Button>
-            <Button onClick={retryArchivedDownload} disabled={isDownloading}>
-              {isDownloading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button onClick={retryArchivedDownload} loading={isDownloading}>
               {t('pdf_archive_issue_retry')}
             </Button>
           </DialogFooter>

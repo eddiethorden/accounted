@@ -16,8 +16,8 @@ const badgeVariants = cva(
           "border-transparent bg-destructive/10 text-destructive",
         outline:
           "border-border text-foreground bg-transparent",
-        success:
-          "border-transparent bg-success/10 text-success",
+        // No success variant: chips mark exceptions (convention 5), and a
+        // normal state renders as muted text; green is for numbers.
         // No amber fill: status colors are data, not chrome (convention 12).
         // The exception reads through the ochre text on a hairline chip.
         warning:

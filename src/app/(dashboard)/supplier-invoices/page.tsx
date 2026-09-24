@@ -593,8 +593,8 @@ export default function SupplierInvoicesPage() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className={cn('h-8 w-8 text-muted-foreground hover:text-foreground', groupMode !== 'none' && 'text-foreground')}
+                size="icon-sm"
+                className={cn('text-muted-foreground hover:text-foreground', groupMode !== 'none' && 'text-foreground')}
                 aria-label={t('group_picker_aria')}
                 title={t('group_by')}
               >

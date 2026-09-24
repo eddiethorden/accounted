@@ -27,7 +27,6 @@ import {
   HandCoins,
   Inbox,
   Landmark,
-  Loader2,
   ReceiptText,
   Scale,
   ShieldCheck,
@@ -130,12 +129,12 @@ function WorklistRow({ href, icon: Icon, label, detail, hint, count, badge, acti
   // the pill can be a real button beside it instead of a button inside an
   // anchor. The pill sits above the stretched area (relative z-10).
   return (
-    <div className="group relative flex w-full items-start gap-3 border-b border-border px-1 py-3.5 transition-colors duration-150 hover:bg-secondary/30">
+    <div className="group relative flex w-full items-start gap-3 border-b border-border px-1 py-3.5 transition-colors duration-150 hover:bg-secondary/35">
       <span className="mt-px w-[18px] shrink-0 text-muted-foreground" aria-hidden>
         <Icon className="h-[15px] w-[15px]" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13.5px]">
+        <p className="truncate text-[13px]">
           <Link href={href} title={hint} className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
             {label}
           </Link>
@@ -257,7 +256,7 @@ export default function AttGoraSection({
           next.delete(match.transaction_id)
           return next
         })
-      }, 200)
+      }, 300)
       void refetchCounts()
     } catch {
       toast({ title: t('suggested_failed_toast'), variant: 'destructive' })
@@ -378,7 +377,7 @@ export default function AttGoraSection({
                               <div
                                 key={match.transaction_id}
                                 className={cn(
-                                  'grid transition-[grid-template-rows,opacity] duration-200 motion-reduce:transition-none',
+                                  'grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none',
                                   isLeaving ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr]',
                                 )}
                               >
@@ -422,16 +421,10 @@ export default function AttGoraSection({
                                   size="sm"
                                   className="shrink-0"
                                   disabled={!!confirmingId || isLeaving}
+                                  loading={isConfirming}
                                   onClick={() => void handleConfirmMatch(match)}
                                 >
-                                  {isConfirming ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                                      {t('suggested_confirm')}
-                                    </>
-                                  ) : (
-                                    t('suggested_confirm')
-                                  )}
+                                  {t('suggested_confirm')}
                                 </Button>
                                   </div>
                                 </div>

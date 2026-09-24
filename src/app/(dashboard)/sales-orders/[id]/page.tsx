@@ -460,7 +460,7 @@ export default function SalesOrderDetailPage({ params }: { params: Promise<{ id:
               variant="ghost"
               size="sm"
               onClick={() => setPendingTransition('cancel')}
-              className="min-h-10 text-muted-foreground hover:text-destructive"
+              className="text-muted-foreground hover:text-destructive"
             >
               {t('action_cancel')}
             </Button>
@@ -470,7 +470,7 @@ export default function SalesOrderDetailPage({ params }: { params: Promise<{ id:
               variant="ghost"
               size="sm"
               onClick={handleDelete}
-              className="min-h-10 text-muted-foreground hover:text-destructive"
+              className="text-muted-foreground hover:text-destructive"
             >
               {t('action_delete')}
             </Button>

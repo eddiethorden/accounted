@@ -9,7 +9,6 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogVeil, useDashShellInert } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/use-toast'
 import { ToastAction } from '@/components/ui/toast'
@@ -4325,8 +4324,8 @@ export default function TransactionsPage() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-foreground"
                 aria-label={t('columns_button')}
                 title={t('columns_button')}
               >
@@ -4432,7 +4431,7 @@ export default function TransactionsPage() {
                   // so it stays in view however far down the selection
                   // reaches and the list does not shift under it. Offset by
                   // --bottom-nav-h so it clears the mobile bottom nav (#2738).
-                  'fixed bottom-[calc(var(--bottom-nav-h)+1rem)] left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-background px-4 py-2 shadow-lg md:left-[calc(50%+var(--nav-w)/2)]',
+                  'fixed bottom-[calc(var(--bottom-nav-h)+1rem)] left-1/2 z-30 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-background px-4 py-2 shadow-[var(--shadow-md)] md:left-[calc(50%+var(--nav-w)/2)]',
                 )}
               >
                 {batchProgress ? (
@@ -4791,7 +4790,7 @@ export default function TransactionsPage() {
           (opened without an anchor). */}
       {templatePickerOpen && templatePickerAnchor && (
         <CategoryPopover anchor={templatePickerAnchor} onClose={() => setTemplatePickerOpen(false)}>
-          <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2 text-[12.5px]">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 text-[12.5px]">
             {templatePickerTransaction && (
               <>
                 <span className="truncate" data-ph-mask>{templatePickerTransaction.description}</span>
@@ -4804,7 +4803,7 @@ export default function TransactionsPage() {
           <div className="flex min-h-0 flex-col overflow-hidden">
             <TemplatePicker {...templatePickerProps} dense />
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/70 bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border bg-background px-3 py-2">
             {templatePickerLinks}
           </div>
         </CategoryPopover>
@@ -5097,7 +5096,7 @@ export default function TransactionsPage() {
                         {c.customer_name || 'Kund'} · {c.invoice_number ?? '-'}
                       </span>
                       {c.match_reason === 'ocr_exact' && (
-                        <Badge variant="success">{t('badge_exact_ocr')}</Badge>
+                        <span className="text-xs text-muted-foreground">{t('badge_exact_ocr')}</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground tabular-nums">
