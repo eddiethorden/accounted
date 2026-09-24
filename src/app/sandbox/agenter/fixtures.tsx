@@ -131,6 +131,23 @@ const shared = (slug: string, name: string, summary: string, m: Shared) => ({
 const KONSULT = 'vertical/konsult-it'
 const RESTAURANG = 'vertical/restaurang-cafe'
 
+// A pack's text as the AI reads it; in the app this comes from agent_atom_registry. Demo wording, not the real pack.
+const PACK_BODY = [
+  '# IT-konsult och systemutvecklare',
+  '',
+  'Läs det här när bolaget säljer konsulttjänster eller utvecklar system åt kunder.',
+  '',
+  '## Innehåll',
+  '- Konsult eller anställd: vad som avgör och när det spelar roll',
+  '- Tjänster till kunder i andra länder: hur fakturan och momsen ska se ut',
+  '- Elektroniska tjänster och licenser',
+  '- Utlägg som vidarefaktureras till kunden',
+  '- Pågående uppdrag vid bokslut',
+  '',
+  '## Fördjupning',
+  'Laddas bara när ett fall kräver det: 3:12, fakturering till utlandet, pågående arbeten.',
+].join('\n')
+
 const CATALOG = [
   shared('tid-till-faktura', 'Tidrapport till faktura', 'Månadens rapporterade timmar per kund blir fakturautkast, med rätt moms för tjänster till utlandet.', { kind: 'workflow', author: 'byra-lind', shared: 7, verified: true, votes: 57, works: 38, notWorks: 2, area: 'fakturering', industries: [KONSULT], uses: ['mail'], usedBy: 212 }),
   shared('stang-dagskassan', 'Stäng dagskassan', 'Z-rapporten till ett verifikat, med kort, Swish och kontant var för sig.', { kind: 'workflow', author: 'kafe-norr', shared: 4, votes: 48, works: 31, notWorks: 2, area: 'lopande', industries: [RESTAURANG], uses: ['zettle', 'bank'], usedBy: 96 }),
@@ -164,7 +181,14 @@ function installFixtures() {
       case '/api/agents/knowledge': return json(OPTIONS)
       case '/api/worklist/counts': return json({ counts: { book_transaction: 42, verifikat_missing_document: 9, inbox_document: 3 } })
       case '/api/skills/usage': return json({ bookkeep: { count: 12, last_at: '2026-09-22T09:14:00Z' }, 'quarterly-vat-review': { count: 2, last_at: '2026-08-12T08:00:00Z' } })
-      case '/api/skills': return url.searchParams.get('slug') === 'own/00000000-0000-4000-8000-000000000001' ? json({ body: OWN_BODY }) : url.searchParams.get('slug') ? json({ body: '# Accounted workflow' }) : json(CATALOG)
+      case '/api/skills': {
+        const slug = url.searchParams.get('slug')
+        if (!slug) return json(CATALOG)
+        if (slug === 'own/00000000-0000-4000-8000-000000000001') return json({ body: OWN_BODY })
+        if (slug.startsWith('vertical/') || slug.startsWith('horizontal/') || slug.startsWith('modifier/')) return json({ body: PACK_BODY })
+        const item = CATALOG.find((c) => c.slug === slug)
+        return json({ body: item ? `# ${item.name}\n\n${item.summary}` : '# Accounted workflow' })
+      }
       default: return json(null)
     }
   }
