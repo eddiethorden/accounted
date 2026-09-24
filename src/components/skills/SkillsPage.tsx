@@ -15,19 +15,17 @@ import { formatDateLong } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { HelpPopover } from '@/components/ui/help-popover'
 import { Button } from '@/components/ui/button'
-import { SegmentedControl } from '@/components/ui/segmented-control'
 import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { SourceMarks } from './ConnectionMark'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
-import { CommunityFoot, KindView } from './KindViews'
+import { PackCard, railName, Section, SharedCard } from './KindViews'
 import { KindsIntro } from './KindsIntro'
-import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
-import { itemHue, KINDS, kindFromParam, kindHref, type ItemKind } from './hues'
-import { agentSegment, agentStatus, communityMeta, communitySegment, fetchConnections, kindOf, rulesSegment, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
+import { useKnowledgeName } from './knowledge-labels'
+import { itemHue, placeFromParam, placeHref, type Place } from './hues'
+import { agentSegment, agentStatus, communityMeta, fetchConnections, kindOf, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
-type Tab = 'accounted' | 'own' | 'community'
 
 type PageState = 'loading' | 'locked' | 'waiting' | 'open'
 
@@ -51,12 +49,11 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const pageRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const pathname = usePathname()
-  const kind = kindFromParam(useSearchParams().get('typ'))
-  const setKind = (next: ItemKind) => router.replace(kindHref(pathname, next), { scroll: false })
+  const placeParam = useSearchParams().get('plats')
+  const setPlace = (next: Place) => router.replace(placeHref(pathname, next), { scroll: false })
   const catalog = useSWR(['/api/skills', companyId], ([url]) => readCatalog(url))
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
   const knowledgeName = useKnowledgeName()
-  const knowledgeDesc = useKnowledgeDesc()
   const worklist = useSWR(['/api/worklist/counts', companyId], ([url]) => readWorklist(url))
   const usage = useSWR(['/api/skills/usage', companyId], ([url]) => readUsage(url))
   const doNow = skillsToDoNow(worklist.data ?? {})
@@ -96,15 +93,24 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
   const agents = useSWR(['/api/agents', companyId, client], ([url, , c]) => readAgents(`${url}?client=${c}`))
 
-  // The company's own industry pack, when onboarding stored one, goes up front so the page speaks to them
-  // at first sight. A cheap model can later suggest more of what fits; until then this is enough.
+  // ── places: Allmänt, each industry and company form, Egna, Community ──
+  // The company's own industry (stored at onboarding) leads the industry list. A cheap model can later
+  // suggest more of what fits; until then this is enough.
   const companyIndustry = agents.data?.agents[0]?.company.find((c) => c.tier === 'vertical')?.id ?? null
-  const industryPack = (options.data ?? []).find((o) => o.id === companyIndustry) ?? null
-  const community = (catalog.data ?? []).filter((skill) => skill.tier === 'community' && kindOf(skill) === 'workflow')
-    .sort((a, b) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0))
-  const [chosenTab, setTab] = useState<Tab | null>(null)
-  // An own agent saved by the AI waits in its tab to be added, so that tab opens first.
-  const tab: Tab = chosenTab ?? (own.some((skill) => skill.draft) ? 'own' : 'accounted')
+  const packs = options.data ?? []
+  const verticals = [...packs.filter((o) => o.tier === 'vertical')].sort((a, b) => Number(b.id === companyIndustry) - Number(a.id === companyIndustry))
+  const modifiers = packs.filter((o) => o.tier === 'modifier')
+  const horizontals = packs.filter((o) => o.tier === 'horizontal')
+  const byVotes = (a: SkillSummary, b: SkillSummary) => (communityMeta(b)?.votes ?? 0) - (communityMeta(a)?.votes ?? 0)
+  const shared = (catalog.data ?? []).filter((skill) => skill.tier === 'community').sort(byVotes)
+  const madeFor = (skill: SkillSummary) => communityMeta(skill)?.industries ?? []
+  const sharedIn = (place: Place) => shared.filter((skill) => place === 'general' ? madeFor(skill).length === 0 : madeFor(skill).includes(place))
+  // An own flow saved by the AI waits under Egna to be added, so that place opens first.
+  const place: Place = placeParam ? placeFromParam(placeParam) : own.some((skill) => skill.draft) ? 'own' : 'general'
+  const countOf = (p: Place) => p === 'general' ? REGISTRY_SKILLS.length + horizontals.length + sharedIn('general').length
+    : p === 'own' ? own.length : p === 'community' ? shared.length : 1 + sharedIn(p).length
+  const placeName = (p: Place) => p === 'general' ? t('place_general') : p === 'own' ? t('tab_own') : p === 'community' ? t('tab_community')
+    : railName(knowledgeName(p, packs.find((o) => o.id === p)?.title ?? p))
 
   // ── connect ──
   const [addressCopy, setAddressCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -164,172 +170,162 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   // agents with work waiting on Att göra come first
   const rest = REGISTRY_SKILLS.slice(FREE_SKILLS).map((s) => s.id)
   const ordered = [...rest.filter((id) => doNow.has(id)), ...rest.filter((id) => !doNow.has(id))]
-  const flows = ordered
+  const flows = [...top, ...ordered]
   const rowsLocked = state === 'locked' || state === 'waiting'
   const pendingName = waitingFor ? AI_CLIENTS.find((c) => c.id === waitingFor)!.name : ''
   const address = waitingFor && waitingFor !== 'claude' ? connectAction(waitingFor).copy : null
 
   return (
     <div ref={pageRef} className={styles.page} data-state={state}>
-      <PageHeader
-        title={t('title')}
-        help={<HelpPopover><p>{t('help')}</p></HelpPopover>}
-        action={<SegmentedControl aria-label={t('kinds_label')} value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))} />}
-      />
+      <PageHeader title={t('title')} help={<HelpPopover><p>{t('help')}</p></HelpPopover>} />
 
       <KindsIntro companyId={companyId} />
 
-      {kind !== 'workflow' ? (
-        <KindView
-          key={kind}
-          kind={kind}
-          hrefBase={hrefBase}
-          catalog={catalog.data ?? []}
-          options={options.data ?? []}
-          overview={agents.data}
-          clientName={clientName}
-          remembered={agents.data?.remembered ?? 0}
-        />
-      ) : (<>
-      <section className={styles.hero}>
-        <div className={styles.intro}><h2>{t('hero_title')}</h2></div>
-        <ul className={styles.agrid}>
-          {top.map((id) => <li key={id}>{card(id)}</li>)}
-          {industryPack ? (
-            <li>
-              <AgentCard
-                href={`${hrefBase}/${rulesSegment(industryPack.id)}`}
-                title={knowledgeName(industryPack.id, industryPack.title)}
-                desc={knowledgeDesc(industryPack.id, industryPack.summary)}
-                kind="rules"
-                symbolKey={industryPack.id}
-                hue={itemHue('rules', industryPack.id)}
-                foot={<span className={styles.metaLine}>{t('fits_you')}</span>}
-              />
-            </li>
-          ) : <li>
-            <button type="button" className={`${styles.acard} ${styles.acCreate}`} disabled={!canWrite} onClick={createAgent}>
-              <span className={styles.acPanel}>
-                <span className={styles.acText}>
-                  <span className={styles.acTitle}>{t('create_card_title')}</span>
-                  <span className={styles.acDesc}>{t('create_card_body', { client: clientName })}</span>
-                  <span className={styles.acMarks}><span className={styles.createCta}>{t('create_card_cta', { client: clientName })}<ArrowRight className="h-3.5 w-3.5" aria-hidden /></span></span>
-                </span>
-                <span className={styles.acTile}><span className={styles.createPlus} aria-hidden><Plus className="h-4 w-4" /></span></span>
-              </span>
-              <span className={styles.acFoot}><span className={styles.statusSlot} /><span className={styles.open} aria-hidden>{t('open_hint')}</span></span>
-            </button>
-          </li>}
-        </ul>
-      </section>
-
-      <section className={styles.lower} aria-label={t('title')}>
-        {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
-        {catalog.error && <p role="alert" className={styles.note}>{t('load_failed')} <button type="button" className="underline underline-offset-4" onClick={() => void catalog.mutate()}>{t('retry')}</button></p>}
-        <SegmentedControl
-          aria-label={t('sources_label')}
-          className={styles.sourceSwitch}
-          value={tab}
-          onChange={setTab}
-          options={(['accounted', 'own', 'community'] as const).map((key) => ({
-            value: key,
-            label: t(`tab_${key}`),
-            count: key === 'own' ? own.length : key === 'community' ? community.length : undefined,
-          }))}
-        />
-
-        <div key={tab} className={`${styles.veilwrap} ${styles.fadeIn}`} id="agents-panel" role="tabpanel" aria-label={t(`tab_${tab}`)}>
-          {tab === 'accounted' && (
-            <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
-              {flows.map((id) => <li key={id}>{card(id)}</li>)}
-            </ul>
-          )}
-          {tab === 'own' && (own.length === 0 ? (
-            <div className={styles.empty}>
-              <p>{t('own_empty', { client: clientName })}</p>
-              <Button disabled={!canWrite} onClick={createAgent}>{t('create_card_cta', { client: clientName })}</Button>
-            </div>
-          ) : (
-            <ul className={styles.agrid}>
-              {own.map((skill) => (
-                <li key={skill.slug}>
-                  <AgentCard
-                    href={`${hrefBase}/${agentSegment(skill.slug)}`}
-                    title={skill.name}
-                    desc={skill.summary}
-                    kind="workflow"
-                    symbolKey={skill.slug}
-                    hue={itemHue('workflow', skill.slug)}
-                    masked
-                    badge={skill.draft ? <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span> : undefined}
-                  />
-                </li>
-              ))}
-            </ul>
+      <div className={styles.placeLayout}>
+        <nav className={styles.rail} aria-label={t('rail_label')}>
+          <RailItem label={t('place_general')} count={countOf('general')} current={place === 'general'} onClick={() => setPlace('general')} />
+          {verticals.length > 0 && <span className={styles.railGroup}>{t('level_vertical')}</span>}
+          {verticals.map((o) => (
+            <RailItem key={o.id} label={railName(knowledgeName(o.id, o.title))} note={o.id === companyIndustry ? t('industry_yours') : undefined} count={countOf(o.id as Place)} current={place === o.id} onClick={() => setPlace(o.id as Place)} />
           ))}
-          {tab === 'community' && (community.length === 0 ? (
-            <div className={styles.empty}>
-              <h3>{t('community_empty_title')}</h3>
-              <p>{t('community_empty_body')}</p>
-              <Button variant="outline" onClick={() => setTab('own')}>{t('community_share_cta')}</Button>
-            </div>
-          ) : (
-            <ul className={styles.agrid}>
-              {community.map((skill) => (
-                <li key={skill.slug}><AgentCard href={`${hrefBase}/${communitySegment(skill.slug)}`} title={skill.name} desc={skill.summary} kind="workflow" symbolKey={skill.slug} hue={itemHue('workflow', skill.slug)} foot={<CommunityFoot meta={communityMeta(skill)} />} /></li>
-              ))}
-            </ul>
+          {modifiers.length > 0 && <span className={styles.railGroup}>{t('level_modifier')}</span>}
+          {modifiers.map((o) => (
+            <RailItem key={o.id} label={railName(knowledgeName(o.id, o.title))} count={countOf(o.id as Place)} current={place === o.id} onClick={() => setPlace(o.id as Place)} />
           ))}
+          <span className={styles.railSep} aria-hidden />
+          <RailItem label={t('tab_own')} count={countOf('own')} current={place === 'own'} onClick={() => setPlace('own')} />
+          <RailItem label={t('tab_community')} count={countOf('community')} current={place === 'community'} onClick={() => setPlace('community')} />
+        </nav>
 
-          {tab === 'accounted' && (
-            <div className={styles.plate} data-gone={rowsLocked ? undefined : ''}>
-              {state === 'locked' && (
-                <div className={styles.gate}>
-                  <h2>{t('sign_title')}</h2>
-                  <div className={styles.gateClients}>
-                    {AI_CLIENTS.map((c, i) => (
-                      <Button key={c.id} size="lg" variant={i === 0 ? 'default' : 'outline'} className="gap-2 pl-3.5" onClick={() => connect(c.id)}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={c.logo} alt="" width={18} height={18} className={styles.clientLogo} />
-                        {i === 0 ? t('connect_client', { client: c.name }) : c.name}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {state === 'waiting' && waitingFor && (
-                <div className={styles.pin}>
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
-                  <h2>{waitingFor === 'claude' ? t('wait_claude_title') : t('wait_title', { client: pendingName })}</h2>
-                  {waitingFor === 'claude' ? <p>{t('wait_claude_body')}</p> : (
-                    <>
-                      {address && (
-                        <div className={styles.addr}>
-                          <code aria-label={t('server_address')}>{address}</code>
-                          <Button size="sm" onClick={() => void copyAddress(address)}>{t(addressCopy === 'copied' ? 'copied' : 'copy')}</Button>
+        <div key={place} className={`${styles.placeBody} ${styles.fadeIn}`}>
+          <div className={styles.placeHead}>
+            <h2>{placeName(place)}</h2>
+            <p>{t(place === 'general' ? 'place_general_hint' : place === 'own' ? 'place_own_hint' : place === 'community' ? 'place_community_hint' : 'place_pack_hint')}</p>
+          </div>
+          {!canWrite && <p className={styles.note}>{t('viewer_note')}</p>}
+          {catalog.error && <p role="alert" className={styles.note}>{t('load_failed')} <button type="button" className="underline underline-offset-4" onClick={() => void catalog.mutate()}>{t('retry')}</button></p>}
+
+          {place === 'general' && (
+            <>
+              <section className={styles.placeSection} aria-label={t('kind_workflow')}>
+                <div className={styles.levelHead}><h3>{t('kind_workflow')}</h3><span>{flows.length + sharedIn('general').filter((s) => kindOf(s) === 'workflow').length}</span></div>
+                <div className={styles.veilwrap}>
+                  <ul className={styles.agrid} aria-hidden={rowsLocked || undefined}>
+                    {flows.map((id) => <li key={id}>{card(id)}</li>)}
+                    {sharedIn('general').filter((s) => kindOf(s) === 'workflow').map((skill) => <SharedCard key={skill.slug} skill={skill} hrefBase={hrefBase} />)}
+                  </ul>
+                  <div className={styles.plate} data-gone={rowsLocked ? undefined : ''}>
+                    {state === 'locked' && (
+                      <div className={styles.gate}>
+                        <h2>{t('sign_title')}</h2>
+                        <div className={styles.gateClients}>
+                          {AI_CLIENTS.map((c, i) => (
+                            <Button key={c.id} size="lg" variant={i === 0 ? 'default' : 'outline'} className="gap-2 pl-3.5" onClick={() => connect(c.id)}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={c.logo} alt="" width={18} height={18} className={styles.clientLogo} />
+                              {i === 0 ? t('connect_client', { client: c.name }) : c.name}
+                            </Button>
+                          ))}
                         </div>
-                      )}
-                      {addressCopy === 'failed' && <p role="status">{t('copy_failed')}</p>}
-                      <ol className={styles.stepsl}>
-                        <li>{t('step_1')}</li>
-                        <li>{t('step_2', { client: pendingName })}</li>
-                        <li>{t('step_3')}</li>
-                      </ol>
-                    </>
-                  )}
-                  <div className={styles.btns}>
-                    <Button variant="outline" onClick={() => reopen(waitingFor)}>{t('open_client', { client: pendingName })}</Button>
-                    <Button onClick={() => { setCheckedOnce(true); pollerRef.current?.check() }}>{t('check_again')}</Button>
+                      </div>
+                    )}
+                    {state === 'waiting' && waitingFor && (
+                      <div className={styles.pin}>
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                        <h2>{waitingFor === 'claude' ? t('wait_claude_title') : t('wait_title', { client: pendingName })}</h2>
+                        {waitingFor === 'claude' ? <p>{t('wait_claude_body')}</p> : (
+                          <>
+                            {address && (
+                              <div className={styles.addr}>
+                                <code aria-label={t('server_address')}>{address}</code>
+                                <Button size="sm" onClick={() => void copyAddress(address)}>{t(addressCopy === 'copied' ? 'copied' : 'copy')}</Button>
+                              </div>
+                            )}
+                            {addressCopy === 'failed' && <p role="status">{t('copy_failed')}</p>}
+                            <ol className={styles.stepsl}>
+                              <li>{t('step_1')}</li>
+                              <li>{t('step_2', { client: pendingName })}</li>
+                              <li>{t('step_3')}</li>
+                            </ol>
+                          </>
+                        )}
+                        <div className={styles.btns}>
+                          <Button variant="outline" onClick={() => reopen(waitingFor)}>{t('open_client', { client: pendingName })}</Button>
+                          <Button onClick={() => { setCheckedOnce(true); pollerRef.current?.check() }}>{t('check_again')}</Button>
+                        </div>
+                        {checkedOnce && <p role="status">{t('still_waiting', { client: pendingName })}</p>}
+                        <button type="button" className="text-xs text-muted-foreground underline underline-offset-4" onClick={() => setPending(null)}>{t('cancel')}</button>
+                      </div>
+                    )}
                   </div>
-                  {checkedOnce && <p role="status">{t('still_waiting', { client: pendingName })}</p>}
-                  <button type="button" className="text-xs text-muted-foreground underline underline-offset-4" onClick={() => setPending(null)}>{t('cancel')}</button>
                 </div>
-              )}
-            </div>
+              </section>
+              <Section kind="rules" count={horizontals.length + sharedIn('general').filter((s) => kindOf(s) === 'rules').length}>
+                {horizontals.map((o) => <PackCard key={o.id} option={o} hrefBase={hrefBase} overview={agents.data} />)}
+                {sharedIn('general').filter((s) => kindOf(s) === 'rules').map((skill) => <SharedCard key={skill.slug} skill={skill} hrefBase={hrefBase} />)}
+              </Section>
+              <Section kind="analysis" count={sharedIn('general').filter((s) => kindOf(s) === 'analysis').length}>
+                {sharedIn('general').filter((s) => kindOf(s) === 'analysis').map((skill) => <SharedCard key={skill.slug} skill={skill} hrefBase={hrefBase} />)}
+              </Section>
+            </>
           )}
+
+          {(place.startsWith('vertical/') || place.startsWith('modifier/')) && (
+            <>
+              {(['workflow', 'rules', 'analysis'] as const).map((k) => {
+                const items = sharedIn(place).filter((s) => kindOf(s) === k)
+                const pack = k === 'rules' ? packs.find((o) => o.id === place) : undefined
+                return (
+                  <Section key={k} kind={k} count={items.length + (pack ? 1 : 0)} empty={t('place_share_first', { place: placeName(place) })}>
+                    {pack && <PackCard option={pack} hrefBase={hrefBase} overview={agents.data} />}
+                    {items.map((skill) => <SharedCard key={skill.slug} skill={skill} hrefBase={hrefBase} />)}
+                  </Section>
+                )
+              })}
+            </>
+          )}
+
+          {place === 'own' && (
+            <section className={styles.placeSection} aria-label={t('tab_own')}>
+              <ul className={styles.agrid}>
+                {own.map((skill) => (
+                  <li key={skill.slug}>
+                    <AgentCard
+                      href={`${hrefBase}/${agentSegment(skill.slug)}`}
+                      title={skill.name}
+                      desc={skill.summary}
+                      kind="workflow"
+                      symbolKey={skill.slug}
+                      hue={itemHue('workflow', skill.slug)}
+                      masked
+                      badge={skill.draft ? <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span> : undefined}
+                    />
+                  </li>
+                ))}
+                <li>
+                  <button type="button" className={`${styles.acard} ${styles.acCreate}`} disabled={!canWrite} onClick={createAgent}>
+                    <span className={styles.acPanel}>
+                      <span className={styles.acText}>
+                        <span className={styles.acTitle}>{t('create_card_title')}</span>
+                        <span className={styles.acDesc}>{t('create_card_body', { client: clientName })}</span>
+                        <span className={styles.acMarks}><span className={styles.createCta}>{t('create_card_cta', { client: clientName })}<ArrowRight className="h-3.5 w-3.5" aria-hidden /></span></span>
+                      </span>
+                      <span className={styles.acTile}><span className={styles.createPlus} aria-hidden><Plus className="h-4 w-4" /></span></span>
+                    </span>
+                    <span className={styles.acFoot}><span className={styles.statusSlot} /><span className={styles.open} aria-hidden>{t('open_hint')}</span></span>
+                  </button>
+                </li>
+              </ul>
+            </section>
+          )}
+
+          {place === 'community' && (['workflow', 'rules', 'analysis'] as const).map((k) => (
+            <Section key={k} kind={k} count={shared.filter((s) => kindOf(s) === k).length} empty={t(`community_empty_${k}`)}>
+              {shared.filter((s) => kindOf(s) === k).map((skill) => <SharedCard key={skill.slug} skill={skill} hrefBase={hrefBase} />)}
+            </Section>
+          ))}
         </div>
-      </section>
-      </>)}
+      </div>
 
       <SkillCreator
         mode={creator}
@@ -341,5 +337,14 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         onSaved={() => { setCreator(null); void catalog.mutate() }}
       />
     </div>
+  )
+}
+
+function RailItem({ label, note, count, current, onClick }: { label: string; note?: string; count: number; current: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className={styles.railItem} aria-current={current ? 'page' : undefined} onClick={onClick}>
+      <span className={styles.railLabel}>{label}{note && <small>{note}</small>}</span>
+      <span className={styles.railCount}>{count}</span>
+    </button>
   )
 }
