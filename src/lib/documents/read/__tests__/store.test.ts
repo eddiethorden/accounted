@@ -45,6 +45,10 @@ function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<
   }
   // The unread batch; other rpcs (the usage meter) answer empty and are not recorded.
   const rpc = (fn: string, args: { p_limit?: number }) => {
+    if (fn === 'document_retry_candidates') {
+      calls.push({ table: `rpc:${fn}`, op: 'select-retry', filters: { ...args } })
+      return Promise.resolve({ data: retry.slice(0, args.p_limit), error: null })
+    }
     if (fn !== 'document_backfill_candidates') return Promise.resolve({ data: null, error: null })
     calls.push({ table: `rpc:${fn}`, op: 'rpc', filters: { ...args } })
     return Promise.resolve({ data: unread.slice(0, args.p_limit), error: null })
@@ -164,6 +168,8 @@ describe('readUnreadDocuments', () => {
     expect(readDocumentBytes).toHaveBeenCalledTimes(1)
     expect(readDocumentBytes).toHaveBeenCalledWith(expect.any(Buffer), 'image/jpeg', { allowModel: true, maxModelPages: null })
     expect(calls.find((c) => c.op === 'select-retry')?.filters.company_id).toBeUndefined()
+    // Through the function that leaves out rows the stamp cannot land on (a locked period).
+    expect(calls.find((c) => c.op === 'select-retry')).toMatchObject({ table: 'rpc:document_retry_candidates', filters: { p_reasons: expect.arrayContaining(['ai_gated']), p_limit: 40 } })
   })
 
 

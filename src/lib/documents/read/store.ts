@@ -196,8 +196,9 @@ export async function readUnreadDocuments(
   // The shelf is on for every company: nobody goes first, and everyone's gated rows are retried under the budget.
   if (!spentTime() && getAiStatus().configured) {
     const room = limit - counts.processed
-    const retry = supabase.from('document_attachments').select('id, company_id, storage_path, mime_type, created_at, journal_entry_id, journal_entry_line_id, doc_type, pages_read_at, read_error').in('read_error', RETRY_REASONS)
-    const { data, error } = await retry.order('pages_read_at', { ascending: true }).limit(room * 4)
+    // Oldest stamp first, leaving out rows the stamp cannot land on: a gated document on a locked period was read
+    // again with the model every run and led the next batch (prod 2026-09-24: 19 rows took every run's budget).
+    const { data, error } = await supabase.rpc('document_retry_candidates', { p_reasons: RETRY_REASONS, p_limit: room * 4 })
     if (error) throw new Error(`fetch retry documents failed: ${error.message}`)
     // Vision pages already spent today per company, read once and kept as the pass spends more.
     const spent = new Map<string, number>()

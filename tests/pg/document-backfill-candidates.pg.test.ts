@@ -12,18 +12,20 @@ import { insertCompany, insertPostedJournalEntry, seedCompany } from './fixtures
  */
 const future = new Date(Date.now() + 86_400_000).toISOString() // ours sort first, whatever else the database holds
 
-async function insertDocument(p: { userId: string; companyId: string; mime?: string; entryId?: string; readAt?: string | null }): Promise<string> {
+const past = '2000-01-01T00:00:00Z' // gated rows retry oldest stamp first: ours lead that list too
+
+async function insertDocument(p: { userId: string; companyId: string; mime?: string; entryId?: string; readAt?: string | null; readError?: string | null }): Promise<string> {
   const id = randomUUID()
   await getPool().query(
     `INSERT INTO public.document_attachments
-       (id, user_id, company_id, file_name, mime_type, file_size_bytes, storage_path, sha256_hash, upload_source, journal_entry_id, pages_read_at, created_at)
-     VALUES ($1, $2, $3, 'underlag.pdf', $4, 1024, $5, $6, 'file_upload', $7, $8, $9)`,
-    [id, p.userId, p.companyId, p.mime ?? 'application/pdf', `documents/${p.companyId}/${id}.pdf`, randomUUID().replace(/-/g, '').padEnd(64, '0'), p.entryId ?? null, p.readAt ?? null, future],
+       (id, user_id, company_id, file_name, mime_type, file_size_bytes, storage_path, sha256_hash, upload_source, journal_entry_id, pages_read_at, read_error, created_at)
+     VALUES ($1, $2, $3, 'underlag.pdf', $4, 1024, $5, $6, 'file_upload', $7, $8, $9, $10)`,
+    [id, p.userId, p.companyId, p.mime ?? 'application/pdf', `documents/${p.companyId}/${id}.pdf`, randomUUID().replace(/-/g, '').padEnd(64, '0'), p.entryId ?? null, p.readAt ?? null, p.readError ?? null, future],
   )
   return id
 }
 
-describe('document_backfill_candidates', () => {
+describe('document_backfill_candidates and document_retry_candidates', () => {
   const ids: Record<string, string> = {}
 
   beforeAll(async () => {
@@ -37,6 +39,9 @@ describe('document_backfill_candidates', () => {
     const locked = await seedCompany()
     const lockedEntry = await insertPostedJournalEntry({ userId: locked.userId, companyId: locked.companyId, fiscalPeriodId: locked.fiscalPeriodId })
     ids.onLockedEntry = await insertDocument({ ...locked, entryId: lockedEntry })
+    ids.gatedOnLockedEntry = await insertDocument({ ...locked, entryId: lockedEntry, readAt: past, readError: 'ai_gated' })
+    ids.gatedOnOpenEntry = await insertDocument({ ...open, entryId: openEntry, readAt: past, readError: 'ai_gated' })
+    ids.readFine = await insertDocument({ ...open, readAt: past })
     await getPool().query(`UPDATE public.fiscal_periods SET locked_at = now() WHERE id = $1`, [locked.fiscalPeriodId])
 
     const source = await seedCompany()
@@ -73,8 +78,19 @@ describe('document_backfill_candidates', () => {
     await expect(getPool().query(`UPDATE public.document_attachments SET pages_read_at = now() WHERE id = $1`, [ids.onLockedEntry])).rejects.toThrow(/locked\/closed fiscal period/)
   })
 
+  it('retries gated documents it can stamp, never one on a locked period', async () => {
+    const got = await runAsServiceRole(async (client) => {
+      const { rows } = await client.query<{ id: string }>(`SELECT id FROM public.document_retry_candidates(ARRAY['ai_gated','partial:ai_gated'], 500)`)
+      return new Set(rows.map((r) => r.id))
+    })
+    expect(got.has(ids.gatedOnOpenEntry)).toBe(true)
+    expect(got.has(ids.gatedOnLockedEntry)).toBe(false)
+    expect(got.has(ids.readFine)).toBe(false)
+  })
+
   it('is for the service role only', async () => {
     const { userId } = await seedCompany()
     await expect(withUserContext(userId, (client) => client.query(`SELECT * FROM public.document_backfill_candidates(1)`))).rejects.toThrow(/permission denied/)
+    await expect(withUserContext(userId, (client) => client.query(`SELECT * FROM public.document_retry_candidates(ARRAY['ai_gated'], 1)`))).rejects.toThrow(/permission denied/)
   })
 })
