@@ -903,6 +903,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
         if (error) throw dbError(error)
         if (!doc) throw notFound('Document not found')
         const d = doc as { id: string; file_name: string; doc_type: string | null; page_count: number | null }
+        let unreadable: string | null = null
         const readPages = () => supabase.from('document_pages').select('page_no, text').eq('document_id', documentId).gte('page_no', from).lte('page_no', to).order('page_no', { ascending: true })
         let { data: pages, error: pagesError } = await readPages()
         if (pagesError) throw dbError(pagesError)
@@ -910,6 +911,11 @@ export function createArkivTools(deps: Deps): McpTool[] {
         if (((pages ?? []) as unknown[]).length === 0) {
           // History the lanes left unread: the agent asking is what it waited for.
           const read = await ensureDocumentRead(supabase, companyId, documentId)
+          if (read.status !== 'read') {
+            // Said plainly, so an agent never takes an empty answer for an empty document.
+            const { data: stamp } = await supabase.from('document_attachments').select('read_error').eq('id', documentId).maybeSingle()
+            unreadable = (stamp as { read_error: string | null } | null)?.read_error ?? (read.status === 'skipped' ? read.reason : read.status)
+          }
           if (read.status === 'read') {
             ;({ data: pages, error: pagesError } = await readPages())
             if (pagesError) throw dbError(pagesError)
@@ -927,6 +933,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
           pages: list.map((p) => ({ page_no: p.page_no, text: fenceDocumentText(p.text ?? '', { page: p.page_no }) })),
           next_page: pageCount != null && last < pageCount ? last + 1 : null,
           notice: DOCUMENT_TEXT_NOTICE,
+          ...(list.length === 0 ? { unreadable: unreadable ?? 'no text on these pages', file_url_hint: 'gnubok_get_source returns a signed link to the file itself.' } : {}),
         }
       },
     },
