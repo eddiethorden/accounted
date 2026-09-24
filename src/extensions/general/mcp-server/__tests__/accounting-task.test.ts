@@ -3,7 +3,7 @@ vi.mock('@/lib/agent-skills/catalog', () => ({ loadSkillCatalog: vi.fn(), loadCa
 vi.mock('@/lib/agent-skills/agent-bundle', async (original) => ({ ...(await original<object>()), loadAgentBundle: vi.fn() }))
 import { loadSkillCatalog, loadCatalogSkill } from '@/lib/agent-skills/catalog'
 import { loadAgentBundle } from '@/lib/agent-skills/agent-bundle'
-import { getAccountingTask } from '../accounting-task'
+import { getAccountingTask, INDUSTRY_SECTIONS_INSTRUCTION } from '../accounting-task'
 
 describe('get_task', () => {
   beforeEach(() => {
@@ -29,6 +29,7 @@ describe('get_task', () => {
       agent: { id: 'quarterly-vat-review', name: 'Momsdeklaration' },
       workflow: { slug: 'quarterly-vat-review', version: 4, body: '# Moms' },
       knowledge: [{ id: 'horizontal/swedish-vat', tier: 'horizontal', source: 'default', title: 'Swedish VAT', summary: '', version: 7, reviewed_at: null, body: '# VAT' }],
+      industry_sections: [],
       references: [], company: [], connections: [{ kind: 'skatteverket', status: 'connected' }],
       company_knowledge: { name: 'Arcim', org_number: null, onboarding_summary: null, facts: [], remembered: [], documents: { total: 0, look_up: [] } },
     })
@@ -36,7 +37,27 @@ describe('get_task', () => {
     expect(loadAgentBundle).toHaveBeenCalledWith({}, 'company-a', 'quarterly-vat-review', 'grok')
     expect(task).toMatchObject({ kind: 'agent:quarterly-vat-review', skills: ['quarterly-vat-review', 'horizontal/swedish-vat'], workflow: { body: '# Moms' } })
     expect(task.instructions[0]).toContain('Accounted agent')
+    expect(task.instructions).not.toContain(INDUSTRY_SECTIONS_INSTRUCTION)
     expect(loadSkillCatalog).not.toHaveBeenCalled()
+  })
+  it('presents the industry sections for the workflow after the knowledge and before the references', async () => {
+    vi.mocked(loadAgentBundle).mockResolvedValue({
+      agent: { id: 'invoicing-rules', name: 'Fakturera rätt' },
+      workflow: { slug: 'invoicing-rules', version: 2, body: '# Faktura' },
+      knowledge: [{ id: 'horizontal/swedish-invoice-compliance', tier: 'horizontal', source: 'default', title: 'Fakturering', summary: '', version: 3, reviewed_at: null, body: '# Regler' }],
+      industry_sections: [{ id: 'vertical/konsult-it/invoice-templates', title: 'Invoice text library', parent_id: 'vertical/konsult-it', body: '# Fakturatexter' }],
+      references: [{ id: 'horizontal/swedish-invoice-compliance/invoice-rules', title: 'Invoice rules' }],
+      company: [{ id: 'vertical/konsult-it', title: 'IT-konsult', tier: 'vertical' }], connections: [],
+      company_knowledge: { name: 'Arcim', org_number: null, onboarding_summary: null, facts: [], remembered: [], documents: { total: 0, look_up: [] } },
+    })
+    const task = await getAccountingTask({ kind: 'agent:invoicing-rules' }, 'company-a', {} as never)
+    expect(task.skills).toEqual(['invoicing-rules', 'horizontal/swedish-invoice-compliance', 'vertical/konsult-it/invoice-templates'])
+    expect(task.instructions[2]).toBe(INDUSTRY_SECTIONS_INSTRUCTION)
+    expect(INDUSTRY_SECTIONS_INSTRUCTION).toContain('Er bransch, för det här arbetsflödet')
+    const keys = Object.keys(task)
+    expect(keys.indexOf('knowledge')).toBeLessThan(keys.indexOf('industry_sections'))
+    expect(keys.indexOf('industry_sections')).toBeLessThan(keys.indexOf('references'))
+    expect(JSON.stringify(task)).toContain('# Fakturatexter')
   })
   it('rejects an unknown agent', async () => {
     vi.mocked(loadAgentBundle).mockResolvedValue(null)

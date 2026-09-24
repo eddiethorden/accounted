@@ -1,3 +1,7 @@
+---
+areas: [moms]
+---
+
 # Dropshipping och kedjetransaktioner: beslutsschema
 
 ## Dimensioner

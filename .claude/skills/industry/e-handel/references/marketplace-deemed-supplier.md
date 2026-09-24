@@ -1,3 +1,7 @@
+---
+areas: [moms]
+---
+
 # Marketplace deemed supplier: 5 kap. 5-6 §§ ML 2023:200
 
 ## När triggas reglerna

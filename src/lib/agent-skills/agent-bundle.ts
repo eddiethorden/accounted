@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AiClient } from '@/lib/onboarding/ai-clients'
-import { AGENTS, CONNECTION_SETTINGS, isCheckable, type AgentConnection, type CheckableConnection } from './agents'
+import { AGENTS, AREAS, CONNECTION_SETTINGS, isCheckable, type AgentConnection, type Area, type CheckableConnection } from './agents'
+import { areasOf } from './areas'
 import { REGISTRY_SKILLS, registrySkillSlug, type RegistrySkillId } from './registry'
 import { toSummary } from './atoms'
 import { workflowSkills } from './workflows'
@@ -37,6 +38,8 @@ export interface AgentOverview {
   knowledge: KnowledgeMeta[]
   references: Array<{ id: string; title: string }>
   company: Array<{ id: string; title: string; tier: 'vertical' | 'modifier' }>
+  /** The company's pack sections tagged with this agent's areas: inlined when it starts. */
+  industry_sections: IndustrySectionMeta[]
   connections: AgentConnectionState[]
   /** Defaults the company took away, so the page can offer them back. */
   removed: string[]
@@ -54,6 +57,14 @@ export interface AgentsOverview {
   documents: number
   /** What the company chose for its own agents, keyed by own/<id>. */
   own_knowledge: Record<string, KnowledgeMeta[]>
+}
+
+/** One section of an industry or company-form pack (a reference child atom). */
+export interface IndustrySectionMeta {
+  id: string
+  title: string
+  /** The pack it belongs to, e.g. vertical/konsult-it. */
+  parent_id: string
 }
 
 interface AtomRow {
@@ -127,6 +138,35 @@ async function loadProfileAtoms(supabase: SupabaseClient, companyId: string): Pr
   return [...(data?.vertical_atoms ?? []), ...(data?.modifier_atoms ?? [])]
 }
 
+interface SectionRow extends AtomRow { areas: Area[] }
+
+/**
+ * The sections of the company's live packs tagged with any of `areas`, in
+ * profile order. Untagged sections never match: they stay loadable on demand
+ * through the pack's own reference list.
+ */
+async function loadIndustrySections(supabase: SupabaseClient, packIds: string[], areas: readonly Area[], withBody: boolean): Promise<SectionRow[]> {
+  if (packIds.length === 0 || areas.length === 0) return []
+  const { data, error } = await supabase.from('agent_atom_registry')
+    .select(`${ATOM_META}, trigger_signals${withBody ? ', body' : ''}`).in('parent_atom_id', packIds).order('id', { ascending: true })
+  if (error) throw new Error(`Failed to load industry sections: ${error.message}`)
+  const order = new Map(packIds.map((id, i) => [id, i]))
+  return ((data ?? []) as unknown as Array<AtomRow & { trigger_signals: unknown }>)
+    .filter((row) => row.is_active && row.mcp_exposed && row.parent_atom_id && order.has(row.parent_atom_id))
+    .map(({ trigger_signals, ...row }) => ({ ...row, areas: areasOf(trigger_signals) }))
+    .filter((row) => row.areas.some((a) => areas.includes(a)))
+    .sort((a, b) => order.get(a.parent_atom_id!)! - order.get(b.parent_atom_id!)!)
+}
+
+function sectionMeta(row: SectionRow): IndustrySectionMeta {
+  return { id: row.id, title: row.title ?? row.id, parent_id: row.parent_atom_id! }
+}
+
+/** A reference file's frontmatter (areas, audience) routes it; the agent reads the text below it. */
+function stripFrontmatter(body: string): string {
+  return body.replace(/^---\n[\s\S]*?\n---\n+/, '')
+}
+
 /** A failed read says "unknown", never "missing": the page must not tell a connected user to connect. */
 async function loadConnectionStates(supabase: SupabaseClient, companyId: string): Promise<Record<CheckableConnection, ConnectionStatus>> {
   const [bank, skv, peppol] = await Promise.all([
@@ -159,15 +199,20 @@ export async function loadAgentsOverview(supabase: SupabaseClient, companyId: st
   const [profileIds, choices] = await Promise.all([loadProfileAtoms(supabase, companyId), loadKnowledgeChoices(supabase, companyId)])
   const chosen = [...choices.values()].flatMap((c) => c.added)
   const ids = [...new Set([...Object.values(AGENTS).flatMap((a) => [...a.knowledge, ...a.references]), ...profileIds, ...chosen])]
-  const [atoms, states, facts, agreements, remembered, documents] = await Promise.all([
+  const [atoms, states, facts, agreements, remembered, documents, sections] = await Promise.all([
     loadAtoms(supabase, ids, false),
     loadConnectionStates(supabase, companyId),
     supabase.from('company_facts').select('predicate').eq('company_id', companyId).eq('subject_kind', 'company').is('sys_to', null).neq('rank', 'deprecated').eq('status', 'confirmed').limit(500),
     supabase.from('agreements').select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('status', 'active'),
     supabase.from('agent_memory').select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('is_active', true),
     supabase.from('document_attachments').select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('admission_state', 'admitted'),
+    // Every tagged section once; each agent keeps those in its areas below.
+    loadIndustrySections(supabase, profileIds, AREAS, false),
   ])
   const company = companyAtoms(atoms, profileIds)
+  const livePacks = new Set(company.map((c) => c.id))
+  const sectionsFor = (areas: readonly Area[]) => sections
+    .filter((s) => livePacks.has(s.parent_atom_id!) && s.areas.some((a) => areas.includes(a))).map(sectionMeta)
   const known = new Set(facts.error ? [] : ((facts.data ?? []) as Array<{ predicate: string }>).map((f) => f.predicate))
   const metas = (list: Array<{ id: string; source: KnowledgeMeta['source'] }>) =>
     list.flatMap(({ id, source }) => { const row = atoms.get(id); return row && !row.parent_atom_id ? [meta(row, source)] : [] })
@@ -190,6 +235,7 @@ export async function loadAgentsOverview(supabase: SupabaseClient, companyId: st
           .filter((r) => effectiveKnowledge(def.knowledge, choices.get(id)).some((k) => k.id === packOf(r)))
           .flatMap((r) => { const row = atoms.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] }),
         company,
+        industry_sections: sectionsFor(def.areas),
         connections: connectionsFor(id, states),
         removed: def.knowledge.filter((k) => choices.get(id)?.removed.has(k)),
       }
@@ -217,6 +263,12 @@ export interface AgentBundle {
   agent: { id: string; name: string }
   workflow: { slug: string; version: number | null; body: string }
   knowledge: Array<KnowledgeMeta & { body: string }>
+  /**
+   * Er bransch, för det här arbetsflödet: the company's industry and
+   * company-form sections tagged with this flow's areas, inlined after the
+   * knowledge within the same budget. Empty for own agents.
+   */
+  industry_sections: Array<IndustrySectionMeta & { body: string }>
   references: Array<{ id: string; title: string }>
   company: AgentOverview['company']
   company_knowledge: CompanyKnowledge
@@ -253,7 +305,10 @@ async function loadCompanyKnowledge(supabase: SupabaseClient, companyId: string,
 export { isAgentId } from './agents'
 import { isAgentId } from './agents'
 
-/** Knowledge bodies inlined per run; what does not fit is listed to load on demand. */
+/**
+ * Knowledge bodies inlined per run, shared by the knowledge and then the
+ * company's industry sections; what does not fit is listed to load on demand.
+ */
 const INLINE_BUDGET = 60_000
 
 function splitByBudget(rows: AtomRow[], list: Array<{ id: string; source: KnowledgeMeta['source'] }>) {
@@ -269,13 +324,29 @@ function splitByBudget(rows: AtomRow[], list: Array<{ id: string; source: Knowle
       used += row.body.length
     } else overflow.push({ id: row.id, title: row.title ?? row.id })
   }
+  return { inline, overflow, used }
+}
+
+/** The sections that fit what the knowledge left of the budget; the rest become references. */
+function splitSections(rows: SectionRow[], used: number) {
+  const inline: AgentBundle['industry_sections'] = []
+  const overflow: Array<{ id: string; title: string }> = []
+  for (const row of rows) {
+    const body = stripFrontmatter(row.body ?? '')
+    if (!body) continue
+    if (used + body.length <= INLINE_BUDGET) {
+      inline.push({ ...sectionMeta(row), body })
+      used += body.length
+    } else overflow.push({ id: row.id, title: row.title ?? row.id })
+  }
   return { inline, overflow }
 }
 
 /**
  * One agent, ready to run: the instruction body, the knowledge the company
  * gave it (defaults adjusted by company_agent_knowledge) inlined within a
- * budget, references and company atoms as ids to load with load_skill.
+ * budget, then the company's pack sections tagged with the flow's areas in
+ * what is left of it, references and company atoms as ids to load with load_skill.
  * `own/<id>` runs a company's own agent the same way.
  */
 export async function loadAgentBundle(supabase: SupabaseClient, companyId: string, id: string, client: AiClient = 'claude'): Promise<AgentBundle | null> {
@@ -293,19 +364,25 @@ export async function loadAgentBundle(supabase: SupabaseClient, companyId: strin
 
   const [profileIds, choices] = await Promise.all([loadProfileAtoms(supabase, companyId), loadKnowledgeChoices(supabase, companyId)])
   const list = effectiveKnowledge(curated?.knowledge ?? [], choices.get(id))
-  const [bodies, metaRows, states, companyKnowledge] = await Promise.all([
+  const [bodies, metaRows, states, companyKnowledge, sectionRows] = await Promise.all([
     loadAtoms(supabase, list.map((k) => k.id), true),
     loadAtoms(supabase, [...(curated?.references ?? []), ...profileIds], false),
     loadConnectionStates(supabase, companyId),
     loadCompanyKnowledge(supabase, companyId, { facts: curated?.facts ?? null, agreements: curated?.agreements ?? true }),
+    // Own agents name no areas, so they get no sections (the query is skipped).
+    loadIndustrySections(supabase, profileIds, curated?.areas ?? [], true),
   ])
-  const { inline, overflow } = splitByBudget([...bodies.values()], list)
+  const { inline, overflow, used } = splitByBudget([...bodies.values()], list)
+  const company = companyAtoms(metaRows, profileIds)
+  const livePacks = new Set(company.map((c) => c.id))
+  const sections = splitSections(sectionRows.filter((s) => livePacks.has(s.parent_atom_id!)), used)
   return {
     agent: { id, name: workflow.name },
     workflow: { slug: workflow.slug, version: workflow.version, body: workflow.body },
     knowledge: inline,
-    references: [...overflow, ...(curated?.references ?? []).filter((r) => list.some((k) => k.id === packOf(r))).flatMap((r) => { const row = metaRows.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] })],
-    company: companyAtoms(metaRows, profileIds),
+    industry_sections: sections.inline,
+    references: [...overflow, ...sections.overflow, ...(curated?.references ?? []).filter((r) => list.some((k) => k.id === packOf(r))).flatMap((r) => { const row = metaRows.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] })],
+    company,
     company_knowledge: companyKnowledge,
     connections: curated ? connectionsFor(id as RegistrySkillId, states) : [],
   }

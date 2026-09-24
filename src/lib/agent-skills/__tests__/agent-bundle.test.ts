@@ -5,7 +5,7 @@ vi.mock('@/lib/arkiv/map', () => ({ buildArkivMap: vi.fn() }))
 import { buildArkivMap } from '@/lib/arkiv/map'
 import { effectiveKnowledge, loadAgentBundle, loadAgentsOverview } from '../agent-bundle'
 
-const { supabase, enqueue, reset } = createQueuedMockSupabase()
+const { supabase, enqueue, reset, findCalls } = createQueuedMockSupabase()
 
 const atom = (id: string, extra: Record<string, unknown> = {}) => ({
   id, tier: id.startsWith('vertical/') ? 'vertical' : 'horizontal', title: id.split('/').pop(), description: `About ${id}. More text.`,
@@ -86,6 +86,7 @@ describe('loadAgentBundle', () => {
     expect(bundle.knowledge.map((k) => [k.id, k.body])).toEqual([['horizontal/swedish-accounting-compliance', '# BFL'], ['horizontal/swedish-invoice-compliance', '# Faktura']])
     expect(bundle.references).toEqual([{ id: 'horizontal/swedish-invoice-compliance/invoice-rules', title: 'invoice-rules' }])
     expect(bundle.connections).toEqual([{ kind: 'mail', status: 'in_ai' }, { kind: 'browser', status: 'in_ai' }])
+    expect(bundle.industry_sections).toEqual([])
   })
 })
 
@@ -172,5 +173,109 @@ describe('loadAgentBundle: the company chooses the knowledge', () => {
 
   it('returns null for an unknown agent', async () => {
     expect(await loadAgentBundle(supabase as never, 'company-a', 'nope')).toBeNull()
+  })
+})
+
+describe('industry sections by area', () => {
+  const pack = atom('vertical/konsult-it', { title: 'IT-konsult & systemutvecklare' })
+  const section = (slug: string, areas: string[] | null, extra: Record<string, unknown> = {}) =>
+    atom(`vertical/konsult-it/${slug}`, { title: slug, trigger_signals: areas ? { areas } : {}, ...extra })
+
+  /** Queue one curated bundle run for a konsult-it company: knowledge bodies, then the sections. */
+  const runBundle = async (id: string, knowledge: unknown[], sections: unknown[]) => {
+    vi.mocked(buildArkivMap).mockResolvedValue(null as never)
+    enqueue({ data: { vertical_atoms: ['vertical/konsult-it'], modifier_atoms: [] } })
+    enqueue({ data: [] }) // choices
+    enqueue({ data: knowledge })
+    enqueue({ data: [pack] }) // references + profile atoms
+    enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null }) // connections
+    enqueue({ data: null }); enqueue({ data: [] }) // summary, memory
+    enqueue({ data: sections })
+    return (await loadAgentBundle(supabase as never, 'company-a', id))!
+  }
+
+  it('inlines only the sections whose areas meet the flow, without their frontmatter', async () => {
+    const bundle = await runBundle('invoicing-rules', [atom('horizontal/swedish-invoice-compliance', { body: '# Faktura' })], [
+      section('invoice-templates', ['fakturering'], { body: '---\nareas: [fakturering]\n---\n\n# Invoice text library' }),
+      section('3-12-rules', ['bokslut'], { body: '# 3:12' }),
+      section('consultant-vs-employee', null, { body: '# Untagged' }),
+      section('switched-off', ['fakturering'], { body: '# Off', is_active: false }),
+    ])
+    expect(bundle.industry_sections).toEqual([
+      { id: 'vertical/konsult-it/invoice-templates', title: 'invoice-templates', parent_id: 'vertical/konsult-it', body: '# Invoice text library' },
+    ])
+    expect(bundle.references.map((r) => r.id)).not.toContain('vertical/konsult-it/3-12-rules')
+    expect(bundle.company).toEqual([{ id: 'vertical/konsult-it', title: 'IT-konsult & systemutvecklare', tier: 'vertical' }])
+    expect(findCalls('agent_atom_registry', 'in')).toContainEqual(['parent_atom_id', ['vertical/konsult-it']])
+  })
+
+  it('shares the budget with the knowledge and lists the sections that do not fit as references', async () => {
+    const bundle = await runBundle('year-end-close', [atom('horizontal/swedish-year-end-closing', { body: 'y'.repeat(50_000) })], [
+      section('3-12-rules', ['bokslut'], { body: 'a'.repeat(6_000) }),
+      section('software-capitalization', ['bokslut'], { body: 'b'.repeat(6_000) }),
+    ])
+    expect(bundle.industry_sections.map((s) => s.id)).toEqual(['vertical/konsult-it/3-12-rules'])
+    expect(bundle.references[0]).toEqual({ id: 'vertical/konsult-it/software-capitalization', title: 'software-capitalization' })
+  })
+
+  it('skips the sections of a pack that is switched off', async () => {
+    vi.mocked(buildArkivMap).mockResolvedValue(null as never)
+    enqueue({ data: { vertical_atoms: ['vertical/konsult-it'], modifier_atoms: [] } })
+    enqueue({ data: [] })
+    enqueue({ data: [] })
+    enqueue({ data: [] }) // the pack itself is not live
+    enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
+    enqueue({ data: null }); enqueue({ data: [] })
+    enqueue({ data: [section('invoice-templates', ['fakturering'], { body: '# Invoice' })] })
+    const bundle = (await loadAgentBundle(supabase as never, 'company-a', 'invoicing-rules'))!
+    expect(bundle.industry_sections).toEqual([])
+  })
+
+  it('does not query sections without profile atoms', async () => {
+    vi.mocked(buildArkivMap).mockResolvedValue(null as never)
+    enqueue({ data: null }); enqueue({ data: [] }); enqueue({ data: [] }); enqueue({ data: [] })
+    enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
+    enqueue({ data: null }); enqueue({ data: [] })
+    const bundle = (await loadAgentBundle(supabase as never, 'company-a', 'invoicing-rules'))!
+    expect(bundle.industry_sections).toEqual([])
+    expect(findCalls('agent_atom_registry', 'in').some(([col]) => col === 'parent_atom_id')).toBe(false)
+  })
+
+  it('leaves an own agent without sections even when the company has packs', async () => {
+    vi.mocked(buildArkivMap).mockResolvedValue(null as never)
+    const ownId = '00000000-0000-4000-8000-000000000002'
+    enqueue({ data: { team_id: null } })
+    enqueue({ data: [{ id: ownId, company_id: 'company-a', team_id: null, atom_id: null, name: 'Egen', description: 'x', body: '# Steg', share_status: 'private', draft: false }] })
+    enqueue({ data: { vertical_atoms: ['vertical/konsult-it'], modifier_atoms: [] } })
+    enqueue({ data: [] }) // no knowledge chosen, so no body query
+    enqueue({ data: [pack] })
+    enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
+    enqueue({ data: null }); enqueue({ data: [] })
+    const bundle = (await loadAgentBundle(supabase as never, 'company-a', `own/${ownId}`))!
+    expect(bundle.industry_sections).toEqual([])
+    expect(bundle.company.map((c) => c.id)).toEqual(['vertical/konsult-it'])
+    expect(findCalls('agent_atom_registry', 'in').some(([col]) => col === 'parent_atom_id')).toBe(false)
+  })
+
+  it('names each agent\'s sections in the overview, without bodies', async () => {
+    enqueue({ data: { vertical_atoms: ['vertical/konsult-it'], modifier_atoms: [] } })
+    enqueue({ data: [] })
+    enqueue({ data: [pack] })
+    enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
+    enqueue({ data: [] }); enqueue({ count: 0 }); enqueue({ count: 0 }); enqueue({ count: 0 })
+    enqueue({ data: [
+      section('invoice-templates', ['fakturering']),
+      section('electronic-services-classification', ['moms']),
+      section('3-12-rules', ['bokslut']),
+      section('consultant-vs-employee', null),
+    ] })
+    const overview = await loadAgentsOverview(supabase as never, 'company-a')
+    const byAgent = (id: string) => overview.agents.find((a) => a.id === id)!.industry_sections
+    expect(byAgent('invoicing-rules')).toEqual([{ id: 'vertical/konsult-it/invoice-templates', title: 'invoice-templates', parent_id: 'vertical/konsult-it' }])
+    expect(byAgent('quarterly-vat-review').map((s) => s.id)).toEqual(['vertical/konsult-it/electronic-services-classification'])
+    expect(byAgent('month-end-close').map((s) => s.id)).toEqual(['vertical/konsult-it/electronic-services-classification'])
+    expect(byAgent('tax-planning').map((s) => s.id)).toEqual(['vertical/konsult-it/3-12-rules'])
+    expect(byAgent('payroll-monthly')).toEqual([])
+    expect(findCalls('agent_atom_registry', 'select').some(([cols]) => String(cols).includes('body'))).toBe(false)
   })
 })

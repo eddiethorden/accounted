@@ -1,4 +1,7 @@
 import type { RegistrySkillId } from './registry'
+import type { Area } from './areas'
+
+export { AREAS, type Area } from './areas'
 
 /**
  * Agenter: each curated skill is an agent built from four separate parts.
@@ -12,6 +15,8 @@ import type { RegistrySkillId } from './registry'
  *    predicates.ts) that change what this agent does, inlined when it starts;
  *    `agreements` adds the running agreements. Everything else stays one lookup
  *    away (search_records, ask_document): eager for what acts, lazy for what informs.
+ *    `areas` routes the company's industry and company-form sections: those
+ *    tagged with any of the agent's areas are inlined when it starts (areas.ts).
  *  - Kopplingar: where the agent acts. `bank`, `skatteverket` and `peppol` are
  *    Accounted connections the page can check; `mail` and `browser` live in the
  *    customer's own AI client (Gmail connector, Claude in Chrome) and are only named.
@@ -31,6 +36,8 @@ export interface AgentDefinition {
   connections: readonly AgentConnection[]
   facts: readonly string[]
   agreements: boolean
+  /** Areas of work this flow does: the company's pack sections tagged with any of them are inlined. */
+  areas: readonly Area[]
 }
 
 const COMPLIANCE = 'horizontal/swedish-accounting-compliance'
@@ -45,6 +52,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['bank', 'mail'],
     facts: ['accounting_method', 'vat_registered', 'vat_method', 'business_description', 'sni_codes', 'top_counterparty', 'monthly_cost_baseline'],
     agreements: true,
+    areas: ['lopande'],
   },
   kvittojakten: {
     knowledge: [COMPLIANCE, INVOICE],
@@ -52,6 +60,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['mail', 'browser'],
     facts: ['business_description', 'top_counterparty'],
     agreements: false,
+    areas: ['lopande'],
   },
   'reconcile-month': {
     knowledge: [COMPLIANCE],
@@ -59,6 +68,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['bank', 'skatteverket'],
     facts: ['bank_connection', 'loan_balance', 'monthly_cost_baseline'],
     agreements: true,
+    areas: ['lopande'],
   },
   'month-end-close': {
     knowledge: [COMPLIANCE, VAT],
@@ -66,6 +76,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['bank', 'skatteverket'],
     facts: ['accounting_method', 'vat_period', 'vat_method', 'fiscal_year', 'bank_connection', 'monthly_cost_baseline'],
     agreements: true,
+    areas: ['lopande', 'moms'],
   },
   'quarterly-vat-review': {
     knowledge: [VAT, COMPLIANCE],
@@ -73,6 +84,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['skatteverket'],
     facts: ['vat_registered', 'vat_period', 'vat_method', 'accounting_method', 'f_skatt', 'sni_codes'],
     agreements: false,
+    areas: ['moms'],
   },
   'payroll-monthly': {
     knowledge: ['horizontal/swedish-payroll'],
@@ -80,6 +92,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['skatteverket', 'bank'],
     facts: ['employer_registered', 'employee_count', 'employee_range_registry', 'monthly_salary_cost', 'beneficial_owners'],
     agreements: false,
+    areas: ['lon'],
   },
   'invoicing-rules': {
     knowledge: [INVOICE, VAT],
@@ -88,6 +101,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: [],
     facts: ['legal_name', 'org_number', 'registered_office', 'f_skatt', 'vat_registered', 'sni_codes'],
     agreements: false,
+    areas: ['fakturering'],
   },
   'kreditfaktura-process': {
     knowledge: [INVOICE, VAT],
@@ -95,6 +109,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: [],
     facts: ['vat_registered', 'accounting_method'],
     agreements: false,
+    areas: ['fakturering'],
   },
   'year-end-close': {
     knowledge: [YEAR_END, 'horizontal/swedish-asset-accounting', 'horizontal/swedish-financial-reporting'],
@@ -105,6 +120,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: ['skatteverket'],
     facts: ['fiscal_year', 'accounting_method', 'share_capital', 'share_count', 'board', 'signatories_rule', 'auditor', 'loan_balance', 'revenue_12m', 'employee_range_registry'],
     agreements: true,
+    areas: ['bokslut'],
   },
   'tax-planning': {
     knowledge: ['horizontal/swedish-tax-planning', YEAR_END],
@@ -113,6 +129,7 @@ export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
     connections: [],
     facts: ['fiscal_year', 'share_capital', 'share_count', 'beneficial_owners', 'board', 'revenue_12m', 'monthly_salary_cost', 'loan_balance'],
     agreements: true,
+    areas: ['bokslut'],
   },
 }
 

@@ -50,6 +50,9 @@ export function communityClosingInstruction(slug: string): string {
   return `This is a community item shared by another company. When the work is done, ask the user "Fungerade det?" (did it work for you?). On a yes, call gnubok_feedback with skill_slug "${slug}", upvote true, context = what the user said. On a no or no answer, record nothing. Ask once.`
 }
 
+/** Added after the knowledge rule only when the company has sections for this workflow. */
+export const INDUSTRY_SECTIONS_INSTRUCTION = '`industry_sections` is "Er bransch, för det här arbetsflödet": the parts of this company\'s industry and company-form knowledge that concern this workflow, already included. Read them before `references`; they are more specific to this company than `knowledge`, which still holds where they are silent. The rest of each pack in `company` stays loadable with load_skill.'
+
 // Compact wire schema: TaskRequestSchema above validates everything, and the
 // handoff prompt passes scope verbatim, so listing its fields here would only
 // spend the default tools/list budget.
@@ -93,8 +96,13 @@ async function getAgentTask(id: string, scope: z.infer<typeof TaskScopeSchema>, 
     kind: `agent:${id}`,
     goal: `Run the ${bundle.agent.name} agent for this company. Clarify the objective before making changes.`,
     scope,
-    skills: [bundle.workflow.slug, ...bundle.knowledge.map((k) => k.id)],
-    instructions: [...AGENT_INSTRUCTIONS, ...ACCOUNTING_TASK_INSTRUCTIONS],
+    skills: [bundle.workflow.slug, ...bundle.knowledge.map((k) => k.id), ...bundle.industry_sections.map((s) => s.id)],
+    instructions: [
+      ...AGENT_INSTRUCTIONS.slice(0, 2),
+      ...(bundle.industry_sections.length > 0 ? [INDUSTRY_SECTIONS_INSTRUCTION] : []),
+      ...AGENT_INSTRUCTIONS.slice(2),
+      ...ACCOUNTING_TASK_INSTRUCTIONS,
+    ],
     ...bundle,
   }
 }

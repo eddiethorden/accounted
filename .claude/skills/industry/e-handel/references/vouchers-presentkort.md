@@ -1,3 +1,7 @@
+---
+areas: [moms]
+---
+
 # Vouchers och presentkort: SPV vs MPV
 
 ## Lagstöd

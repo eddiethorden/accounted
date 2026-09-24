@@ -1,3 +1,7 @@
+---
+areas: [fakturering]
+---
+
 # ROT-fakturering enligt fakturamodellen: flöde och kontering
 
 ## Regelverk

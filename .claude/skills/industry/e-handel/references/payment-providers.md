@@ -1,3 +1,7 @@
+---
+areas: [lopande]
+---
+
 # Payment Provider: bokföringsmappning per aktör
 
 Per provider: jurisdiktion, reverse charge-status, faktureringsmodell, payout-cykel, BAS-konton, fee-struktur.
