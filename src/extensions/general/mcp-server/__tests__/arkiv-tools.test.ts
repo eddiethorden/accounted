@@ -24,6 +24,7 @@ const JE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 beforeEach(() => {
   reset()
   rpc.mockClear()
+  ;(ensureDocumentRead as ReturnType<typeof vi.fn>).mockClear()
   process.env.ARKIV_BRAIN_COMPANY_IDS = CO
 })
 
