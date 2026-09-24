@@ -173,12 +173,14 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
         <section className={styles.stage} aria-label={name}>
           <StrataField seed={seedOf(agentId)} ground={`hsl(${hue} 52% 88%)`} bar={`hsl(${hue} 40% 42%)`} strength={2.2} />
           <div className={styles.stageTile}>
-            <FlowSymbol hue={hue} size={96} lively />
+            <FlowSymbol hue={hue} size={96} />
             <b data-ph-mask={own ? '' : undefined}>{name}</b>
             {task && <small>{task}</small>}
           </div>
           <div className={styles.stageFoot}>
-            <Button size="lg" className="gap-2" onClick={run}>
+            <Button size="lg" className="gap-2 pl-3.5" onClick={run}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={18} height={18} className={styles.clientLogo} />
               {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
               <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Button>

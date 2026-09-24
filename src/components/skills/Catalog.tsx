@@ -4,8 +4,10 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
-import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
+import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Check, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
+import type { AgentConnectionState, AgentsOverview } from '@/lib/agent-skills/agent-bundle'
+import type { RegistrySkillId } from '@/lib/agent-skills/registry'
+import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import { Button } from '@/components/ui/button'
@@ -17,10 +19,12 @@ import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
 import { ConnectionMark, SourceMarks } from './ConnectionMark'
+import { copyPromptAndOpen } from './run'
+import type { Presence } from './hues'
 import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
-import { agentSegment, communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
+import { agentSegment, agentStatus, communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
 const KINDS: ItemKind[] = ['workflow', 'rules', 'analysis']
@@ -65,6 +69,8 @@ interface Item {
   usedByFlows?: number
   /** A longer description for the featured slot. */
   lede?: string
+  /** Set only when a connection the flow needs is missing. */
+  status?: { presence: Presence; text: string }
   /** What a flow works with, as the small marks on its card. */
   connections?: readonly AgentConnection[]
 }
@@ -76,7 +82,7 @@ interface Item {
  * categories (industries and company forms) with counts; a category or a
  * search shows the full list. Egna is what the company made or uses.
  */
-export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, clientName, canWrite, onCreate, gate }: {
+export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, client, aiReady, canWrite, onCreate, gate }: {
   hrefBase: string
   catalog: SkillSummary[]
   options: KnowledgeOption[]
@@ -84,13 +90,16 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   usage: SkillUsage | undefined
   own: SkillSummary[]
   companyIndustry: string | null
-  clientName: string
+  /** The AI the company works in; `aiReady` is true once it is connected. */
+  client: AiClient
+  aiReady: boolean
   canWrite: boolean
   onCreate: () => void
   /** Shown in the featured slot while no AI is connected. */
   gate: ReactNode
 }) {
   const t = useTranslations('skills_registry')
+  const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
   const knowledgeName = useKnowledgeName()
   const knowledgeDesc = useKnowledgeDesc()
   const router = useRouter()
@@ -125,6 +134,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const flows: Item[] = SHOWN_FLOWS.map((id) => ({ id })).map((s) => ({
     key: s.id, kind: 'workflow', title: t(`skills.${s.id}.name`), desc: t(`skills.${s.id}.short`), href: `${hrefBase}/${agentSegment(s.id)}`,
     source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0, connections: AGENTS[s.id].connections, lede: t(`skills.${s.id}.desc`),
+    status: agentStatus({ id: s.id, aiKnown: true, overview, waiting: undefined, lastAt: undefined, t: (key, values) => t(key, values), formatDate: (iso) => iso }),
   }))
   const packs: Item[] = options.filter((o) => o.tier !== 'community').map((o) => ({
     key: o.id, kind: 'rules', title: knowledgeName(o.id, o.title), desc: knowledgeDesc(o.id, o.summary), href: `${hrefBase}/${rulesSegment(o.id)}`,
@@ -228,7 +238,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
 
       {view === 'discover' && !listing && (
         <>
-          {gate ?? (featured && <Featured item={featured} industry={featured.categories.includes(companyIndustry ?? '')} />)}
+          {gate ?? (featured && <Featured item={featured} industry={featured.categories.includes(companyIndustry ?? '')} client={client} aiReady={aiReady} overview={overview} />)}
 
           <section className={styles.catSection}>
             <div className={styles.catHead}>
@@ -289,16 +299,25 @@ function CatalogCard({ item }: { item: Item }) {
         hue={hue}
         masked={item.source === 'own'}
         marks={item.connections && item.connections.length > 0 ? <SourceMarks connections={item.connections} /> : undefined}
+        status={item.status}
         foot={foot}
       />
     </li>
   )
 }
 
-/** The featured slot at the top of Upptäck, as Claude's "From Anthropic" banner. */
-function Featured({ item, industry }: { item: Item; industry: boolean }) {
+/** The featured slot at the top of Upptäck, as Claude's "From Anthropic" banner. A flow starts right here in the company's AI. */
+function Featured({ item, industry, client, aiReady, overview }: { item: Item; industry: boolean; client: AiClient; aiReady: boolean; overview: AgentsOverview | null | undefined }) {
   const t = useTranslations('skills_registry')
+  const [ran, setRan] = useState(false)
   const hue = itemHue(item.kind, item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
+  const ai = AI_CLIENTS.find((c) => c.id === client)!
+  const runnable = item.kind === 'workflow' && item.source === 'accounted' && aiReady
+  const states = overview?.agents.find((a) => a.id === item.key)?.connections ?? []
+  function run() {
+    const id = item.key as RegistrySkillId
+    void copyPromptAndOpen(t('prompt', { say: t(`skills.${id}.say`), agent: id, client }), client, true).then(() => setRan(true))
+  }
   return (
     <section className={styles.featured} style={{ background: `hsl(${hue} 32% 90%)` }}>
       <div className={styles.featuredText}>
@@ -307,15 +326,39 @@ function Featured({ item, industry }: { item: Item; industry: boolean }) {
         <p>{item.lede ?? item.desc}</p>
         {item.connections && item.connections.length > 0 && (
           <div className={styles.featuredUses}>
-            <span>{t('featured_uses')}</span>
-            {item.connections.map((c) => (
-              <span key={c} className={styles.featuredChip}><span className={styles.appchip}><ConnectionMark kind={c} /></span>{t(`conn_${c}`)}</span>
-            ))}
+            {item.connections.map((c) => <ConnectionBadge key={c} kind={c} state={states.find((s) => s.kind === c)} clientName={ai.name} />)}
           </div>
         )}
-        <div><Button asChild size="sm"><Link href={item.href}>{t('open_hint')}</Link></Button></div>
+        <div className={styles.featuredActions}>
+          {runnable ? (
+            <Button size="sm" className="gap-2 pl-2.5" onClick={run}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={ai.logo} alt="" width={16} height={16} className={styles.clientLogo} />
+              {t('run_agent', { client: ai.name })}
+            </Button>
+          ) : null}
+          <Button asChild size="sm" variant={runnable ? 'outline' : 'default'}><Link href={item.href}>{t('open_hint')}</Link></Button>
+          {ran && <span className={styles.featuredNote} role="status">{t('prefilled_open', { client: ai.name })}</span>}
+        </div>
       </div>
       <span className={styles.featuredArt}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={120} open /></span>
     </section>
   )
+}
+
+/**
+ * One connection as its logo, saying where it stands: an Accounted connection
+ * is connected or links to where it is set up; mail and browser live in the
+ * company's AI, which Accounted cannot see.
+ */
+function ConnectionBadge({ kind, state, clientName }: { kind: AgentConnection; state: AgentConnectionState | undefined; clientName: string }) {
+  const t = useTranslations('skills_registry')
+  const status = state?.status ?? 'in_ai'
+  const label = status === 'in_ai' ? t('badge_in_ai', { conn: t(`conn_${kind}`), client: clientName })
+    : status === 'connected' ? t('badge_connected', { conn: t(`conn_${kind}`) })
+    : status === 'missing' ? t('badge_missing', { conn: t(`conn_${kind}`) }) : t(`conn_${kind}`)
+  const inner = <><span className={styles.appchip}><ConnectionMark kind={kind} /></span>{status === 'missing' && <small>{t('conn_missing')}</small>}{status === 'connected' && <Check className="h-3 w-3" aria-hidden />}</>
+  return status === 'missing' && state?.settings_href
+    ? <Link href={state.settings_href} className={styles.connBadge} data-status={status} title={label} aria-label={label}>{inner}</Link>
+    : <span className={styles.connBadge} data-status={status} title={label} aria-label={label} role="img">{inner}</span>
 }

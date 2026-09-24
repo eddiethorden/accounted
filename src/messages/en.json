@@ -10630,7 +10630,9 @@
     "knowledge_group_modifier": "Company set-up",
     "knowledge_group_community": "Community",
     "knowledge_picker_done": "Done",
-    "featured_uses": "Uses",
+    "badge_in_ai": "{conn} in {client}",
+    "badge_connected": "{conn} connected",
+    "badge_missing": "{conn} missing: connect",
     "category_names": {
       "bygg-hantverk": "Construction & trades",
       "e-handel": "E-commerce",
