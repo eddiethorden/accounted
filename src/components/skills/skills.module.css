@@ -788,12 +788,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 :is(.acard, .stage, .featured, .giveCard, .kindsIntro):hover .fs2 { animation: flow-lift-2 2.4s var(--ease-out) infinite; }
 :is(.acard, .stage, .featured, .giveCard, .kindsIntro):hover .fs3 { animation: flow-lift-3 2.4s var(--ease-out) infinite; }
 @media (prefers-reduced-motion: reduce) { .flowTilt { transition: none; } .flowDot, .flowStep { animation: none !important; } }
-.featuredUses { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.connBadge { display: inline-flex; align-items: center; gap: 5px; height: 32px; min-width: 32px; padding: 0 9px; border-radius: 9999px; background: hsl(var(--background) / 0.9); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); color: hsl(var(--foreground)); font-size: 12px; text-decoration: none; }
-.connBadge .appchip, .connBadge .appchip img, .connBadge .appchip svg { width: 18px; height: 18px; }
-.connBadge[data-status='connected'] svg:last-child { color: hsl(var(--success)); }
-.connBadge[data-status='missing'] { border: 1px dashed hsl(var(--warning)); background: hsl(var(--background) / 0.6); }
-.connBadge[data-status='missing'] small { color: hsl(var(--warning)); font-size: 12px; }
 .featuredActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .featuredText > div.featuredActions { margin-top: 10px; }
 .featuredNote { font-size: 12.5px; color: hsl(var(--foreground) / 0.65); }
@@ -810,8 +804,11 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .featuredLink:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .featuredText, .featuredArt { position: relative; z-index: 1; pointer-events: none; }
 .featuredText a, .featuredText button { pointer-events: auto; }
-.startBtn { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 5px; border: 0; border-radius: 9999px; background: hsl(var(--foreground)); color: hsl(var(--background)); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
-.startBtn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.35); }
-.startBtn:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
-.startLogo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9999px; background: #fff; }
-.startLogo img { width: 18px; height: 18px; object-fit: contain; }
+
+.btnLogo { width: 16px; height: 16px; object-fit: contain; border-radius: 4px; }
+.featuredUses { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+.connBadge { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; border-radius: 8px; color: hsl(var(--foreground)); font-size: 12px; text-decoration: none; }
+.connBadge .appchip, .connBadge .appchip img, .connBadge .appchip svg { width: 18px; height: 18px; }
+.connBadge[data-status='connected'] svg:last-child { color: hsl(var(--success)); }
+.connBadge[data-status='missing'] { border: 1px dashed hsl(var(--warning)); }
+.connBadge[data-status='missing'] small { color: hsl(var(--warning)); font-size: 12px; }
