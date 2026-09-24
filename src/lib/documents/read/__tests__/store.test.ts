@@ -28,7 +28,6 @@ function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<
       return api
     }
     api.is = () => api
-    api.or = (f: string) => { state.filters.or = f; return api }
     api.in = (k: string, v: unknown) => {
       state.filters[k] = v
       if (k === 'read_error') state.op = 'select-retry'
@@ -44,7 +43,13 @@ function makeSupabase(unread: Array<Record<string, unknown>> = [], retry: Array<
     }
     return api
   }
-  return { supabase: { from: (t: string) => chain(t) } as never, calls }
+  // The unread batch; other rpcs (the usage meter) answer empty and are not recorded.
+  const rpc = (fn: string, args: { p_limit?: number }) => {
+    if (fn !== 'document_backfill_candidates') return Promise.resolve({ data: null, error: null })
+    calls.push({ table: `rpc:${fn}`, op: 'rpc', filters: { ...args } })
+    return Promise.resolve({ data: unread.slice(0, args.p_limit), error: null })
+  }
+  return { supabase: { from: (t: string) => chain(t), rpc } as never, calls }
 }
 
 const doc = { id: 'doc-1', company_id: 'co-1', storage_path: 'documents/co-1/u/1_a.pdf', mime_type: 'application/pdf' }
@@ -165,9 +170,9 @@ describe('readUnreadDocuments', () => {
   it('never asks for rollout rows: nobody goes first now that the shelf is on for everyone', async () => {
     const { supabase, calls } = makeSupabase([{ ...doc, mime_type: 'application/xml' }])
     expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 1, read: 0, skipped: 1, errors: 0 })
-    const ops = calls.filter((c) => c.op.startsWith('select')).map((c) => c.op)
+    const ops = calls.filter((c) => c.op.startsWith('select') || c.op === 'rpc').map((c) => c.op)
     expect(ops).not.toContain('select-rollout')
-    expect(ops.at(-1)).toBe('select')
+    expect(ops.at(-1)).toBe('rpc')
   })
 
   it('stops between documents once the time budget is spent', async () => {
@@ -182,9 +187,8 @@ describe('readUnreadDocuments', () => {
     asMock(readDocumentBytes).mockResolvedValue({ ok: true, reader: 'office', pageCount: 1, pages: [{ pageNo: 1, text: 't', reader: 'office', hasTextLayer: true }] })
     const { supabase, calls } = makeSupabase([doc, { ...doc, id: 'doc-2', mime_type: 'application/xml' }])
     expect(await readUnreadDocuments(supabase, 10)).toEqual({ processed: 2, read: 1, skipped: 1, errors: 0 })
-    // Bank responses are asked away in the query: newest first, they had filled every batch.
-    const unreadSelect = calls.find((c) => c.op === 'select' && c.table === 'document_attachments')
-    expect(unreadSelect?.filters.or).toContain('application/json')
+    // The unread batch comes from the one function that knows which rows the stamp can land on.
+    expect(calls.find((c) => c.op === 'rpc')).toMatchObject({ table: 'rpc:document_backfill_candidates', filters: { p_limit: 10 } })
   })
 
   it('stops the batch at the first document the missing reader fails, leaving the rest unread', async () => {

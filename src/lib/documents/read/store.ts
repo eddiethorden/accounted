@@ -7,7 +7,7 @@ import { createLogger } from '@/lib/logger'
 import { recordArkivUsage } from '@/lib/arkiv/usage'
 import { readDocumentBytes } from './router'
 import { historyReaderTier, readLaneFor, readPlanFor, isActingType, type ReadPlan } from './lanes'
-import { NOT_STRUCTURED_MIME_FILTER, READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
+import { READER_UNAVAILABLE, ReaderUnavailableError, readerForMime, type ReadOutcome } from './types'
 
 const log = createLogger('documents/read')
 
@@ -236,14 +236,10 @@ export async function readUnreadDocuments(
   }
 
   if (spentTime()) return counts
-  const { data, error } = await supabase
-    .from('document_attachments')
-    .select('id, company_id, storage_path, mime_type, created_at, journal_entry_id, journal_entry_line_id, doc_type, pages_read_at, read_error')
-    .is('pages_read_at', null)
-    // A bank response is the record itself and is never read; newest first, they filled every batch (prod 2026-09-24: 28 000 queued, backlog reads down to 3 a day).
-    .or(NOT_STRUCTURED_MIME_FILTER)
-    .order('created_at', { ascending: false })
-    .limit(limit - counts.processed)
+  // Only documents the stamp can land on: a bank response is never read, and a row on a locked period or an
+  // archived reset source refuses the update, so it stayed the newest unread and was read again every run
+  // (prod 2026-09-24: backlog reads down to 3 a day). Those are read when someone opens them.
+  const { data, error } = await supabase.rpc('document_backfill_candidates', { p_limit: limit - counts.processed })
   if (error) throw new Error(`fetch unread documents failed: ${error.message}`)
   await walkByPlan((data ?? []) as ReadableDocumentRow[])
   return counts
