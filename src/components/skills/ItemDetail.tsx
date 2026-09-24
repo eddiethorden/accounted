@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { ArrowLeft, Check, ChevronUp, Plus, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { ArrowLeft, Check, ChevronUp, Plus } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { AGENTS } from '@/lib/agent-skills/agents'
@@ -150,7 +150,6 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                       )}
                     </Row>
                   )}
-                  {item.community && <Works meta={item.community} slug={item.key} />}
                 </div>
                 <Field label={t('field_contents')} note={t('contents_note')}>
                   <div className={styles.mdBody} data-ph-mask={item.community ? '' : undefined}>
@@ -197,7 +196,7 @@ function GiveCard({ name, task, hue, has, note, disabled, onToggle }: { name: st
   )
 }
 
-async function sendFeedback(payload: { slug: string; vote?: boolean; feedback?: 'works' | 'not_works' | null }): Promise<boolean> {
+async function sendFeedback(payload: { slug: string; vote: boolean }): Promise<boolean> {
   try {
     const response = await fetch('/api/agents/community/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     return response.ok
@@ -222,24 +221,3 @@ function Vote({ meta, slug }: { meta: CommunityMeta; slug: string }) {
   )
 }
 
-/** "Fungerar det?": the answer that tells the next company whether to trust it, and the author that it helped. */
-function Works({ meta, slug }: { meta: CommunityMeta; slug: string }) {
-  const t = useTranslations('skills_registry')
-  const [mine, setMine] = useState(meta.feedback)
-  const works = meta.works - (meta.feedback === 'works' ? 1 : 0) + (mine === 'works' ? 1 : 0)
-  const notWorks = meta.not_works - (meta.feedback === 'not_works' ? 1 : 0) + (mine === 'not_works' ? 1 : 0)
-  function choose(answer: 'works' | 'not_works') {
-    const next = mine === answer ? null : answer
-    const before = mine
-    setMine(next)
-    void sendFeedback({ slug, feedback: next }).then((ok) => { if (!ok) setMine(before) })
-  }
-  return (
-    <Row label={t('row_works')}>
-      <span className={styles.worksPair}>
-        <Button variant={mine === 'works' ? 'default' : 'outline'} size="sm" className="gap-1.5" aria-pressed={mine === 'works'} onClick={() => choose('works')}><ThumbsUp className="h-3.5 w-3.5" aria-hidden />{t('works')} <span className={styles.voteCount}>{works}</span></Button>
-        <Button variant={mine === 'not_works' ? 'default' : 'outline'} size="sm" className="gap-1.5" aria-pressed={mine === 'not_works'} onClick={() => choose('not_works')}><ThumbsDown className="h-3.5 w-3.5" aria-hidden />{t('not_works')} <span className={styles.voteCount}>{notWorks}</span></Button>
-      </span>
-    </Row>
-  )
-}

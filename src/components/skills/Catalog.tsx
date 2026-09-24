@@ -14,6 +14,10 @@ import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ItemSymbol } from './ItemSymbol'
+import { AgentCard } from './AgentCard'
+import { CommunityFoot } from './KindViews'
+import { SourceMarks } from './ConnectionMark'
+import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
 import { itemHue, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { agentSegment, communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
@@ -51,6 +55,8 @@ interface Item {
   categories: string[]
   popularity: number
   usedByFlows?: number
+  /** What a flow works with, as the small marks on its card. */
+  connections?: readonly AgentConnection[]
 }
 
 /**
@@ -108,7 +114,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   })
   const flows: Item[] = REGISTRY_SKILLS.map((s) => ({
     key: s.id, kind: 'workflow', title: t(`skills.${s.id}.name`), desc: t(`skills.${s.id}.short`), href: `${hrefBase}/${agentSegment(s.id)}`,
-    source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0,
+    source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0, connections: AGENTS[s.id].connections,
   }))
   const packs: Item[] = options.filter((o) => o.tier !== 'community').map((o) => ({
     key: o.id, kind: 'rules', title: knowledgeName(o.id, o.title), desc: knowledgeDesc(o.id, o.summary), href: `${hrefBase}/${rulesSegment(o.id)}`,
@@ -190,7 +196,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           <div className={styles.catHead}><h2>{t(`own_${kind}_title`)}</h2></div>
           {listed.length === 0
             ? <div className={styles.placeEmpty}>{t(`own_${kind}_empty`, { client: clientName })}</div>
-            : <ul className={styles.catGrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+            : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
       )}
 
@@ -202,7 +208,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           </div>
           {listed.length === 0
             ? <div className={styles.placeEmpty}>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</div>
-            : <ul className={styles.catGrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+            : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
       )}
 
@@ -215,7 +221,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
               <h2>{t(`most_used_${kind}`)}</h2>
               {ofKind.length > TOP && <button type="button" className={styles.catLink} onClick={() => setShowAll(true)}>{t('show_all')}<ArrowRight className="h-4 w-4" aria-hidden /></button>}
             </div>
-            {top.length === 0 ? <div className={styles.placeEmpty}>{t(`community_empty_${kind}`)}</div> : <ul className={styles.catGrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+            {top.length === 0 ? <div className={styles.placeEmpty}>{t(`community_empty_${kind}`)}</div> : <ul className={styles.agrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
           </section>
 
           {categories.length > 0 && (
@@ -251,28 +257,26 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   )
 }
 
-/** One item in the catalogue: its picture on a tile, name, what it does, and who stands behind it. */
+/** One item in the catalogue, in the page's own card: tinted panel, its picture on a tile, and a foot. */
 function CatalogCard({ item }: { item: Item }) {
   const t = useTranslations('skills_registry')
-  const meta = item.meta
-  const rated = meta ? meta.works + meta.not_works : 0
-  const by = item.source === 'community' && meta ? `@${meta.author}` : item.source === 'own' ? t('source_own') : 'Accounted'
-  const facts = [
-    t('by', { who: by }),
-    meta && meta.used_by ? t('used_by_companies', { count: meta.used_by }) : null,
-    meta && rated > 0 ? t('works_share', { pct: Math.round((meta.works / rated) * 100) }) : null,
-    item.usedByFlows ? t('used_by', { count: item.usedByFlows }) : null,
-  ].filter(Boolean).join(' · ')
+  const hue = itemHue(item.kind, item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)
+  const foot = item.meta ? <CommunityFoot meta={item.meta} />
+    : item.usedByFlows ? <span className={styles.metaLine}>{t('used_by', { count: item.usedByFlows })}</span>
+    : undefined
   return (
     <li>
-      <Link href={item.href} className={styles.ccard}>
-        <span className={styles.ccIcon}><ItemSymbol kind={item.kind} hue={itemHue(item.kind, item.key, item.source === 'accounted' && item.kind === 'workflow' ? item.key as never : null)} seedKey={item.key} size={40} /></span>
-        <span className={styles.ccText}>
-          <b data-ph-mask={item.source === 'own' ? '' : undefined}>{item.title}{meta?.author_verified && <span className={styles.verified} title={t('author_verified')}>✓</span>}</b>
-          <span className={styles.ccDesc} data-ph-mask={item.source === 'own' ? '' : undefined}>{item.desc}</span>
-          <small>{facts}{meta && <> · <span className={styles.voteMini}><ChevronUp className="h-3 w-3" aria-hidden />{meta.votes}</span></>}</small>
-        </span>
-      </Link>
+      <AgentCard
+        href={item.href}
+        title={item.title}
+        desc={item.desc}
+        kind={item.kind}
+        symbolKey={item.key}
+        hue={hue}
+        masked={item.source === 'own'}
+        marks={item.connections && item.connections.length > 0 ? <SourceMarks connections={item.connections} /> : undefined}
+        foot={foot}
+      />
     </li>
   )
 }
