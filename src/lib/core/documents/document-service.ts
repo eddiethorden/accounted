@@ -231,7 +231,7 @@ export const ALLOWED_DOCUMENT_TYPES = [
   ...OFFICE_DOCUMENT_TYPES,
 ]
 
-/** What a browser leaves blank: Chrome reports no type for a HEIC picked or dropped on a Mac. */
+/** What a browser leaves blank or generic: a HEIC arrives with no type or as application/octet-stream (prod, 2026-09-24). */
 const EXTENSION_TYPES: Record<string, string> = {
   pdf: 'application/pdf',
   jpg: 'image/jpeg',
@@ -242,11 +242,11 @@ const EXTENSION_TYPES: Record<string, string> = {
   heif: 'image/heif',
 }
 
-/** The declared type, or the one the file extension implies when the browser declared none. */
+/** The declared type, or the one the file extension implies when the browser declared none or only the generic one. */
 export function declaredDocumentType(file: { name?: string | null; type?: string | null }): string {
-  if (file.type) return file.type
+  if (file.type && file.type !== 'application/octet-stream') return file.type
   const ext = (file.name ?? '').toLowerCase().split('.').pop() ?? ''
-  return EXTENSION_TYPES[ext] ?? ''
+  return EXTENSION_TYPES[ext] ?? file.type ?? ''
 }
 
 /**

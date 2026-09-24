@@ -210,6 +210,9 @@ describe('receipt image upload metadata', () => {
     expect(declaredDocumentType({ name: 'kvitto.pdf', type: undefined })).toBe('application/pdf')
     expect(declaredDocumentType({ name: 'kvitto.pdf', type: 'image/jpeg' })).toBe('image/jpeg')
     expect(declaredDocumentType({ name: 'okänd.xyz', type: '' })).toBe('')
+    // The generic type a browser sends for a file it does not know is no declaration either.
+    expect(declaredDocumentType({ name: 'IMG_7484.heic', type: 'application/octet-stream' })).toBe('image/heic')
+    expect(declaredDocumentType({ name: 'okänd.xyz', type: 'application/octet-stream' })).toBe('application/octet-stream')
     expect(declaredDocumentType({ name: null, type: '' })).toBe('')
   })
 
