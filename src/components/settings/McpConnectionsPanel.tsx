@@ -2,7 +2,7 @@
 
 import { useLocale, useTranslations } from 'next-intl'
 import { useState, useSyncExternalStore } from 'react'
-import { ArrowUpRight, Code2, KeyRound, Loader2, Plug, Terminal } from 'lucide-react'
+import { ArrowUpRight, KeyRound, Loader2, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { AttnLine } from '@/components/ui/attn-line'
@@ -37,18 +37,40 @@ const LOGO: Partial<Record<ConnectionKind | ConnectTarget, string>> = {
   'claude-code': AI_CLIENTS.find((c) => c.id === 'claude')?.logo,
 }
 
+/**
+ * Single-colour brand marks drawn in currentColor, so they follow the theme
+ * (a black <img> would vanish in dark mode). Path data from simple-icons
+ * 16.32.0, CC0-1.0: Cursor's mark, and the Model Context Protocol mark for a
+ * generic MCP client.
+ */
+function CursorMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23" />
+    </svg>
+  )
+}
+
+function McpMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M13.85 0a4.16 4.16 0 0 0-2.95 1.217L1.456 10.66a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l9.442-9.442a2.49 2.49 0 0 1 3.541 0 2.49 2.49 0 0 1 0 3.541L8.59 12.97l-.1.1a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l.1-.098 7.03-7.034a2.49 2.49 0 0 1 3.542 0l.049.05a2.49 2.49 0 0 1 0 3.54l-8.54 8.54a1.96 1.96 0 0 0 0 2.755l1.753 1.753a.835.835 0 0 0 1.18 0 .835.835 0 0 0 0-1.18l-1.753-1.753a.266.266 0 0 1 0-.394l8.54-8.54a4.185 4.185 0 0 0 0-5.9l-.05-.05a4.16 4.16 0 0 0-2.95-1.218c-.2 0-.401.02-.6.048a4.17 4.17 0 0 0-1.17-3.552A4.16 4.16 0 0 0 13.85 0m0 3.333a.84.84 0 0 0-.59.245L6.275 10.56a4.186 4.186 0 0 0 0 5.902 4.186 4.186 0 0 0 5.902 0L19.16 9.48a.835.835 0 0 0 0-1.18.835.835 0 0 0-1.18 0l-6.985 6.984a2.49 2.49 0 0 1-3.54 0 2.49 2.49 0 0 1 0-3.54l6.983-6.985a.835.835 0 0 0 0-1.18.84.84 0 0 0-.59-.245" />
+    </svg>
+  )
+}
+
 const ICON = {
   local: Terminal,
-  cursor: Code2,
-  mcp: Plug,
-  other: Plug,
+  cursor: CursorMark,
+  mcp: McpMark,
+  other: McpMark,
   key: KeyRound,
 } as const
 
 /** A client's mark in a round well: the logo where we ship one, else a Lucide glyph. */
 function ClientMark({ kind, size = 'md' }: { kind: ConnectionKind | ConnectTarget; size?: 'md' | 'lg' }) {
   const logo = LOGO[kind]
-  const Icon = ICON[kind as keyof typeof ICON] ?? Plug
+  const Icon = ICON[kind as keyof typeof ICON] ?? McpMark
   return (
     <span
       aria-hidden
@@ -61,7 +83,7 @@ function ClientMark({ kind, size = 'md' }: { kind: ConnectionKind | ConnectTarge
         // eslint-disable-next-line @next/next/no-img-element
         <img src={logo} alt="" className={size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
       ) : (
-        <Icon className={cn('text-muted-foreground', size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5')} />
+        <Icon className={cn(kind === 'local' || kind === 'key' ? 'text-muted-foreground' : 'text-foreground', size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5')} />
       )}
     </span>
   )
