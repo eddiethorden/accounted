@@ -41,14 +41,16 @@ export const MAX_PARTIES = 20
 const fold = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('sv')
 const dated = (d: ConnectionDocument) => d.document_date ?? d.created_at.slice(0, 10)
 
-export function buildConnections(rows: readonly ConnectionDocument[], opts: { max?: number; filter?: string } = {}): Connections {
+export function buildConnections(rows: readonly ConnectionDocument[], opts: { max?: number; filter?: string; exclude?: string | null } = {}): Connections {
   const max = opts.max ?? MAX_PARTIES
   const filter = opts.filter ? fold(opts.filter) : ''
+  // The company's own name (its customer invoices name it as the issuer) is the middle of the picture, never a counterparty.
+  const exclude = opts.exclude ? fold(opts.exclude) : ''
   const byId = new Map<string, PartyNode>()
   let unattached = 0
   for (const row of rows) {
     const name = row.counterparty?.trim().replace(/\s+/g, ' ')
-    if (!name) {
+    if (!name || (exclude && fold(name) === exclude)) {
       unattached += 1
       continue
     }
@@ -100,6 +102,14 @@ export interface ConnectionLayout {
 /** A counterparty with at most this many documents gets them drawn as nodes of their own. */
 export const DOCUMENT_NODES_MAX = 2
 
+/** The routine kinds: a merchant's two receipts are a count on the edge, an agreement or a decision is a node of its own. */
+const ROUTINE_TYPES = new Set(['receipt', 'supplier_invoice', 'credit_note', 'customer_invoice', 'bank_statement', 'tax_account_statement'])
+
+/** Whether a counterparty's documents are drawn as nodes: few of them, and at least one that is not routine. */
+export function drawsDocuments(party: PartyNode): boolean {
+  return party.count <= DOCUMENT_NODES_MAX && party.documents.some((d) => !d.doc_type || !ROUTINE_TYPES.has(d.doc_type))
+}
+
 /**
  * A deterministic radial layout: the counterparties on one ellipse around
  * the company, evenly spaced, the most connected first at twelve o'clock;
@@ -115,7 +125,7 @@ export function layoutConnections(parties: readonly PartyNode[], width = 960, he
     const angle = (i / Math.max(n, 1)) * Math.PI * 2 - Math.PI / 2
     const x = center.x + rx * Math.cos(angle)
     const y = center.y + ry * Math.sin(angle)
-    const docs = party.count <= DOCUMENT_NODES_MAX ? party.documents : []
+    const docs = drawsDocuments(party) ? party.documents : []
     const documents = docs.map((document, j) => {
       const spread = docs.length === 1 ? 0 : (j === 0 ? -0.14 : 0.14)
       const a = angle + spread

@@ -9,7 +9,7 @@ import { ToolbarSearch } from '@/components/ui/toolbar-search'
 import { useCompanyOptional } from '@/contexts/CompanyContext'
 import type { ArkivDocumentRow } from '@/app/api/arkiv/documents/route'
 import { DOC_TYPES } from '@/lib/documents/classify/taxonomy'
-import { buildConnections, layoutConnections, DOCUMENT_NODES_MAX, type ConnectionDocument } from '@/lib/arkiv/connections'
+import { buildConnections, layoutConnections, drawsDocuments, type ConnectionDocument } from '@/lib/arkiv/connections'
 
 /**
  * /arkiv/kopplingar: the company in the middle, the counterparties around
@@ -21,8 +21,10 @@ import { buildConnections, layoutConnections, DOCUMENT_NODES_MAX, type Connectio
 const LIMIT = 500
 const WIDTH = 960
 const HEIGHT = 620
-const COMPANY_R = 34
+const COMPANY_H = 40
 const DOC_R = 7
+/** Geist at 15px runs about 8px per character; the pill is sized from that, never measured. */
+const pillWidth = (label: string) => Math.max(96, Math.round(label.length * 8.2) + 28)
 
 const shortName = (name: string) => {
   const trimmed = name.replace(/\s+(AB|HB|KB|Inc\.?|Ltd\.?)$/i, '').trim()
@@ -67,8 +69,9 @@ export function ArkivConnections() {
       })),
     [rows],
   )
-  const all = useMemo(() => buildConnections(documents), [documents])
-  const connections = useMemo(() => buildConnections(documents, { filter: query.trim() || undefined }), [documents, query])
+  const exclude = company?.name ?? null
+  const all = useMemo(() => buildConnections(documents, { exclude }), [documents, exclude])
+  const connections = useMemo(() => buildConnections(documents, { filter: query.trim() || undefined, exclude }), [documents, query, exclude])
   const layout = useMemo(() => layoutConnections(connections.parties, WIDTH, HEIGHT), [connections])
 
   const typeLabel = (docType: string | null) => (docType && (DOC_TYPES as readonly string[]).includes(docType) ? t(`types.${docType}` as never) : t('type_unknown'))
@@ -123,10 +126,10 @@ export function ArkivConnections() {
                 {p.documents.map((d) => (
                   <line key={`de-${d.document.document_id}`} x1={p.x} y1={p.y} x2={d.x} y2={d.y} className="stroke-border" strokeWidth={1} />
                 ))}
-                {p.party.count > DOCUMENT_NODES_MAX ? (
+                {!drawsDocuments(p.party) ? (
                   <text
-                    x={layout.center.x + (p.x - layout.center.x) * 0.58}
-                    y={layout.center.y + (p.y - layout.center.y) * 0.58 - 4}
+                    x={layout.center.x + (p.x - layout.center.x) * 0.72}
+                    y={layout.center.y + (p.y - layout.center.y) * 0.72 - 4}
                     textAnchor="middle"
                     className="fill-muted-foreground text-[11px]"
                   >
@@ -137,10 +140,18 @@ export function ArkivConnections() {
             ))}
 
             <g>
-              <circle cx={layout.center.x} cy={layout.center.y} r={COMPANY_R} className="fill-secondary stroke-muted-foreground" strokeWidth={1} />
-              <text x={layout.center.x} y={layout.center.y + 5} textAnchor="middle" className="fill-foreground font-display text-[15px]">
-                {shortName(company?.name ?? t('connections_company'))}
-              </text>
+              {(() => {
+                const label = shortName(company?.name ?? t('connections_company'))
+                const w = pillWidth(label)
+                return (
+                  <>
+                    <rect x={layout.center.x - w / 2} y={layout.center.y - COMPANY_H / 2} width={w} height={COMPANY_H} rx={COMPANY_H / 2} className="fill-secondary stroke-muted-foreground" strokeWidth={1} />
+                    <text x={layout.center.x} y={layout.center.y + 5} textAnchor="middle" className="fill-foreground font-display text-[15px]">
+                      {label}
+                    </text>
+                  </>
+                )
+              })()}
             </g>
 
             {layout.placed.map((p) => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildConnections, layoutConnections, type ConnectionDocument } from '../connections'
+import { buildConnections, drawsDocuments, layoutConnections, type ConnectionDocument } from '../connections'
 
 const doc = (over: Partial<ConnectionDocument> & { document_id: string }): ConnectionDocument => ({
   title: over.document_id,
@@ -33,6 +33,17 @@ describe('buildConnections', () => {
     expect(c.parties[1].documents[0].voucher).toBe('A118')
   })
 
+  it('never lists the company itself as a counterparty', () => {
+    const rows = [
+      doc({ document_id: 'a', counterparty: 'Arcim Technology AB', doc_type: 'customer_invoice' }),
+      doc({ document_id: 'b', counterparty: 'arcim technology ab', doc_type: 'customer_invoice' }),
+      doc({ document_id: 'c', counterparty: 'Expisoft AB', doc_type: 'customer_invoice' }),
+    ]
+    const c = buildConnections(rows, { exclude: 'Arcim Technology AB' })
+    expect(c.parties.map((p) => p.name)).toEqual(['Expisoft AB'])
+    expect(c.unattached).toBe(2)
+  })
+
   it('draws at most `max` counterparties, counts the rest, and filters by a name fragment', () => {
     const rows = ['Almi', 'Balzac', 'Bolagsverket', 'Propel', 'Skatteverket'].flatMap((name, i) =>
       Array.from({ length: i + 1 }, (_, j) => doc({ document_id: `${name}-${j}`, counterparty: name })),
@@ -60,9 +71,14 @@ describe('layoutConnections', () => {
     expect(Math.round(systembolaget.x)).toBe(480)
     expect(systembolaget.y).toBeLessThan(310)
     expect(systembolaget.documents).toEqual([])
-    expect(almi.documents).toHaveLength(2)
-    // Both document nodes sit outside the ring, on Almi's side.
-    for (const d of almi.documents) expect(d.y).toBeGreaterThan(almi.y)
+    // Two receipts from a merchant are a count on the edge, not nodes.
+    expect(drawsDocuments(almi.party)).toBe(false)
+    expect(almi.documents).toEqual([])
+    // An agreement gets its own node, and its neighbour on the same counterparty comes along.
+    const withAgreement = layoutConnections(buildConnections([doc({ document_id: 'l', counterparty: 'Almi', doc_type: 'agreement.loan' }), doc({ document_id: 'r', counterparty: 'Almi' })]).parties, 960, 620)
+    expect(withAgreement.placed[0].documents).toHaveLength(2)
+    // Both document nodes sit outside the ring, above Almi at twelve o clock.
+    for (const d of withAgreement.placed[0].documents) expect(d.y).toBeLessThan(withAgreement.placed[0].y)
     // The same archive draws the same picture.
     expect(layoutConnections(buildConnections(rows).parties, 960, 620)).toEqual(layout)
   })
