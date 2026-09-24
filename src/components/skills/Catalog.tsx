@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, ArrowRight, ArrowUpDown, ArrowUpRight, Briefcase, Check, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Check, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
 import type { AgentConnectionState, AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
@@ -326,22 +326,21 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
         <span>{industry ? t('featured_industry') : item.source === 'community' && item.meta ? t('featured_community', { who: `@${item.meta.author}` }) : t('featured_accounted')}</span>
         <h2>{item.title}</h2>
         <p>{item.lede ?? item.desc}</p>
-        {item.connections && item.connections.length > 0 && (
-          <div className={styles.featuredUses}>
-            {item.connections.map((c) => <ConnectionBadge key={c} kind={c} state={states.find((s) => s.kind === c)} clientName={ai.name} />)}
-          </div>
-        )}
-        {runnable && (
-          <div className={styles.featuredActions}>
-            <button type="button" className={styles.startBtn} onClick={run}>
+        <div className={styles.featuredActions}>
+          {runnable && (
+            <Button size="sm" className="gap-2 pl-3" onClick={run}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <span className={styles.startLogo}><img src={ai.logo} alt="" width={16} height={16} /></span>
+              <img src={ai.logo} alt="" width={14} height={14} className={styles.btnLogo} />
               {t('run_agent', { client: ai.name })}
-              <ArrowUpRight className="h-4 w-4" aria-hidden />
-            </button>
-            {ran && <span className={styles.featuredNote} role="status">{t('prefilled_open', { client: ai.name })}</span>}
-          </div>
-        )}
+            </Button>
+          )}
+          {item.connections && item.connections.length > 0 && (
+            <span className={styles.featuredUses}>
+              {item.connections.map((c) => <ConnectionBadge key={c} kind={c} state={states.find((s) => s.kind === c)} clientName={ai.name} />)}
+            </span>
+          )}
+          {ran && <span className={styles.featuredNote} role="status">{t('prefilled_open', { client: ai.name })}</span>}
+        </div>
       </div>
       <span className={styles.featuredArt}><ItemSymbol kind={item.kind} hue={hue} seedKey={item.key} size={120} open /></span>
     </section>

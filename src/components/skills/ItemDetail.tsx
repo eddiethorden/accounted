@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { ArrowLeft, Check, ChevronUp, Plus } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronUp, Plus } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { AGENTS } from '@/lib/agent-skills/agents'
@@ -13,6 +13,9 @@ import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { SHOWN_FLOWS } from './catalog-setup'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { formatDateLong } from '@/lib/utils'
+import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
+import { AI_CLIENTS, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
+import { copyPromptAndOpen } from './run'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Field, Row, SubView } from './AgentDetail'
@@ -22,7 +25,7 @@ import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
 import { catalogHref, itemHue, seedOf, type ItemKind } from './hues'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
-import { communityMeta, communitySegment, kindOf, readAgents, readCatalog, readOptions, rulesSegment, type CommunityMeta } from './data'
+import { communityMeta, communitySegment, fetchConnections, kindOf, readAgents, readCatalog, readOptions, rulesSegment, simulatedClient, type CommunityMeta } from './data'
 import styles from './skills.module.css'
 
 // The Markdown parser loads with the first pack that is opened, not with the list.
@@ -49,11 +52,10 @@ type Item = {
 }
 
 /**
- * The page of an agent instruction that is not a flow: a rule pack from
- * Accounted, or anything the community shared. Same stage and panel as a
- * flow's page. Rules can be given to flows from here; community items carry
- * who shared them, votes and "fungerar / fungerar inte", which is what makes
- * sharing worth it.
+ * The page of a knowledge pack from Accounted, or of anything the community
+ * shared. A shared flow looks like any flow: its steps, what it brings along
+ * and a start button in the company's AI, plus who shared it and the upvote.
+ * Knowledge shows its own text, as the AI reads it, and can be given to flows.
  */
 export function ItemDetail({ segment, backHref }: { segment: string; backHref: string }) {
   const { company } = useCompany()
@@ -71,6 +73,16 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const catalog = useSWR(isRules ? null : ['/api/skills', companyId], ([url]) => readCatalog(url))
   const agents = useSWR(['/api/agents', companyId, 'claude'], ([url, , c]) => readAgents(`${url}?client=${c}`))
   const [view, setView] = useState<'main' | 'give'>('main')
+  const [connected, setConnected] = useState<AiClient[] | null>(null)
+  const [ran, setRan] = useState(false)
+  useEffect(() => {
+    const simulated = simulatedClient()
+    const controller = new AbortController()
+    void (simulated ? Promise.resolve([simulated]) : fetchConnections(controller.signal)).then((list) => { if (list) setConnected(list) })
+    return () => controller.abort()
+  }, [])
+  const client = pickConnectedAiClient(connected ?? []) ?? 'claude'
+  const ai = AI_CLIENTS.find((c) => c.id === client)!
 
   const pack: KnowledgeOption | undefined = options.data?.find((o) => rulesSegment(o.id) === segment)
   const shared = catalog.data?.find((s) => s.tier === 'community' && communitySegment(s.slug) === segment)
@@ -101,6 +113,12 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   // Back to where the item lives: its industry or company form, or the general list.
   const home = item.atomId && (item.atomId.startsWith('vertical/') || item.atomId.startsWith('modifier/')) ? item.atomId : item.community?.industries[0] ?? null
   const back = catalogHref(backHref, item.kind, home)
+  const isFlow = item.kind === 'workflow' && !!item.community
+  const steps = isFlow && body.data ? ownSkillSteps(body.data) : []
+  function runShared() {
+    // A shared item's text carries what its author wrote, so the prompt is copied rather than typed into the chat.
+    void copyPromptAndOpen(t('shared_prompt', { name: item!.name, slug: item!.key, client }), client, false).then(() => setRan(true))
+  }
   const flowsWith = (atomId: string) => SHOWN_FLOWS.map((id) => ({ id })).filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
   const holders = item.atomId ? flowsWith(item.atomId) : []
   const reviewed = item.reviewedAt ? formatDateLong(item.reviewedAt, locale) : null
@@ -124,9 +142,17 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
             <small>{t(`kind_one_${item.kind}`)}{item.community ? ` · @${item.community.author}` : ''}</small>
           </div>
           <div className={styles.stageFoot}>
-            {item.atomId
+            {isFlow ? (
+              <Button size="lg" className="gap-2 pl-4" onClick={runShared}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={ai.logo} alt="" width={16} height={16} className={styles.btnLogo} />
+                {t('run_agent', { client: ai.name })}
+                <ArrowUpRight className="h-4 w-4" aria-hidden />
+              </Button>
+            ) : item.atomId
               ? <Button size="lg" className="gap-2" disabled={!canWrite} onClick={() => setView('give')}><Plus className="h-4 w-4" aria-hidden />{t('give_to_flow')}</Button>
               : <span />}
+            {ran && <span className={styles.stageStatus} role="status">{t('copied_open', { client: ai.name })}</span>}
             {item.community && <Vote meta={item.community} slug={item.key} />}
           </div>
         </section>
@@ -140,8 +166,16 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   <div className={styles.fieldBox} data-ph-mask={item.community ? '' : undefined}>{item.name}</div>
                   <span className={styles.fieldHint}>{item.desc}</span>
                 </Field>
+                {isFlow && (
+                  <Field label={t('section_instructions')} note={t('source_community')} copy={<CopyIcon text={body.data} label={t('copy_instructions')} />}>
+                    <div className={styles.instrBox} data-ph-mask="">
+                      {steps.length > 0 ? <ol>{steps.map((step, i) => <li key={i}>{step}</li>)}</ol> : body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{t('loading_short')}</span>}
+                    </div>
+                  </Field>
+                )}
                 <div className={styles.rows}>
-                  <Row label={t('row_source')}><span className={styles.muted}>{[item.community ? t('source_community') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>
+                  {!item.community && <Row label={t('row_source')}><span className={styles.muted}>{[item.community ? t('source_community') : t('source_accounted'), item.version ? t('version_short', { version: item.version }) : null].filter(Boolean).join(' · ')}</span></Row>}
+                  {isFlow && <Row label={t('section_knowledge')}><span className={styles.muted}>{t('shared_flow_knowledge')}</span></Row>}
                   {item.level && <Row label={t('row_level')}><span className={styles.muted}>{t(`level_${item.level}`)}</span></Row>}
                   {item.community && <Row label={t('row_shared_by')}><Link href={`${backHref}/av.${item.community.author}`} className={styles.authorLink}>@{item.community.author}{item.community.author_verified && ` · ${t('author_verified')}`} · {t('author_shared', { count: item.community.author_shared })}</Link></Row>}
                   <Row label={t('row_reviewed')}><span className={styles.muted}>{reviewed ?? t('reviewed_accounted')}</span></Row>
@@ -153,11 +187,11 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                     </Row>
                   )}
                 </div>
-                <Field label={t('field_contents')} note={t('contents_note')} copy={<CopyIcon text={body.data} label={t('copy_contents')} />}>
+                {!isFlow && <Field label={t('field_contents')} note={t('contents_note')} copy={<CopyIcon text={body.data} label={t('copy_contents')} />}>
                   <div className={styles.mdBody} data-ph-mask={item.community ? '' : undefined}>
                     {body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{body.error ? t('body_failed_pack') : t('loading_short')}</span>}
                   </div>
-                </Field>
+                </Field>}
               </>
             )}
             {view === 'give' && item.atomId && (

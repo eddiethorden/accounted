@@ -119,46 +119,7 @@ const OWN_BODY = [
   '4. Visa listan och fråga om betalfil ska skapas.',
 ].join('\n')
 
-// Example community items (names, handles and counts are made up for the demo), one or more per kind.
-type Shared = { kind: 'workflow' | 'rules' | 'analysis'; author: string; shared: number; verified?: boolean; votes: number; works: number; notWorks: number; area: string | null; industries?: string[]; uses?: string[]; usedBy?: number }
-const shared = (slug: string, name: string, summary: string, m: Shared) => ({
-  slug: `community/${slug}`, name, summary, tags: ['community'], tier: 'community', source: 'community', active: false, installations: [],
-  community: {
-    kind: m.kind, author: m.author, author_shared: m.shared, author_verified: !!m.verified, votes: m.votes, voted: false, works: m.works, not_works: m.notWorks,
-    feedback: null, reviewed_at: '2026-09-18T10:00:00Z', area: m.area, industries: m.industries ?? [], uses: m.uses ?? [], used_by: m.usedBy ?? null,
-  },
-})
-const KONSULT = 'vertical/konsult-it'
-const RESTAURANG = 'vertical/restaurang-cafe'
-
-// A pack's text as the AI reads it; in the app this comes from agent_atom_registry. Demo wording, not the real pack.
-const PACK_BODY = [
-  '# IT-konsult och systemutvecklare',
-  '',
-  'Läs det här när bolaget säljer konsulttjänster eller utvecklar system åt kunder.',
-  '',
-  '## Innehåll',
-  '- Konsult eller anställd: vad som avgör och när det spelar roll',
-  '- Tjänster till kunder i andra länder: hur fakturan och momsen ska se ut',
-  '- Elektroniska tjänster och licenser',
-  '- Utlägg som vidarefaktureras till kunden',
-  '- Pågående uppdrag vid bokslut',
-  '',
-  '## Fördjupning',
-  'Laddas bara när ett fall kräver det: 3:12, fakturering till utlandet, pågående arbeten.',
-].join('\n')
-
 const CATALOG = [
-  shared('tid-till-faktura', 'Tidrapport till faktura', 'Månadens rapporterade timmar per kund blir fakturautkast, med rätt moms för tjänster till utlandet.', { kind: 'workflow', author: 'byra-lind', shared: 7, verified: true, votes: 57, works: 38, notWorks: 2, area: 'fakturering', industries: [KONSULT], uses: ['mail'], usedBy: 212 }),
-  shared('stang-dagskassan', 'Stäng dagskassan', 'Z-rapporten till ett verifikat, med kort, Swish och kontant var för sig.', { kind: 'workflow', author: 'kafe-norr', shared: 4, votes: 48, works: 31, notWorks: 2, area: 'lopande', industries: [RESTAURANG], uses: ['zettle', 'bank'], usedBy: 96 }),
-  shared('styrelserapport', 'Månadsrapport till styrelsen', 'Resultat, likviditet och avvikelser mot budget på en sida.', { kind: 'workflow', author: 'byra-lind', shared: 7, verified: true, votes: 22, works: 14, notWorks: 1, area: 'bokslut', usedBy: 41 }),
-  shared('shopify-underlag', 'Shopify-order som underlag', 'Ordrar och utbetalningar från Shopify blir underlag i bokföringen.', { kind: 'workflow', author: 'butiken', shared: 1, votes: 12, works: 7, notWorks: 2, area: 'lopande', industries: ['vertical/e-handel'], uses: ['shopify', 'bank'], usedBy: 18 }),
-  shared('dricks-kort', 'Dricks via kort till personalen', 'Hur dricks som kommer in via kortinlösen hanteras fram till lönen, med källor.', { kind: 'rules', author: 'bistro-ost', shared: 2, votes: 17, works: 9, notWorks: 1, area: 'lon', industries: [RESTAURANG] }),
-  shared('konsult-vidarefakturering', 'Vidarefakturering av utlägg', 'När ett utlägg för kundens räkning ska med moms och när det inte ska det, med källor.', { kind: 'rules', author: 'byra-lind', shared: 7, verified: true, votes: 31, works: 19, notWorks: 0, area: 'fakturering', industries: [KONSULT] }),
-  shared('ravaruprocent', 'Råvaruprocent per månad', 'Varuinköp mot försäljning, och vad som är normalt för en restaurang.', { kind: 'analysis', author: 'lunchkrogen', shared: 3, votes: 64, works: 40, notWorks: 3, area: 'analys', industries: [RESTAURANG], usedBy: 133 }),
-  shared('debiteringsgrad', 'Debiteringsgrad och timpris', 'Fakturerade timmar mot arbetade, och vad det betyder för timpriset.', { kind: 'analysis', author: 'byra-lind', shared: 7, verified: true, votes: 44, works: 29, notWorks: 1, area: 'analys', industries: [KONSULT], usedBy: 87 }),
-  shared('kassaflode-13', 'Kassaflöde 13 veckor framåt', 'Kända in- och utbetalningar vecka för vecka, med varning när saldot blir lågt.', { kind: 'analysis', author: 'byra-lind', shared: 7, verified: true, votes: 41, works: 25, notWorks: 2, area: 'analys', uses: ['bank'], usedBy: 154 }),
-  shared('personalkostnad', 'Personalkostnad per omsättningskrona', 'Löner och avgifter mot omsättning, månad för månad.', { kind: 'analysis', author: 'kafe-norr', shared: 4, votes: 29, works: 18, notWorks: 4, area: 'analys' }),
   { slug: 'own/00000000-0000-4000-8000-000000000001', name: 'Påminnelse om leverantörsfakturor', summary: 'Listar obetalda leverantörsfakturor som förfaller inom en vecka.', tags: ['own'], tier: 'own', source: 'own', active: true, shareStatus: 'private', installations: [{ installation_id: '00000000-0000-4000-8000-000000000001', scope: 'company' }] },
 ]
 
@@ -187,7 +148,6 @@ function installFixtures() {
         if (slug === 'own/00000000-0000-4000-8000-000000000001') return json({ body: OWN_BODY })
         const real = PACK_TEXTS.get(slug)
         if (real) return json({ body: real })
-        if (slug === 'vertical/konsult-it') return json({ body: PACK_BODY })
         const pack = OPTIONS.find((o) => o.id === slug)
         if (pack) return json({ body: `# ${pack.title}\n\nI appen visas packets egen text här, samma text som din AI läser.` })
         const item = CATALOG.find((c) => c.slug === slug)
