@@ -1264,6 +1264,7 @@ export const ARCHIVE_EXCLUDED_TABLES: Record<string, string> = {
   agent_profiles: 'AI assistant state, not räkenskapsinformation',
   company_skills: 'Company/team AI instructions; proposal provenance is retained in pending_operations and audit_log',
   company_agent_knowledge: 'which knowledge packs each AI agent carries for the company; configuration, not räkenskapsinformation',
+  community_feedback: 'votes and "fungerar det?" answers on shared community agent instructions; not räkenskapsinformation',
   api_keys: 'secrets',
   bank_connections: 'PSD2 connection state and tokens, not portable',
   bolagsverket_avtal_acceptances: 'service agreement acceptance state',
