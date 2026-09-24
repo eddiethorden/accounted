@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { Banknote, ChevronRight, File, FileOutput, FileQuestion, FileSignature, FileText, Landmark, Receipt, ScrollText, type LucideIcon } from 'lucide-react'
+import { Banknote, ChevronRight, File, FileOutput, FileQuestion, FileSignature, FileText, ScrollText, ShoppingBag, Stamp, type LucideIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -27,11 +27,12 @@ const PICKER_CLASS = 'h-8 w-auto gap-1.5 rounded-full px-3.5 text-[13px]'
 const LIMIT = 500
 const SHOW_FIRST = 8
 
+// Myndigheter is a stamp, not a bank; a receipt is a purchase already paid, so a bag, not a till slip (founder, 2026-09-24).
 const ICONS: Record<FolderKey, LucideIcon> = {
   agreements: FileSignature,
-  authority: Landmark,
+  authority: Stamp,
   corporate: ScrollText,
-  receipts: Receipt,
+  receipts: ShoppingBag,
   supplier_invoices: FileText,
   customer_invoices: FileOutput,
   bank_statements: Banknote,
