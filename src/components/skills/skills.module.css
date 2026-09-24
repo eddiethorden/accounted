@@ -797,3 +797,9 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .featuredActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .featuredText > div.featuredActions { margin-top: 10px; }
 .featuredNote { font-size: 12.5px; color: hsl(var(--foreground) / 0.65); }
+.fieldTools { display: inline-flex; align-items: center; gap: 8px; }
+.copyIcon { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: none; color: hsl(var(--muted-foreground)); cursor: pointer; transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out); }
+.copyIcon:hover:not(:disabled) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.copyIcon:disabled { opacity: .4; cursor: default; }
+.copyIcon[data-state='copied'] { color: hsl(var(--success)); }
+.copyIcon:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }

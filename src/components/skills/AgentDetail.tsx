@@ -20,6 +20,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
 import { FlowSymbol } from './FlowSymbol'
+import { CopyIcon } from './CopyIcon'
 import { itemHue, seedOf } from './hues'
 import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
@@ -201,7 +202,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                 <span className={styles.fieldHint}>{desc}</span>
               </Field>
 
-              <Field label={t('section_instructions')} note={own ? t('instructions_own') : [t('instructions_source'), overview?.workflow.version ? t('instructions_version', { version: overview.workflow.version }) : null].filter(Boolean).join(' · ')}>
+              <Field label={t('section_instructions')} copy={<CopyIcon text={body.data} label={t('copy_instructions')} />} note={own ? t('instructions_own') : [t('instructions_source'), overview?.workflow.version ? t('instructions_version', { version: overview.workflow.version }) : null].filter(Boolean).join(' · ')}>
                 <div className={styles.instrBox}><ol data-ph-mask={own ? '' : undefined}>{steps.map((step, i) => <li key={i}>{step}</li>)}</ol></div>
               </Field>
 
@@ -283,10 +284,10 @@ export function Row({ label, children, onAdd, addLabel, onOpen }: { label: strin
 }
 
 /** A labelled field, label above its box. */
-export function Field({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
+export function Field({ label, note, copy, children }: { label: string; note?: string; copy?: ReactNode; children: ReactNode }) {
   return (
     <div className={styles.field}>
-      <div className={styles.fieldHead}><span className={styles.rowLabel}>{label}</span>{note && <span className={styles.partNote}>{note}</span>}</div>
+      <div className={styles.fieldHead}><span className={styles.rowLabel}>{label}</span><span className={styles.fieldTools}>{note && <span className={styles.partNote}>{note}</span>}{copy}</span></div>
       {children}
     </div>
   )

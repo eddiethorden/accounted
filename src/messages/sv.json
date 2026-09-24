@@ -10521,6 +10521,8 @@
     "knowledge_group_modifier": "Bolagsform och upplägg",
     "knowledge_group_community": "Community",
     "knowledge_picker_done": "Klar",
+    "copy_instructions": "Kopiera instruktionerna",
+    "copy_contents": "Kopiera texten",
     "badge_in_ai": "{conn} i {client}",
     "badge_connected": "{conn} ansluten",
     "badge_missing": "{conn} saknas: koppla",
