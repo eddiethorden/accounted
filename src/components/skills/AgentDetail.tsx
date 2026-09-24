@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
@@ -26,10 +27,13 @@ import { ConnectionMark } from './ConnectionMark'
 import { SlidingTabs } from './SlidingTabs'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
-import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, simulatedClient, type SkillSummary } from './data'
+import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, rulesSegment, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
-type View = 'main' | 'knowledge' | 'company' | 'advanced'
+// The Markdown parser loads when someone opens what the AI reads, not with the page.
+const Markdown = dynamic(() => import('@/components/agent/MarkdownMessage'))
+
+type View = 'main' | 'knowledge' | 'company' | 'advanced' | 'all'
 type Own = SkillSummary & { installations: [{ installation_id: string }] }
 
 async function readBody(url: string): Promise<string> {
@@ -207,6 +211,9 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
               )}
 
               <div className={styles.rows}>
+                <Row label={t('section_all')} onOpen={() => setView('all')}>
+                  <span className={styles.muted}>{t('all_summary', { count: knowledge.length })}</span>
+                </Row>
                 {curated && (
                   <Row label={t('section_connections')}>
                     {connections.length === 0 ? <span className={styles.muted}>{t('connections_none')}</span> : <Capped items={connections.map((c) => <ConnectionChip key={c.kind} connection={c} />)} />}
@@ -214,7 +221,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                 )}
                 <Row label={t('section_knowledge')} onAdd={canEdit ? () => setView('knowledge') : undefined} addLabel={t('knowledge_add')}>
                   {knowledge.length === 0 ? <span className={styles.muted}>{t(own ? 'knowledge_own' : 'knowledge_none')}</span> : <Capped items={knowledge.map((k) => (
-                    <KnowledgeChip key={k.id} knowledge={k} canEdit={canEdit} onRemove={() => changeKnowledge('remove', k.id)} />
+                    <KnowledgeChip key={k.id} knowledge={k} href={`${backHref}/${rulesSegment(k.id)}`} canEdit={canEdit} onRemove={() => changeKnowledge('remove', k.id)} />
                   ))} />}
                 </Row>
                 <Row label={t('section_company')} onOpen={() => setView('company')}>
@@ -226,6 +233,21 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                 <Row label={t('section_advanced')} onOpen={() => setView('advanced')} />
               </div>
             </>
+          )}
+          {view === 'all' && (
+            <SubView title={t('section_all')} onBack={() => setView('main')}>
+              <p className={styles.muted}>{t('all_lede', { name })}</p>
+              <ol className={styles.allList}>
+                <li>
+                  <details className={styles.allItem} open>
+                    <summary><span className={styles.allKind}>{t('section_instructions')}</span><b data-ph-mask={own ? '' : undefined}>{name}</b></summary>
+                    <div className={styles.mdBody} data-ph-mask={own ? '' : undefined}>{body.data ? <Markdown text={body.data} /> : <span className={styles.muted}>{t('loading_short')}</span>}</div>
+                  </details>
+                </li>
+                {knowledge.map((k) => <li key={k.id}><PackText knowledge={k} href={`${backHref}/${rulesSegment(k.id)}`} companyId={companyId} /></li>)}
+              </ol>
+              <p className={styles.muted}>{t('all_company')}</p>
+            </SubView>
           )}
           {view === 'company' && (
             <SubView title={t('section_company')} onBack={() => setView('main')}>
@@ -336,7 +358,25 @@ function CopyInstruction({ body }: { body: string | undefined }) {
   )
 }
 
-function KnowledgeChip({ knowledge, canEdit, onRemove }: { knowledge: KnowledgeMeta; canEdit: boolean; onRemove: () => Promise<boolean> }) {
+/** One knowledge pack in "Det här får din AI": closed until opened, then its full text as the AI reads it. */
+function PackText({ knowledge, href, companyId }: { knowledge: KnowledgeMeta; href: string; companyId: string }) {
+  const t = useTranslations('skills_registry')
+  const name = useKnowledgeName()
+  const [open, setOpen] = useState(false)
+  const text = useSWR(open ? ['/api/skills', companyId, knowledge.id] : null, ([url, , slug]) => readBody(`${url}?slug=${encodeURIComponent(slug)}`))
+  return (
+    <details className={styles.allItem} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>
+        <span className={styles.allKind}>{t('kind_one_rules')}</span>
+        <b>{name(knowledge.id, knowledge.title)}</b>
+        <Link href={href} className={styles.allLink} onClick={(e) => e.stopPropagation()}>{t('open_pack')}</Link>
+      </summary>
+      <div className={styles.mdBody}>{text.data ? <Markdown text={text.data} /> : <span className={styles.muted}>{text.error ? t('body_failed_pack') : t('loading_short')}</span>}</div>
+    </details>
+  )
+}
+
+function KnowledgeChip({ knowledge, href, canEdit, onRemove }: { knowledge: KnowledgeMeta; href: string; canEdit: boolean; onRemove: () => Promise<boolean> }) {
   const t = useTranslations('skills_registry')
   const name = useKnowledgeName()
   const describe = useKnowledgeDesc()
@@ -344,7 +384,7 @@ function KnowledgeChip({ knowledge, canEdit, onRemove }: { knowledge: KnowledgeM
   const label = name(knowledge.id, knowledge.title)
   return (
     <span className={`${styles.chip} ${styles.chipKnow} ${knowledge.source === 'added' ? styles.chipAdded : ''}`} title={describe(knowledge.id, knowledge.summary)}>
-      {label}
+      <Link href={href} className={styles.chipLink}>{label}</Link>
       {knowledge.source === 'added' && <small>{t('knowledge_added_tag')}</small>}
       {canEdit && (
         <button type="button" className={styles.chipX} aria-label={t('knowledge_remove', { name: label })} disabled={busy} onClick={() => { setBusy(true); void onRemove().finally(() => setBusy(false)) }}>
