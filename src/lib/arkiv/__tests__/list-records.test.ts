@@ -52,6 +52,25 @@ describe('listRecords', () => {
     expect(findCalls('document_extractions', 'select')).toEqual([])
   })
 
+  it('marks a later copy of the same file even when the reader made different text of it', async () => {
+    enqueue({
+      data: [
+        { id: 'p2', file_name: 'IMG_4417.jpeg', doc_type: 'receipt', created_at: '2026-08-10T08:00:00Z', page_count: 1, pages_read_at: 'x', read_error: null, journal_entry_id: null, sha256_hash: 'bytes-1' },
+        { id: 'p1', file_name: 'IMG_4417.jpeg', doc_type: 'receipt', created_at: '2026-05-20T13:40:00Z', page_count: 1, pages_read_at: 'x', read_error: null, journal_entry_id: null, sha256_hash: 'bytes-1' },
+      ],
+      count: 2,
+    })
+    enqueue({ data: [{ document_id: 'p2', content_sha256: 'text-b' }, { document_id: 'p1', content_sha256: 'text-a' }] })
+    enqueue({ data: [{ document_id: 'p2', content_sha256: 'text-b' }, { document_id: 'p1', content_sha256: 'text-a' }] })
+    enqueue({ data: [{ id: 'p1', created_at: '2026-05-20T13:40:00Z' }, { id: 'p2', created_at: '2026-08-10T08:00:00Z' }] })
+    enqueue({ data: [{ id: 'p1', created_at: '2026-05-20T13:40:00Z', sha256_hash: 'bytes-1' }, { id: 'p2', created_at: '2026-08-10T08:00:00Z', sha256_hash: 'bytes-1' }] })
+    const out = await listRecords(supabase, 'co-1', { type: 'receipt' })
+    expect(out.items.map((i) => [i.record_ref, i.duplicate_of])).toEqual([
+      ['document:p2', 'document:p1'],
+      ['document:p1', null],
+    ])
+  })
+
   it('ends with no next page and fetches nothing more when the list is empty', async () => {
     enqueue({ data: [], count: 0 })
     expect(await listRecords(supabase, 'co-1', { type: 'untyped' })).toEqual({ items: [], total: 0, next_offset: null })

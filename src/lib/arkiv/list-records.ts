@@ -23,7 +23,7 @@ export interface ListedRecord {
   page_count: number | null
   read: boolean
   voucher: string | null
-  /** The earliest archived document with the same text; set on the later copies, so a sum counts each once. */
+  /** The earliest archived document with the same file or the same text; set on the later copies, so a sum counts each once. */
   duplicate_of: string | null
 }
 
@@ -61,7 +61,7 @@ export async function listRecords(supabase: SupabaseClient, companyId: string, o
 
   let query = supabase
     .from('document_attachments')
-    .select('id, file_name, doc_type, created_at, page_count, pages_read_at, read_error, journal_entry_id', { count: 'exact' })
+    .select('id, file_name, doc_type, created_at, page_count, pages_read_at, read_error, journal_entry_id, sha256_hash', { count: 'exact' })
     .eq('company_id', companyId)
     .in('admission_state', ['admitted', 'held'])
     .or(NOT_STRUCTURED_MIME_FILTER)
@@ -81,6 +81,7 @@ export async function listRecords(supabase: SupabaseClient, companyId: string, o
     pages_read_at: string | null
     read_error: string | null
     journal_entry_id: string | null
+    sha256_hash: string | null
   }>
   const total = count ?? rows.length
   if (rows.length === 0) return { items: [], total, next_offset: null }
@@ -121,9 +122,29 @@ export async function listRecords(supabase: SupabaseClient, companyId: string, o
     }
   }
 
+  // The same file sent twice has the same bytes, whatever a reader made of a photo each time (prod: one
+  // receipt photo archived four times, read four slightly different ways, so its text hashes differed).
+  const byteOriginal = new Map<string, { id: string; created_at: string }>()
+  const byteHashes = [...new Set(rows.map((r) => r.sha256_hash).filter((h): h is string => !!h))]
+  if (byteHashes.length) {
+    const { data: same, error: sameError } = await supabase
+      .from('document_attachments')
+      .select('id, created_at, sha256_hash')
+      .eq('company_id', companyId)
+      .in('sha256_hash', byteHashes)
+    if (sameError) throw new Error(`list failed: ${sameError.message}`)
+    for (const d of (same ?? []) as Array<{ id: string; created_at: string; sha256_hash: string }>) {
+      const current = byteOriginal.get(d.sha256_hash)
+      if (!current || d.created_at < current.created_at || (d.created_at === current.created_at && d.id < current.id)) byteOriginal.set(d.sha256_hash, { id: d.id, created_at: d.created_at })
+    }
+  }
+
   const items = rows.map((r) => {
     const hash = hashOf.get(r.id)
-    const original = hash ? canonical.get(hash) : undefined
+    const byText = hash ? canonical.get(hash) : undefined
+    const byBytes = r.sha256_hash ? byteOriginal.get(r.sha256_hash) : undefined
+    // Whichever copy was archived first is the original.
+    const original = byBytes && byBytes.id !== r.id && (!byText || byText === r.id || byBytes.created_at <= r.created_at) ? byBytes.id : byText
     return {
       record_ref: `document:${r.id}`,
       file_name: r.file_name,
