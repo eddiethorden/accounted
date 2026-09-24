@@ -233,7 +233,7 @@ function GiveCard({ name, task, hue, has, note, disabled, onToggle }: { name: st
     <div className={styles.giveCard} data-held={has ? "" : undefined}>
       <FlowSymbol hue={hue} size={34} />
       <span className={styles.giveText}><b>{name}</b><span>{note ? `${task} · ${note}` : task}</span></span>
-      <Button variant={has ? 'default' : 'outline'} size="icon" className={styles.sqBtn} aria-pressed={has} aria-label={has ? t('knowledge_remove', { name }) : t('give_to_named', { name })} disabled={disabled} loading={busy}
+      <Button variant={has ? 'default' : 'outline'} size="icon" aria-pressed={has} aria-label={has ? t('knowledge_remove', { name }) : t('give_to_named', { name })} disabled={disabled} loading={busy}
         onClick={() => { setBusy(true); void onToggle().finally(() => setBusy(false)) }}>
         {has ? <Check className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
       </Button>

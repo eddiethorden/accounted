@@ -590,7 +590,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .rowContent { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .rowContent .muted { overflow: hidden; text-overflow: ellipsis; }
 .rowAction { display: flex; justify-content: center; align-items: center; width: 40px; }
-.sqBtn { border-radius: 10px; }
 .instrBox { position: relative; max-height: 200px; }
 
 /* ── sliding tabs: the pill glides, a click leaves no outline ── */
@@ -725,11 +724,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 /* ── the catalogue, laid out like Claude's Customize page ── */
 .catalog { display: flex; flex-direction: column; gap: 36px; }
 .catBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.catTabs { display: inline-flex; gap: 4px; }
-.catTab { height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: 14px; font-weight: 500; color: hsl(var(--muted-foreground)); cursor: pointer; transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out); }
-.catTab:hover { color: hsl(var(--foreground)); }
-.catTab[aria-selected='true'] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
-.catTab:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .catDivider { width: 1px; height: 24px; background: hsl(var(--border)); }
 .catTools { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .catSection { display: flex; flex-direction: column; gap: 14px; }

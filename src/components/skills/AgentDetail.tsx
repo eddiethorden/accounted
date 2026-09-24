@@ -277,7 +277,7 @@ export function Row({ label, children, onAdd, addLabel, onOpen }: { label: strin
       <span className={styles.rowLabel}>{label}</span>
       <div className={styles.rowContent}>{children}</div>
       <span className={styles.rowAction}>
-        {onAdd && <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button>}
+        {onAdd && <Button variant="outline" size="icon" aria-label={addLabel} onClick={onAdd}><Plus className="h-4 w-4" aria-hidden /></Button>}
         {onOpen && <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />}
       </span>
     </>

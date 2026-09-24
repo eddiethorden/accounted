@@ -176,11 +176,12 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   return (
     <div className={styles.catalog}>
       <div className={styles.catBar}>
-        <div className={styles.catTabs} role="tablist" aria-label={t('kinds_label')}>
-          {KINDS.map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={k === kind} className={styles.catTab} onClick={() => go({ typ: k, kategori: null })}>{t(`kind_${k}`)}</button>
-          ))}
-        </div>
+        <SegmentedControl<ItemKind>
+          aria-label={t('kinds_label')}
+          value={kind}
+          onChange={(k) => go({ typ: k, kategori: null })}
+          options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))}
+        />
         <span className={styles.catDivider} aria-hidden />
         <SegmentedControl<'own' | 'discover'>
           aria-label={t('view_label')}
@@ -193,7 +194,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           {view === 'discover' && categories.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={t('category_label')}><SlidersHorizontal className="h-4 w-4" aria-hidden /></Button>
+                <Button variant="outline" size="icon-sm" aria-label={t('category_label')}><SlidersHorizontal className="h-4 w-4" aria-hidden /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>{t('category_label')}</DropdownMenuLabel>
@@ -206,7 +207,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={t('sort_label')}><ArrowUpDown className="h-4 w-4" aria-hidden /></Button>
+              <Button variant="outline" size="icon-sm" aria-label={t('sort_label')}><ArrowUpDown className="h-4 w-4" aria-hidden /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>{t('sort_label')}</DropdownMenuLabel>
