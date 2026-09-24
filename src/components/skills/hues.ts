@@ -1,7 +1,12 @@
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 
-/** What an agent instruction is: a flow to follow, rules to apply, an analysis to read, or a connection. */
-export type ItemKind = 'workflow' | 'rules' | 'analysis' | 'connection'
+/**
+ * What an agent instruction is. A flow is a task the AI carries out (steps, a
+ * result to approve); knowledge is what is true (law, industry, the company)
+ * and never runs on its own, it is given to flows; an analysis is a figure or
+ * report and how to read it.
+ */
+export type ItemKind = 'workflow' | 'rules' | 'analysis'
 
 /** How an agent is doing right now: ready, has work waiting, blocked on a connection, or waiting for the user's AI. */
 export type Presence = 'ready' | 'busy' | 'blocked' | 'idle'
@@ -27,8 +32,8 @@ const WORKFLOW_HUES: Record<RegistrySkillId, number> = {
   'tax-planning': 330,
 }
 
-/** Rules, analyses and connections stay near their type's colour, a little apart from each other. */
-const KIND_HUES: Record<Exclude<ItemKind, 'workflow'>, number> = { rules: 34, analysis: 152, connection: 268 }
+/** Knowledge and analyses stay near their type's colour, a little apart from each other. */
+const KIND_HUES: Record<Exclude<ItemKind, 'workflow'>, number> = { rules: 34, analysis: 152 }
 
 export function itemHue(kind: ItemKind, key: string, curated?: RegistrySkillId | null): number {
   if (kind === 'workflow') return curated ? WORKFLOW_HUES[curated] : seedOf(key) % 360
@@ -36,8 +41,8 @@ export function itemHue(kind: ItemKind, key: string, curated?: RegistrySkillId |
 }
 
 /** The four kinds, in the order of the top bar's switch; `?typ=` carries the chosen one. */
-export const KINDS: ItemKind[] = ['workflow', 'rules', 'analysis', 'connection']
-const KIND_PARAM: Record<ItemKind, string> = { workflow: 'arbetsfloden', rules: 'regler', analysis: 'analyser', connection: 'kopplingar' }
+export const KINDS: ItemKind[] = ['workflow', 'rules', 'analysis']
+const KIND_PARAM: Record<ItemKind, string> = { workflow: 'arbetsfloden', rules: 'kunskap', analysis: 'analyser' }
 export function kindFromParam(value: string | null): ItemKind {
   return KINDS.find((k) => KIND_PARAM[k] === value) ?? 'workflow'
 }

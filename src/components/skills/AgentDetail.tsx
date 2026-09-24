@@ -92,8 +92,8 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
     )
   }
 
-  const name = curated ? t(`skills.${curated}.agent`) : own?.name ?? ''
-  const task = curated ? t(`skills.${curated}.name`) : null
+  const name = curated ? t(`skills.${curated}.name`) : own?.name ?? ''
+  const task = t('kind_one_workflow')
   const hue = itemHue('workflow', agentId, curated)
   const desc = curated ? t(`skills.${curated}.desc`) : own ? t(own.draft ? 'draft_desc' : 'own_desc') : ''
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []

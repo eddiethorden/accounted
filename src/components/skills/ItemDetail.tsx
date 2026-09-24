@@ -53,7 +53,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const { canWrite } = useCanWrite()
   const knowledgeName = useKnowledgeName()
   const knowledgeDesc = useKnowledgeDesc()
-  const isRules = segment.startsWith('regler.')
+  const isRules = segment.startsWith('kunskap.')
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
   const catalog = useSWR(isRules ? null : ['/api/skills', companyId], ([url]) => readCatalog(url))
   const agents = useSWR(['/api/agents', companyId, 'claude'], ([url, , c]) => readAgents(`${url}?client=${c}`))
@@ -133,7 +133,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   {item.atomId && (
                     <Row label={t('row_used_by')} onAdd={canWrite ? () => setView('give') : undefined} addLabel={t('give_to_flow')}>
                       {holders.length === 0 ? <span className={styles.muted}>{t('used_by_none')}</span> : (
-                        <>{holders.slice(0, 2).map((s) => <span key={s.id} className={styles.chip}>{t(`skills.${s.id}.agent`)}</span>)}{holders.length > 2 && <span className={styles.chip}>+{holders.length - 2}</span>}</>
+                        <>{holders.slice(0, 2).map((s) => <span key={s.id} className={styles.chip}>{t(`skills.${s.id}.name`)}</span>)}{holders.length > 2 && <span className={styles.chip}>+{holders.length - 2}</span>}</>
                       )}
                     </Row>
                   )}
@@ -150,7 +150,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                     const isDefault = AGENTS[s.id].knowledge.includes(item.atomId!)
                     return (
                       <li key={s.id}>
-                        <GiveCard name={t(`skills.${s.id}.agent`)} task={t(`skills.${s.id}.name`)} hue={itemHue('workflow', s.id, s.id)} has={has} note={isDefault ? t('knowledge_default') : undefined} disabled={!canWrite || !agents.data} onToggle={() => toggle(s.id, has)} />
+                        <GiveCard name={t(`skills.${s.id}.name`)} task={t(`skills.${s.id}.short`)} hue={itemHue('workflow', s.id, s.id)} has={has} note={isDefault ? t('knowledge_default') : undefined} disabled={!canWrite || !agents.data} onToggle={() => toggle(s.id, has)} />
                       </li>
                     )
                   })}
