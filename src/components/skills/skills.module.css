@@ -756,3 +756,4 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .categoryIcon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 10px; background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .categoryName { font-size: 15px; font-weight: 500; min-width: 0; }
 .categoryName small { display: block; font-size: 11.5px; font-weight: 400; color: hsl(var(--muted-foreground)); }
+.shareInvite { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

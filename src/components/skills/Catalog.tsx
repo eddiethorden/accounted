@@ -4,16 +4,16 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpDown, Briefcase, Building2, ChevronDown, ChevronUp, Cloud, HardHat, Laptop, Megaphone, Plus, Shuffle, SlidersHorizontal, ShoppingCart, Stethoscope, UserRound, UtensilsCrossed, Store, Truck, Home, Tractor, Palette, GraduationCap, HeartHandshake, User, type LucideIcon } from 'lucide-react'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
-import { REGISTRY_SKILLS } from '@/lib/agent-skills/registry'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ItemSymbol } from './ItemSymbol'
+import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
 import { SourceMarks } from './ConnectionMark'
@@ -26,7 +26,7 @@ import styles from './skills.module.css'
 const KINDS: ItemKind[] = ['workflow', 'rules', 'analysis']
 const KIND_PARAM: Record<ItemKind, string> = { workflow: 'arbetsfloden', rules: 'kunskap', analysis: 'analyser' }
 const TOP = 6
-const CATEGORIES_SHOWN = 6
+const CATEGORIES_SHOWN = 8
 
 /** A category's picture, by the industry or company-form pack it stands for. */
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
@@ -40,6 +40,14 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   'holding-ab': Building2,
   'mixed-verksamhet': Shuffle,
   'single-shareholder-ab-fmb': UserRound,
+  'handel-butik': Store,
+  'transport-logistik': Truck,
+  fastighet: Home,
+  'jordbruk-skog': Tractor,
+  'kreativa-yrken': Palette,
+  utbildning: GraduationCap,
+  'ideell-forening': HeartHandshake,
+  'enskild-firma': User,
 }
 
 type Source = 'accounted' | 'community' | 'own'
@@ -114,7 +122,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
     const meta = communityMeta(s)
     return { key: s.slug, kind: kindOf(s), title: s.name, desc: s.summary, href: `${hrefBase}/${communitySegment(s.slug)}`, source: 'community', meta, categories: meta?.industries ?? [], popularity: meta?.used_by ?? meta?.votes ?? 0 }
   })
-  const flows: Item[] = REGISTRY_SKILLS.map((s) => ({
+  const flows: Item[] = SHOWN_FLOWS.map((id) => ({ id })).map((s) => ({
     key: s.id, kind: 'workflow', title: t(`skills.${s.id}.name`), desc: t(`skills.${s.id}.short`), href: `${hrefBase}/${agentSegment(s.id)}`,
     source: 'accounted', meta: null, categories: [], popularity: usage?.[s.id]?.count ?? 0, connections: AGENTS[s.id].connections, lede: t(`skills.${s.id}.desc`),
   }))
@@ -130,9 +138,9 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const carried = new Set(overview?.agents.flatMap((a) => a.knowledge.map((k) => k.id)) ?? [])
   const mine = kind === 'workflow' ? ownFlows : kind === 'rules' ? packs.filter((p) => carried.has(p.key)) : []
 
-  const categories = options.filter((o) => o.tier === 'vertical' || o.tier === 'modifier')
-    .map((o) => ({ id: o.id, name: knowledgeName(o.id, o.title).replace(/\s*\([^)]*\)\s*$/, ''), count: ofKind.filter((i) => i.categories.includes(o.id)).length }))
-    .filter((c) => c.count > 0)
+  // Every industry and company form, empty ones too: an empty category asks for the first contribution.
+  const categories = CATEGORY_IDS
+    .map((id) => ({ id: id as string, name: t(`category_names.${id.split('/')[1]}`), count: ofKind.filter((i) => i.categories.includes(id)).length }))
     .sort((a, b) => Number(b.id === companyIndustry) - Number(a.id === companyIndustry) || b.count - a.count)
   const categoryName = categories.find((c) => c.id === category)?.name ?? (category ? knowledgeName(category, category) : null)
 
@@ -210,7 +218,10 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
             <button type="button" className={styles.catLink} onClick={() => { setQ(''); go({ kategori: null }) }}><ArrowLeft className="h-4 w-4" aria-hidden />{t('back_overview')}</button>
           </div>
           {listed.length === 0
-            ? <div className={styles.placeEmpty}>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</div>
+            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}>
+                <span>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
+                {category && <Button size="sm" variant="outline" disabled={!canWrite} onClick={onCreate}>{t('share_first_cta', { client: clientName })}</Button>}
+              </div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
       )}
@@ -245,7 +256,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
                     <li key={c.id}>
                       <button type="button" className={styles.categoryCard} onClick={() => go({ kategori: c.id })}>
                         <span className={styles.categoryIcon}><Icon className="h-6 w-6" strokeWidth={1.5} aria-hidden /></span>
-                        <span className={styles.categoryName}>{c.name}{c.id === companyIndustry && <small>{t('industry_yours')}</small>}</span>
+                        <span className={styles.categoryName}>{c.name}{c.id === companyIndustry ? <small>{t('industry_yours')}</small> : c.count === 0 && <small>{t('category_be_first')}</small>}</span>
                         <span className={styles.catCount}>{c.count}</span>
                       </button>
                     </li>
