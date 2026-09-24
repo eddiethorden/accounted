@@ -10562,6 +10562,8 @@
     "link_guessed": "guessed link",
     "signal_no_text_layer": "Scanned, no text layer",
     "signal_no_text_layer_help": "The file has no text layer and was read by the model. Normal for photos and scans.",
+    "signal_inbox_kind": "Type from the inbox reading",
+    "signal_inbox_kind_help": "The inbox read the document as a supplier invoice or a receipt before the archive typed it. That reading decides the direction: the company is the recipient, not the issuer.",
     "signal_duplicate_content": "Same content as another document",
     "signal_duplicate_content_help": "Another document in the archive has the same text.",
     "signal_multi_document": "Several documents in one file",

@@ -10562,6 +10562,8 @@
     "link_guessed": "gissad koppling",
     "signal_no_text_layer": "Skannad, ingen textnivå",
     "signal_no_text_layer_help": "Filen saknar textlager och lästes av modellen. Normalt för foton och skanningar.",
+    "signal_inbox_kind": "Typ enligt inkorgens läsning",
+    "signal_inbox_kind_help": "Inkorgen läste dokumentet som en leverantörsfaktura eller ett kvitto innan arkivet satte typ. Den läsningen avgör riktningen: bolaget är mottagare, inte utställare.",
     "signal_duplicate_content": "Samma innehåll som ett annat dokument",
     "signal_duplicate_content_help": "Ett annat dokument i arkivet har samma text.",
     "signal_multi_document": "Flera dokument i en fil",
