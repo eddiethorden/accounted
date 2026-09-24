@@ -10548,7 +10548,7 @@
     },
     "prompt_own": "{say} Load the skill \"{skill}\" from Accounted (load_skill) and follow it.",
     "tab_accounted": "Accounted",
-    "tab_own": "Yours",
+    "tab_own": "Own",
     "tab_community": "Community",
     "own_empty": "No agents of your own yet. Tell {client} about something you do every month and it becomes one.",
     "community_empty_title": "What others share lands here",
