@@ -10306,6 +10306,7 @@
     "viewer_note": "Du har läsbehörighet i företaget och kan inte skapa eller ta bort agenter.",
     "skills": {
       "bookkeep": {
+        "role": "Bokförare",
         "name": "Bokför transaktioner",
         "short": "Föreslår konto och moms. Du godkänner.",
         "desc": "Går igenom obokade banktransaktioner, föreslår konto och moms och väntar på ditt godkännande.",
@@ -10319,6 +10320,7 @@
         "say": "Bokför mina obokade transaktioner."
       },
       "kvittojakten": {
+        "role": "Kvittojägare",
         "name": "Kvittojakten",
         "short": "Hittar kvitton som saknas.",
         "desc": "Letar upp kvitton och fakturor som saknas i din mejl och kopplar dem till rätt verifikat.",
@@ -10333,6 +10335,7 @@
         "note": "Har du Claude i Chrome? Då hämtar Kvittojakten även fakturor från portaler som AWS, Google Ads och OpenAI, och kan ställa in att de skickas till Accounted automatiskt."
       },
       "reconcile-month": {
+        "role": "Avstämning",
         "name": "Stäm av månaden",
         "short": "Jämför bank och bokföring.",
         "desc": "Jämför bank och bokföring konto för konto och visar vad som skiljer.",
@@ -10345,6 +10348,7 @@
         "say": "Stäm av förra månaden åt mig."
       },
       "month-end-close": {
+        "role": "Månadsavslut",
         "name": "Månadsavslut",
         "short": "Bokför klart och låser månaden.",
         "desc": "Bokför klart, stämmer av, kontrollerar verifikatserien och låser perioden.",
@@ -10357,6 +10361,7 @@
         "say": "Gör månadsavslutet för förra månaden."
       },
       "quarterly-vat-review": {
+        "role": "Moms",
         "name": "Momsdeklaration",
         "short": "Går igenom momsen ruta för ruta.",
         "desc": "Går igenom momsen ruta för ruta och förbereder deklarationen.",
@@ -10369,6 +10374,7 @@
         "say": "Förbered momsdeklarationen."
       },
       "payroll-monthly": {
+        "role": "Lön",
         "name": "Lön och AGI",
         "short": "Lön, avgifter och AGI.",
         "desc": "Beräknar lön, arbetsgivaravgifter och semesterskuld och tar fram AGI.",
@@ -10381,6 +10387,7 @@
         "say": "Kör månadens lön."
       },
       "invoicing-rules": {
+        "role": "Fakturering",
         "name": "Fakturera rätt",
         "short": "Kontrollerar fakturan innan den skickas.",
         "desc": "Kontrollerar obligatoriska uppgifter, moms och ROT/RUT innan fakturan skickas.",
@@ -10393,6 +10400,7 @@
         "say": "Hjälp mig skapa en faktura."
       },
       "kreditfaktura-process": {
+        "role": "Kreditering",
         "name": "Kreditfaktura",
         "short": "Rättar en skickad faktura rätt väg.",
         "desc": "Väljer rätt väg när en skickad faktura ska rättas eller krediteras.",
@@ -10405,6 +10413,7 @@
         "say": "En faktura blev fel. Hjälp mig kreditera den."
       },
       "year-end-close": {
+        "role": "Bokslut",
         "name": "Årsbokslut",
         "short": "Stänger året när allt är klart.",
         "desc": "Bokslutstransaktioner, kontroll av att allt är klart och stängning av året.",
@@ -10417,6 +10426,7 @@
         "say": "Gör årsbokslutet."
       },
       "tax-planning": {
+        "role": "Skatteplanering",
         "name": "Skatteplanering",
         "short": "Räknar på alternativen inför årsskiftet.",
         "desc": "Periodiseringsfond, lön eller utdelning: räknar på alternativen inför årsskiftet.",
@@ -10475,6 +10485,38 @@
     "share_status_published": "Publicerad i community",
     "share_status_withdrawn": "Delning återkallad",
     "share_withdraw": "Dra tillbaka",
+    "status_ai_missing": "Väntar på din AI",
+    "status_needs": "Behöver {conn}",
+    "status_last": "Senast igång {date}",
+    "status_ready": "Redo",
+    "run_agent": "Be {name} börja i {client}",
+    "knowledge_add": "Lägg till kunskap",
+    "knowledge_add_one": "Lägg till",
+    "knowledge_remove": "Ta bort {name}",
+    "knowledge_reset": "Återställ till standard",
+    "knowledge_added_tag": "tillagd",
+    "knowledge_group_horizontal": "Svenska regler",
+    "knowledge_group_vertical": "Branscher",
+    "knowledge_group_modifier": "Bolagsform och upplägg",
+    "knowledge_group_community": "Community",
+    "knowledge_picker_done": "Klar",
+    "knowledge_save_failed": "Kunde inte ändra kunskapen. Försök igen.",
+    "knowledge_all_added": "Allt finns redan hos agenten.",
+    "knowledge_hint": "Välj vad agenten ska kunna. Standard kommer från Accounted, resten väljer ni.",
+    "knowledge_descs": {
+      "swedish-accounting-compliance": "Bokföringslagen, BFN:s allmänna råd, BAS-kontoplanen och verifikationskrav.",
+      "swedish-vat": "Moms: skattesatser, omvänd skattskyldighet, EU-handel och deklarationens rutor.",
+      "swedish-payroll": "Lön, arbetsgivaravgifter, skatteavdrag, förmåner, semester och AGI.",
+      "swedish-invoice-compliance": "Vad en faktura måste innehålla, kreditfakturor och ROT/RUT.",
+      "swedish-e-invoicing": "E-faktura och Peppol, krav vid fakturor till offentlig sektor.",
+      "swedish-year-end-closing": "Bokslut: periodiseringar, bokslutsdispositioner, skatt och årets stängning.",
+      "swedish-asset-accounting": "Inventarier och avskrivningar, leasing och försäljning av tillgångar.",
+      "swedish-financial-reporting": "Årsredovisning enligt K2/K3, inlämning till Bolagsverket och INK2.",
+      "swedish-tax-planning": "Periodiseringsfond, överavskrivningar, 3:12 och lön eller utdelning.",
+      "swedish-sru-filing": "SRU-koder och filerna som lämnas till Skatteverket.",
+      "swedish-sie-import-export": "SIE-filer vid flytt mellan bokföringsprogram.",
+      "swedish-project-accounting": "Projekt, pågående arbeten, intäktsföring och bidrag."
+    },
     "knowledge_names": {
       "swedish-accounting-compliance": "Bokföringslagen",
       "swedish-vat": "Moms",

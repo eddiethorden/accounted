@@ -28,7 +28,7 @@ describe('get_task', () => {
     vi.mocked(loadAgentBundle).mockResolvedValue({
       agent: { id: 'quarterly-vat-review', name: 'Momsdeklaration' },
       workflow: { slug: 'quarterly-vat-review', version: 4, body: '# Moms' },
-      knowledge: [{ id: 'horizontal/swedish-vat', title: 'Swedish VAT', summary: '', version: 7, reviewed_at: null, body: '# VAT' }],
+      knowledge: [{ id: 'horizontal/swedish-vat', tier: 'horizontal', source: 'default', title: 'Swedish VAT', summary: '', version: 7, reviewed_at: null, body: '# VAT' }],
       references: [], company: [], connections: [{ kind: 'skatteverket', status: 'connected' }],
       company_knowledge: { name: 'Arcim', org_number: null, onboarding_summary: null, facts: [], remembered: [], documents: { total: 0, look_up: [] } },
     })
@@ -39,8 +39,8 @@ describe('get_task', () => {
     expect(loadSkillCatalog).not.toHaveBeenCalled()
   })
   it('rejects an unknown agent', async () => {
+    vi.mocked(loadAgentBundle).mockResolvedValue(null)
     await expect(getAccountingTask({ kind: 'agent:nope' }, 'company-a', {} as never)).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    expect(loadAgentBundle).not.toHaveBeenCalled()
   })
   it('resolves own slugs only inside the authorized company catalog', async () => {
     vi.mocked(loadCatalogSkill).mockResolvedValue(null)

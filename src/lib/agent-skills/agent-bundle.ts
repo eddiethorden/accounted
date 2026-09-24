@@ -5,6 +5,7 @@ import { REGISTRY_SKILLS, registrySkillSlug, type RegistrySkillId } from './regi
 import { toSummary } from './atoms'
 import { workflowSkills } from './workflows'
 import { kvittojaktenSkills } from './workflows/kvittojakten'
+import { loadCompanySkillRows, ownSkill } from './company-skills'
 import type { Skill } from './types'
 import { buildArkivMap, type ArkivMap } from '@/lib/arkiv/map'
 
@@ -19,6 +20,9 @@ export interface AgentConnectionState {
 
 export interface KnowledgeMeta {
   id: string
+  tier: string
+  /** `default`: the agent ships with it; `added`: the company chose it. */
+  source: 'default' | 'added'
   title: string
   summary: string
   version: number | null
@@ -34,6 +38,8 @@ export interface AgentOverview {
   references: Array<{ id: string; title: string }>
   company: Array<{ id: string; title: string; tier: 'vertical' | 'modifier' }>
   connections: AgentConnectionState[]
+  /** Defaults the company took away, so the page can offer them back. */
+  removed: string[]
 }
 
 export interface AgentsOverview {
@@ -46,6 +52,8 @@ export interface AgentsOverview {
   remembered: number
   /** Documents an agent can search and read. */
   documents: number
+  /** What the company chose for its own agents, keyed by own/<id>. */
+  own_knowledge: Record<string, KnowledgeMeta[]>
 }
 
 interface AtomRow {
@@ -70,8 +78,37 @@ function workflowFor(id: RegistrySkillId, client: AiClient): Skill {
   return skill
 }
 
-function meta(row: AtomRow): KnowledgeMeta {
-  return { id: row.id, title: row.title ?? row.id, summary: toSummary(row.description, 160), version: row.version, reviewed_at: row.reviewed_at }
+function meta(row: AtomRow, source: KnowledgeMeta['source'] = 'default'): KnowledgeMeta {
+  return { id: row.id, tier: row.tier, source, title: row.title ?? row.id, summary: toSummary(row.description, 160), version: row.version, reviewed_at: row.reviewed_at }
+}
+
+/** A company's changes to one agent's knowledge (company_agent_knowledge). */
+interface KnowledgeChoice { added: string[]; removed: Set<string> }
+
+async function loadKnowledgeChoices(supabase: SupabaseClient, companyId: string): Promise<Map<string, KnowledgeChoice>> {
+  const { data, error } = await supabase.from('company_agent_knowledge').select('agent_id, atom_id, included, created_at')
+    .eq('company_id', companyId).order('created_at', { ascending: true })
+  if (error) throw new Error(`Failed to load agent knowledge choices: ${error.message}`)
+  const choices = new Map<string, KnowledgeChoice>()
+  for (const row of (data ?? []) as Array<{ agent_id: string; atom_id: string; included: boolean }>) {
+    const choice = choices.get(row.agent_id) ?? { added: [], removed: new Set<string>() }
+    if (row.included) choice.added.push(row.atom_id)
+    else choice.removed.add(row.atom_id)
+    choices.set(row.agent_id, choice)
+  }
+  return choices
+}
+
+/** A reference travels with its pack: "horizontal/swedish-vat/x" belongs to "horizontal/swedish-vat". */
+function packOf(referenceId: string): string {
+  return referenceId.split('/').slice(0, 2).join('/')
+}
+
+/** The knowledge an agent carries for this company: its defaults, minus what was taken away, plus what was added. */
+export function effectiveKnowledge(defaults: readonly string[], choice: KnowledgeChoice | undefined): Array<{ id: string; source: KnowledgeMeta['source'] }> {
+  const kept = defaults.filter((id) => !choice?.removed.has(id)).map((id) => ({ id, source: 'default' as const }))
+  const added = (choice?.added ?? []).filter((id) => !defaults.includes(id)).map((id) => ({ id, source: 'added' as const }))
+  return [...kept, ...added]
 }
 
 /** Live rows only: a withdrawn or unexposed atom never reaches an agent (the kill switch). */
@@ -119,8 +156,9 @@ function companyAtoms(atoms: Map<string, AtomRow>, profileIds: string[]): AgentO
 
 /** Every curated agent with its knowledge, the company's own atoms and connection states. No bodies. */
 export async function loadAgentsOverview(supabase: SupabaseClient, companyId: string, client: AiClient = 'claude'): Promise<AgentsOverview> {
-  const profileIds = await loadProfileAtoms(supabase, companyId)
-  const ids = [...new Set([...Object.values(AGENTS).flatMap((a) => [...a.knowledge, ...a.references]), ...profileIds])]
+  const [profileIds, choices] = await Promise.all([loadProfileAtoms(supabase, companyId), loadKnowledgeChoices(supabase, companyId)])
+  const chosen = [...choices.values()].flatMap((c) => c.added)
+  const ids = [...new Set([...Object.values(AGENTS).flatMap((a) => [...a.knowledge, ...a.references]), ...profileIds, ...chosen])]
   const [atoms, states, facts, agreements, remembered, documents] = await Promise.all([
     loadAtoms(supabase, ids, false),
     loadConnectionStates(supabase, companyId),
@@ -131,7 +169,11 @@ export async function loadAgentsOverview(supabase: SupabaseClient, companyId: st
   ])
   const company = companyAtoms(atoms, profileIds)
   const known = new Set(facts.error ? [] : ((facts.data ?? []) as Array<{ predicate: string }>).map((f) => f.predicate))
+  const metas = (list: Array<{ id: string; source: KnowledgeMeta['source'] }>) =>
+    list.flatMap(({ id, source }) => { const row = atoms.get(id); return row && !row.parent_atom_id ? [meta(row, source)] : [] })
+  const own_knowledge = Object.fromEntries([...choices.entries()].filter(([agent]) => agent.startsWith('own/')).map(([agent, choice]) => [agent, metas(effectiveKnowledge([], choice))]))
   return {
+    own_knowledge,
     facts: known.size,
     agreements: agreements.error ? 0 : agreements.count ?? 0,
     remembered: remembered.error ? 0 : remembered.count ?? 0,
@@ -143,10 +185,13 @@ export async function loadAgentsOverview(supabase: SupabaseClient, companyId: st
         id,
         workflow: { slug: workflow.slug, version: workflow.version ?? null },
         facts_known: def.facts.filter((f) => known.has(f)).length,
-        knowledge: def.knowledge.flatMap((k) => { const row = atoms.get(k); return row ? [meta(row)] : [] }),
-        references: def.references.flatMap((r) => { const row = atoms.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] }),
+        knowledge: metas(effectiveKnowledge(def.knowledge, choices.get(id))),
+        references: def.references
+          .filter((r) => effectiveKnowledge(def.knowledge, choices.get(id)).some((k) => k.id === packOf(r)))
+          .flatMap((r) => { const row = atoms.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] }),
         company,
         connections: connectionsFor(id, states),
+        removed: def.knowledge.filter((k) => choices.get(id)?.removed.has(k)),
       }
     }),
   }
@@ -169,7 +214,7 @@ export interface CompanyKnowledge {
 }
 
 export interface AgentBundle {
-  agent: { id: RegistrySkillId; name: string }
+  agent: { id: string; name: string }
   workflow: { slug: string; version: number | null; body: string }
   knowledge: Array<KnowledgeMeta & { body: string }>
   references: Array<{ id: string; title: string }>
@@ -180,8 +225,8 @@ export interface AgentBundle {
 
 const REMEMBERED = 10
 
-async function loadCompanyKnowledge(supabase: SupabaseClient, companyId: string, id: RegistrySkillId): Promise<CompanyKnowledge> {
-  const def = AGENTS[id]
+/** Own agents declare no facts: they get every company fact the map holds. */
+async function loadCompanyKnowledge(supabase: SupabaseClient, companyId: string, def: { facts: readonly string[] | null; agreements: boolean }): Promise<CompanyKnowledge> {
   const [map, profile, memory] = await Promise.all([
     // The map is best-effort: an archive that cannot be read never blocks the agent.
     buildArkivMap(supabase, companyId).catch(() => null),
@@ -189,10 +234,10 @@ async function loadCompanyKnowledge(supabase: SupabaseClient, companyId: string,
     supabase.from('agent_memory').select('content').eq('company_id', companyId).eq('is_active', true)
       .order('relevance_score', { ascending: false, nullsFirst: false }).limit(REMEMBERED),
   ])
-  const order = new Map(def.facts.map((f, i) => [f, i]))
+  const order = def.facts ? new Map(def.facts.map((f, i) => [f, i])) : null
   const facts = (map?.company_facts ?? [])
-    .filter((f) => order.has(f.predicate))
-    .sort((a, b) => order.get(a.predicate)! - order.get(b.predicate)!)
+    .filter((f) => !order || order.has(f.predicate))
+    .sort((a, b) => order ? order.get(a.predicate)! - order.get(b.predicate)! : 0)
     .map(({ label, value, valid_from }) => ({ label, value, valid_from }))
   return {
     name: map?.company.name ?? null,
@@ -209,27 +254,60 @@ export function isAgentId(value: string): value is RegistrySkillId {
   return value in AGENTS
 }
 
+/** Knowledge bodies inlined per run; what does not fit is listed to load on demand. */
+const INLINE_BUDGET = 60_000
+
+function splitByBudget(rows: AtomRow[], list: Array<{ id: string; source: KnowledgeMeta['source'] }>) {
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const inline: Array<KnowledgeMeta & { body: string }> = []
+  const overflow: Array<{ id: string; title: string }> = []
+  let used = 0
+  for (const { id, source } of list) {
+    const row = byId.get(id)
+    if (!row?.body || row.parent_atom_id) continue
+    if (used + row.body.length <= INLINE_BUDGET) {
+      inline.push({ ...meta(row, source), body: row.body })
+      used += row.body.length
+    } else overflow.push({ id: row.id, title: row.title ?? row.id })
+  }
+  return { inline, overflow }
+}
+
 /**
- * One agent, ready to run: the workflow body, its knowledge cores inlined, the
- * references and company atoms as ids to load with load_skill when needed.
+ * One agent, ready to run: the instruction body, the knowledge the company
+ * gave it (defaults adjusted by company_agent_knowledge) inlined within a
+ * budget, references and company atoms as ids to load with load_skill.
+ * `own/<id>` runs a company's own agent the same way.
  */
-export async function loadAgentBundle(supabase: SupabaseClient, companyId: string, id: RegistrySkillId, client: AiClient = 'claude'): Promise<AgentBundle> {
-  const def = AGENTS[id]
-  const profileIds = await loadProfileAtoms(supabase, companyId)
-  const [cores, metaRows, states, companyKnowledge] = await Promise.all([
-    loadAtoms(supabase, [...def.knowledge], true),
-    loadAtoms(supabase, [...def.references, ...profileIds], false),
+export async function loadAgentBundle(supabase: SupabaseClient, companyId: string, id: string, client: AiClient = 'claude'): Promise<AgentBundle | null> {
+  const curated = isAgentId(id) ? AGENTS[id] : null
+  let workflow: { slug: string; name: string; version: number | null; body: string }
+  if (curated) {
+    const skill = workflowFor(id as RegistrySkillId, client)
+    workflow = { slug: skill.slug, name: skill.name, version: skill.version ?? null, body: skill.body }
+  } else if (id.startsWith('own/')) {
+    const row = (await loadCompanySkillRows(supabase, companyId)).find((r) => `own/${r.id}` === id)
+    const skill = row ? ownSkill(row) : null
+    if (!skill) return null
+    workflow = { slug: skill.slug, name: skill.name, version: null, body: skill.body }
+  } else return null
+
+  const [profileIds, choices] = await Promise.all([loadProfileAtoms(supabase, companyId), loadKnowledgeChoices(supabase, companyId)])
+  const list = effectiveKnowledge(curated?.knowledge ?? [], choices.get(id))
+  const [bodies, metaRows, states, companyKnowledge] = await Promise.all([
+    loadAtoms(supabase, list.map((k) => k.id), true),
+    loadAtoms(supabase, [...(curated?.references ?? []), ...profileIds], false),
     loadConnectionStates(supabase, companyId),
-    loadCompanyKnowledge(supabase, companyId, id),
+    loadCompanyKnowledge(supabase, companyId, { facts: curated?.facts ?? null, agreements: curated?.agreements ?? true }),
   ])
-  const workflow = workflowFor(id, client)
+  const { inline, overflow } = splitByBudget([...bodies.values()], list)
   return {
     agent: { id, name: workflow.name },
-    workflow: { slug: workflow.slug, version: workflow.version ?? null, body: workflow.body },
-    knowledge: def.knowledge.flatMap((k) => { const row = cores.get(k); return row?.body ? [{ ...meta(row), body: row.body }] : [] }),
-    references: def.references.flatMap((r) => { const row = metaRows.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] }),
+    workflow: { slug: workflow.slug, version: workflow.version, body: workflow.body },
+    knowledge: inline,
+    references: [...overflow, ...(curated?.references ?? []).filter((r) => list.some((k) => k.id === packOf(r))).flatMap((r) => { const row = metaRows.get(r); return row ? [{ id: row.id, title: row.title ?? row.id }] : [] })],
     company: companyAtoms(metaRows, profileIds),
     company_knowledge: companyKnowledge,
-    connections: connectionsFor(id, states),
+    connections: curated ? connectionsFor(id as RegistrySkillId, states) : [],
   }
 }

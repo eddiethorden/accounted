@@ -14,8 +14,11 @@ import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
 import type { AgentOverview } from '@/lib/agent-skills/agent-bundle'
 import type { CompanySkillRow } from '@/lib/agent-skills/company-skills'
 import { formatDateLong } from '@/lib/utils'
-import { SkillMarks } from './SkillMarks'
-import { AgentParts, type CompanyCounts } from './AgentParts'
+import { AgentParts, type ChangeKnowledge, type CompanyCounts } from './AgentParts'
+import { AgentAvatar, type Presence } from './AgentFace'
+import { AGENTS } from '@/lib/agent-skills/agents'
+import type { KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
+import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import styles from './skills.module.css'
 
 type ShareStatus = CompanySkillRow['share_status']
@@ -27,8 +30,14 @@ export type SheetTarget =
 /** What the sheet knows about the agent beyond its target: from GET /api/agents. */
 export interface SheetAgentContext {
   agent?: AgentOverview
+  /** What the opened agent knows for the company (curated effective list or an own agent's choices). */
+  knowledge: KnowledgeMeta[]
   company: AgentOverview['company']
   counts: CompanyCounts
+  /** The agent's live status line and presence, as on its card. */
+  status?: { presence: Presence; text: string }
+  options: KnowledgeOption[]
+  onChangeKnowledge: ChangeKnowledge
 }
 
 /**
@@ -140,16 +149,26 @@ function SheetBody({ target, context, onShare, companyId, client, canWrite, todo
     <div className={styles.sheetBody}>
       <div className={styles.sheetHead}>
         <div className={styles.dtTop}>
-          {id && <SkillMarks id={id} />}
-          <DialogPrimitive.Title asChild><h2 data-ph-mask={own ? '' : undefined}>{title}</h2></DialogPrimitive.Title>
+          {id ? (
+            <div className={`${styles.sheetIdent} flex-1 min-w-0`}>
+              <AgentAvatar id={id} presence={context.status?.presence} size="lg" />
+              <span className={styles.who}>
+                <DialogPrimitive.Title asChild><h2 className={styles.whoName}>{AGENTS[id].persona.name}</h2></DialogPrimitive.Title>
+                <span className={styles.whoRole}>{t(`skills.${id}.role`)} · {title}</span>
+              </span>
+            </div>
+          ) : (
+            <DialogPrimitive.Title asChild><h2 data-ph-mask={own ? '' : undefined}>{title}</h2></DialogPrimitive.Title>
+          )}
           <DialogPrimitive.Close asChild><Button variant="outline" size="icon" className="shrink-0 self-start" aria-label={t('close')}><X className="h-4 w-4" aria-hidden /></Button></DialogPrimitive.Close>
         </div>
         <p className={styles.dtD}>{own ? t(own.draft ? 'draft_desc' : 'own_desc') : t(`skills.${id}.desc`)}</p>
         {id && t.has(`skills.${id}.note`) && <p className={styles.dtNote}>{t(`skills.${id}.note`)}</p>}
+        {context.status && <p className={styles.status} data-presence={context.status.presence}>{context.status.text}</p>}
         {usage && <p className={styles.usesLine}>{t('uses_line', { count: usage.count, date: formatDateLong(usage.last_at, locale) })}</p>}
       </div>
       <div className={styles.sheetMain}>
-        <AgentParts steps={steps} agent={context.agent} company={context.company} counts={context.counts} own={!!own} />
+        <AgentParts steps={steps} agent={context.agent} knowledge={context.knowledge} company={context.company} counts={context.counts} own={!!own} options={context.options} canEdit={canWrite && !own?.draft} onChangeKnowledge={context.onChangeKnowledge} />
         {own && !own.draft && <ShareBox target={own} canWrite={canWrite} onShare={onShare} />}
         <div className={styles.sheetFoot}>
           {own?.draft ? (
@@ -179,7 +198,7 @@ function SheetBody({ target, context, onShare, companyId, client, canWrite, todo
             <div className="flex flex-col gap-2">
               {todo ? <p className={styles.todoLine}><b>{todo}</b>{t('sheet_todo', { count: todo })}</p> : null}
               <Button size="lg" className="w-full gap-2" onClick={copyAndOpen}>
-                {t('run_client', { client: clientName })}
+                {id ? t('run_agent', { name: AGENTS[id].persona.name, client: clientName }) : t('run_client', { client: clientName })}
                 <ArrowUpRight className="h-4 w-4" aria-hidden />
               </Button>
               <p className={styles.goHint}>{t(own ? 'run_hint' : 'run_hint_prefilled', { client: clientName })}</p>

@@ -5,7 +5,7 @@ import { codedError } from './company-routing'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadSkillCatalog, loadCatalogSkill } from '@/lib/agent-skills/catalog'
 import { AccountKeySchema } from '@/lib/reconciliation/schemas'
-import { isAgentId, loadAgentBundle, type AgentBundle } from '@/lib/agent-skills/agent-bundle'
+import { loadAgentBundle, type AgentBundle } from '@/lib/agent-skills/agent-bundle'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
 
 const TaskScopeSchema = z.object({
@@ -25,7 +25,7 @@ const TaskRequestSchema = z.object({
   kind: z.union([
     z.enum(Object.keys(ACCOUNTING_TASKS) as [AccountingTaskKind, ...AccountingTaskKind[]]),
     z.string().regex(/^skill:[a-z0-9][a-z0-9/-]{0,249}$/),
-    z.string().regex(/^agent:[a-z0-9][a-z0-9-]{0,63}$/),
+    z.string().regex(/^agent:(own\/[0-9a-f-]{36}|[a-z0-9][a-z0-9-]{0,63})$/),
   ]),
   scope: TaskScopeSchema.optional(),
   /** Which AI runs the agent: Kvittojakten's workflow differs per client. */
@@ -77,8 +77,8 @@ export async function getAccountingTask(args: Record<string, unknown>, companyId
 async function getAgentTask(id: string, scope: z.infer<typeof TaskScopeSchema>, companyId: string, supabase: SupabaseClient, client?: AiClient): Promise<AgentBundle & {
   company_id: string; kind: string; goal: string; scope: z.infer<typeof TaskScopeSchema>; skills: string[]; instructions: string[]
 }> {
-  if (!isAgentId(id)) throw codedError('NOT_FOUND', `Agent not found: ${id}`)
   const bundle = await loadAgentBundle(supabase, companyId, id, client)
+  if (!bundle) throw codedError('NOT_FOUND', `Agent not found: ${id}`)
   return {
     company_id: companyId,
     kind: `agent:${id}`,

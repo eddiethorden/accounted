@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowRight, Check, Loader2, Plus } from 'lucide-react'
+import { ArrowRight, Loader2, Plus } from 'lucide-react'
 import useSWR from 'swr'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
 import type { CatalogSkill } from '@/lib/agent-skills/catalog'
 import type { WorklistCategory } from '@/lib/worklist/types'
-import { FREE_SKILLS, REGISTRY_SKILLS, hasTodoSignal, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
+import { FREE_SKILLS, REGISTRY_SKILLS, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import { AI_CLIENTS, aiConnectAction, aiPrefilledChatLink, openAiConnector, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
@@ -21,6 +21,11 @@ import { SkillSheet, type SheetTarget } from './SkillSheet'
 import { SkillCreator, type CreatorMode, type KeyRect } from './SkillCreator'
 import { SkillMarks } from './SkillMarks'
 import { useKnowledgeName } from './AgentParts'
+import { AgentAvatar, AgentWho, type Presence } from './AgentFace'
+import { AGENTS, isCheckable } from '@/lib/agent-skills/agents'
+import type { KnowledgeAction, KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
+import { formatDateLong } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 import { Spark, centerIn, prefersReducedMotion, wait } from './spark'
 import styles from './skills.module.css'
 
@@ -92,6 +97,12 @@ async function readAgents(url: string): Promise<AgentsOverview | null> {
   return (await response.json()).data as AgentsOverview
 }
 
+async function readOptions(url: string): Promise<KnowledgeOption[]> {
+  const response = await fetch(url)
+  if (!response.ok) return []
+  return (await response.json()).data as KnowledgeOption[]
+}
+
 async function readCatalog(url: string): Promise<SkillSummary[]> {
   const response = await fetch(url)
   if (!response.ok) throw new Error('Skills request failed')
@@ -151,9 +162,6 @@ function Registry({ companyId }: { companyId: string }) {
   const worklist = useSWR(['/api/worklist/counts', companyId], ([url]) => readWorklist(url))
   const usage = useSWR(['/api/skills/usage', companyId], ([url]) => readUsage(url))
   const doNow = skillsToDoNow(worklist.data ?? {})
-  // "Allt klart": the skill has a signal and the loaded worklist has nothing for it
-  const allDone = (id: RegistrySkillId) => !!worklist.data && hasTodoSignal(id) && !doNow.has(id)
-  const uses = (slug: string) => usage.data?.[slug]?.count ?? 0
   // the one thing worth doing now: the skill with the most waiting
   const own: OwnRow[] = (catalog.data ?? [])
     .filter((skill) => skill.tier === 'own' && skill.shareStatus !== 'withdrawn' && skill.installations[0])
@@ -251,6 +259,18 @@ function Registry({ companyId }: { companyId: string }) {
   const clientName = AI_CLIENTS.find((c) => c.id === client)!.name
   const agents = useSWR(['/api/agents', companyId, client], ([url, , c]) => readAgents(`${url}?client=${c}`))
   const agentFor = (id: RegistrySkillId) => agents.data?.agents.find((a) => a.id === id)
+  const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
+  const locale = useLocale()
+  async function changeKnowledge(agentId: string, action: KnowledgeAction, atomId?: string): Promise<boolean> {
+    try {
+      const response = await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(atomId ? { action, agent_id: agentId, atom_id: atomId } : { action, agent_id: agentId }) })
+      if (!response.ok) return false
+      await agents.mutate()
+      return true
+    } catch {
+      return false
+    }
+  }
   const [tab, setTab] = useState<Tab>('accounted')
 
   // ── connect ──
@@ -388,6 +408,19 @@ function Registry({ companyId }: { companyId: string }) {
     })()
   }, [landingSlug])
 
+  // ── how each agent is doing right now, as one line and a presence dot ──
+  function statusFor(id: RegistrySkillId): { presence: Presence; text: string } {
+    // Only when no AI is known to be connected: while the status loads, say what the agent itself is doing.
+    if (state === 'locked' || state === 'waiting') return { presence: 'idle', text: t('status_ai_missing') }
+    const missing = agentFor(id)?.connections.find((c) => isCheckable(c.kind) && c.status === 'missing')
+    if (missing) return { presence: 'blocked', text: t('status_needs', { conn: t(`conn_${missing.kind}`) }) }
+    const waiting = doNow.get(id)
+    if (waiting) return { presence: 'busy', text: t('now_count', { count: waiting }) }
+    const last = usage.data?.[id]?.last_at
+    if (last) return { presence: 'ready', text: t('status_last', { date: formatDateLong(last, locale) }) }
+    return { presence: 'ready', text: t('status_ready') }
+  }
+
   // ── derived view ──
   const top = REGISTRY_SKILLS.slice(0, FREE_SKILLS)
   // skills with work waiting on Att göra come first
@@ -432,15 +465,15 @@ function Registry({ companyId }: { companyId: string }) {
               data-now={doNow.has(skill.id) ? '' : undefined}
             >
               <button type="button" className={styles.face} onClick={() => setSheet({ kind: 'registry', id: skill.id, locked: !isConnected })}>
-                <span className={styles.faceTop}>
-                  <SkillMarks id={skill.id} />
-                  {doNow.has(skill.id) && <span className={styles.now}>{t('now_count', { count: doNow.get(skill.id)! })}</span>}
-                  {allDone(skill.id) && <span className={styles.done}><Check className="h-3 w-3" aria-hidden />{t('all_done')}</span>}
+                <span className={styles.ident}>
+                  <AgentAvatar id={skill.id} presence={statusFor(skill.id).presence} />
+                  <AgentWho id={skill.id} />
                 </span>
-                <h3>{t(`skills.${skill.id}.name`)}</h3>
+                <span className={styles.task}>{t(`skills.${skill.id}.name`)}</span>
                 <p>{t(`skills.${skill.id}.short`)}</p>
                 <span className={styles.foot}>
-                  {uses(skill.id) > 0 && <span className={styles.uses}>{t('uses', { count: uses(skill.id) })}</span>}
+                  <span className={styles.status} data-presence={statusFor(skill.id).presence}>{statusFor(skill.id).text}</span>
+                  <SkillMarks id={skill.id} />
                   <span className={styles.open} aria-hidden>{t('open_hint')}</span>
                 </span>
               </button>
@@ -507,16 +540,23 @@ function Registry({ companyId }: { companyId: string }) {
                 >
                   <span className={styles.anchor} ref={(el) => { if (el) rowAnchors.current.set(row.key, el); else rowAnchors.current.delete(row.key) }} aria-hidden />
                   <button type="button" className={styles.rowMain} tabIndex={rowsLocked ? -1 : undefined} onClick={() => openRow(row)}>
-                    <span className={styles.nm} data-ph-mask={row.own ? '' : undefined}>{row.name}</span>
+                    {row.id ? (
+                      <span className={styles.ident}>
+                        <AgentAvatar id={row.id} presence={statusFor(row.id).presence} />
+                        <span className={styles.who}>
+                          <span className={styles.whoName}>{AGENTS[row.id].persona.name}</span>
+                          <span className={styles.whoRole}>{t(`skills.${row.id}.role`)}</span>
+                        </span>
+                      </span>
+                    ) : <span className={styles.nm} data-ph-mask={row.own ? '' : undefined}>{row.name}</span>}
                   </button>
+                  {row.id && <span className={styles.task}>{row.name}</span>}
                   <span className={styles.ds} data-ph-mask={row.own ? '' : undefined}>{row.desc}</span>
                   {row.own?.draft && <span className={`${styles.now} ${styles.nowLight}`}>{t('draft_tag')}</span>}
-                  {row.id && doNow.has(row.id) && <span className={`${styles.now} ${styles.nowLight}`}>{t('now_count', { count: doNow.get(row.id)! })}</span>}
-                  {row.id && allDone(row.id) && <span className={`${styles.done} ${styles.doneLight}`}><Check className="h-3 w-3" aria-hidden />{t('all_done')}</span>}
                   {row.id && agentFor(row.id) && <span className={styles.kn}>{agentFor(row.id)!.knowledge.map((k) => knowledgeName(k.id, k.title)).join(' · ')}</span>}
                   <span className={styles.foot}>
+                    {row.id && <span className={styles.status} data-presence={statusFor(row.id).presence}>{statusFor(row.id).text}</span>}
                     {row.id && <SkillMarks id={row.id} />}
-                    {uses(row.key) > 0 && <span className={styles.uses}>{t('uses', { count: uses(row.key) })}</span>}
                     <span className={styles.open} aria-hidden>{t('open_hint')}</span>
                   </span>
                 </div>
@@ -572,7 +612,13 @@ function Registry({ companyId }: { companyId: string }) {
 
       <SkillSheet
         target={sheet?.kind === 'registry' ? { ...sheet, locked: sheetLocked } : sheet}
-        context={{ agent: sheet?.kind === 'registry' ? agentFor(sheet.id) : undefined, company: agents.data?.agents[0]?.company ?? [], counts: { agreements: agents.data?.agreements ?? 0, remembered: agents.data?.remembered ?? 0, documents: agents.data?.documents ?? 0 } }}
+        context={{
+          agent: sheet?.kind === 'registry' ? agentFor(sheet.id) : undefined,
+          knowledge: sheet?.kind === 'registry' ? agentFor(sheet.id)?.knowledge ?? [] : sheet ? agents.data?.own_knowledge[sheet.slug] ?? [] : [],
+          status: sheet?.kind === 'registry' ? statusFor(sheet.id) : undefined,
+          options: options.data ?? [],
+          onChangeKnowledge: (action, atomId) => sheet ? changeKnowledge(sheet.kind === 'registry' ? sheet.id : sheet.slug, action, atomId) : Promise.resolve(false),
+          company: agents.data?.agents[0]?.company ?? [], counts: { agreements: agents.data?.agreements ?? 0, remembered: agents.data?.remembered ?? 0, documents: agents.data?.documents ?? 0 } }}
         onShare={shareOwn}
         companyId={companyId}
         client={client}
