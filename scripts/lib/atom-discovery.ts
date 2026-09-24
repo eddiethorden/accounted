@@ -18,6 +18,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { discoverCommunitySkills } from './community-skills'
+import { AREAS, isArea, type Area } from '../../src/lib/agent-skills/areas'
 
 export type Tier = 'horizontal' | 'vertical' | 'modifier' | 'community'
 
@@ -299,7 +300,8 @@ async function readAtom(
       ? `${r.descriptor}: reference for ${parent.title}`
       : `Reference for ${parent.title}`,
     sni_prefixes: [],
-    trigger_signals: {},
+    // A section's areas route it to the flows that work in them (agent-bundle.ts).
+    trigger_signals: r.areas.length > 0 ? { areas: r.areas } : {},
     estimated_tokens: estimateTokens(r.body),
     body_path: relative(rootDir, r.absPath),
     body: r.body,
@@ -329,6 +331,8 @@ interface ReferenceFile {
   /** First ATX heading (or first line), used as a human-readable label. */
   descriptor: string
   audience: Audience
+  /** Areas of work the section serves (`areas: [..]` frontmatter); empty when untagged. */
+  areas: Area[]
 }
 
 async function readReferenceFiles(skillDir: string): Promise<ReferenceFile[]> {
@@ -345,6 +349,10 @@ async function readReferenceFiles(skillDir: string): Promise<ReferenceFile[]> {
     const body = normalizeLineEndings(await readFile(absPath, 'utf8'))
     const relFromRefs = relative(refsDir, absPath).split(sep).join('/')
     const audience = parseAudience(body, absPath)
+    const areas = parseAreas(body, absPath)
+    if (audience === 'developer' && areas.length > 0) {
+      throw new Error(`${absPath}: a developer reference never reaches a flow, so it cannot declare areas`)
+    }
     out.push({
       absPath,
       relPath: `references/${relFromRefs}`,
@@ -352,6 +360,7 @@ async function readReferenceFiles(skillDir: string): Promise<ReferenceFile[]> {
       body,
       descriptor: firstHeadingOrLine(body),
       audience,
+      areas,
     })
   }
   return out
@@ -374,6 +383,21 @@ function parseAudience(body: string, path: string): Audience {
   if (value === undefined || value === 'agent') return 'agent'
   if (value === 'developer') return 'developer'
   throw new Error(`${path}: audience must be "agent" or "developer", got "${value}"`)
+}
+
+/**
+ * `areas: [moms, fakturering]` from a reference file's frontmatter, in the
+ * fixed set of lib/agent-skills/areas.ts. An unknown area throws: a typo would
+ * otherwise silently keep a section away from the flow it was written for.
+ */
+export function parseAreas(body: string, path: string): Area[] {
+  const fm = extractFrontmatter(body)
+  if (!fm || !/^areas:/m.test(fm.raw)) return []
+  const values = parseArray(fm.raw, 'areas')
+  if (!values) throw new Error(`${path}: areas must be an inline list, e.g. areas: [moms, fakturering]`)
+  const unknown = values.filter((v) => !isArea(v))
+  if (unknown.length > 0) throw new Error(`${path}: unknown area(s) ${unknown.join(', ')}; allowed: ${AREAS.join(', ')}`)
+  return [...new Set(values as Area[])]
 }
 
 function firstHeadingOrLine(md: string): string {

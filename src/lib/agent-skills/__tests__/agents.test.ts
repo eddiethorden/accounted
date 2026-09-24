@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { discoverAtoms } from '@/scripts/lib/atom-discovery'
-import { AGENTS, CONNECTION_SETTINGS, isCheckable } from '../agents'
+import { AGENTS, AREAS, CONNECTION_SETTINGS, isCheckable } from '../agents'
 import { REGISTRY_SKILLS } from '../registry'
 import { predicateDef } from '@/lib/arkiv/facts/predicates'
 
@@ -24,6 +24,13 @@ describe('AGENTS manifest', () => {
         expect(atom!.parent_atom_id, `${id}: ${r} must be a reference`).not.toBeNull()
         expect(atom!.audience, `${id}: ${r} is developer material`).toBe('agent')
       }
+    }
+  })
+
+  it('gives every agent at least one area from the fixed set', () => {
+    for (const [id, def] of Object.entries(AGENTS)) {
+      expect(def.areas.length, `${id}: areas`).toBeGreaterThan(0)
+      for (const a of def.areas) expect(AREAS, `${id}: area ${a}`).toContain(a)
     }
   })
 

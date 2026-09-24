@@ -590,7 +590,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .rowContent { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .rowContent .muted { overflow: hidden; text-overflow: ellipsis; }
 .rowAction { display: flex; justify-content: center; align-items: center; width: 40px; }
-.sqBtn { border-radius: 10px; }
 .instrBox { position: relative; max-height: 200px; }
 
 /* ── sliding tabs: the pill glides, a click leaves no outline ── */
@@ -725,11 +724,6 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 /* ── the catalogue, laid out like Claude's Customize page ── */
 .catalog { display: flex; flex-direction: column; gap: 36px; }
 .catBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.catTabs { display: inline-flex; gap: 4px; }
-.catTab { height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: 14px; font-weight: 500; color: hsl(var(--muted-foreground)); cursor: pointer; transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out); }
-.catTab:hover { color: hsl(var(--foreground)); }
-.catTab[aria-selected='true'] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
-.catTab:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .catDivider { width: 1px; height: 24px; background: hsl(var(--border)); }
 .catTools { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .catSection { display: flex; flex-direction: column; gap: 14px; }
@@ -833,3 +827,32 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .textEdit { width: 100%; min-height: 220px; padding: 14px 16px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); font: inherit; font-size: 13.5px; line-height: 21px; color: hsl(var(--foreground)); resize: vertical; outline: none; transition: border-color 150ms var(--ease-out); }
 .textEdit:focus { border-color: hsl(var(--ring)); }
 .placeholderName { color: hsl(var(--muted-foreground)); font-weight: 400; }
+
+/* ── an analysis's picture (AnalysisSymbol.tsx): raised bars, still until hovered ── */
+.anaSym { position: relative; display: inline-block; flex: none; }
+.anaBox { position: absolute; left: 0; top: 0; width: 64px; height: 64px; transform-origin: 0 0; perspective: 220px; }
+.anaTilt { position: absolute; inset: 0; transform: rotateX(24deg) rotateZ(-8deg); transform-style: preserve-3d; transition: transform 300ms var(--ease-out); }
+.anaSheet { position: absolute; left: 6px; right: 6px; bottom: 8px; height: 10px; border-radius: 6px; background: linear-gradient(180deg, hsl(var(--fh) 45% 88%), hsl(var(--fh) 40% 80%)); box-shadow: 0 5px 8px -3px rgb(0 0 0 / 0.22); }
+.anaBar {
+  position: absolute; bottom: 13px; width: 11px; border-radius: 4px 4px 2px 2px; transform-origin: 50% 100%;
+  background: linear-gradient(90deg, hsl(var(--fh) 58% 52%), hsl(var(--fh) 62% 40%));
+  box-shadow: inset 2px 0 0 hsl(var(--fh) 70% 70% / 0.6), 0 3px 0 hsl(var(--fh) 55% 30%), 0 6px 8px -2px rgb(0 0 0 / 0.25);
+}
+.anaBar::before { content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 5px; border-radius: 50%; background: hsl(var(--fh) 65% 72%); }
+.ab1 { left: 12px; height: 16px; }
+.ab2 { left: 27px; height: 26px; }
+.ab3 { left: 42px; height: 38px; }
+.anaLine path { stroke: hsl(var(--fh) 70% 32%); stroke-dasharray: 40; stroke-dashoffset: 40; }
+.anaLine circle { fill: hsl(var(--fh) 70% 32%); opacity: 0; }
+.anaLine { position: absolute; left: 0; top: 0; }
+@keyframes ana-rise { 0% { transform: scaleY(0.35); } 60% { transform: scaleY(1.06); } 100% { transform: scaleY(1); } }
+@keyframes ana-draw { 0%, 45% { stroke-dashoffset: 40; } 85%, 100% { stroke-dashoffset: 0; } }
+@keyframes ana-dot { 0%, 80% { opacity: 0; } 100% { opacity: 1; } }
+:is(.acard, .stage, .featured, .kindsIntro):hover .anaTilt { transform: rotateX(0deg) rotateZ(0deg); }
+:is(.acard, .stage, .featured, .kindsIntro):hover .anaBar { animation: ana-rise 600ms var(--ease-out) both; }
+:is(.acard, .stage, .featured, .kindsIntro):hover .ab2 { animation-delay: 120ms; }
+:is(.acard, .stage, .featured, .kindsIntro):hover .ab3 { animation-delay: 240ms; }
+:is(.acard, .stage, .featured, .kindsIntro):hover .anaLine path { animation: ana-draw 1100ms var(--ease-out) both; }
+:is(.acard, .stage, .featured, .kindsIntro):hover .anaLine circle { animation: ana-dot 1100ms var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) { .anaTilt { transition: none; } .anaBar, .anaLine path, .anaLine circle { animation: none !important; } .anaLine path { stroke-dashoffset: 0; } .anaLine circle { opacity: 1; } }
+.featured { overflow: hidden; }

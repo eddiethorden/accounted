@@ -22,7 +22,8 @@ import { ConnectionMark, SourceMarks } from './ConnectionMark'
 import { copyPromptAndOpen } from './run'
 import type { Presence } from './hues'
 import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
-import { itemHue, type ItemKind } from './hues'
+import { itemHue, seedOf, type ItemKind } from './hues'
+import { StrataField } from './StrataField'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { agentSegment, agentStatus, communityMeta, communitySegment, kindOf, rulesSegment, type CommunityMeta, type SkillSummary } from './data'
 import styles from './skills.module.css'
@@ -176,11 +177,12 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   return (
     <div className={styles.catalog}>
       <div className={styles.catBar}>
-        <div className={styles.catTabs} role="tablist" aria-label={t('kinds_label')}>
-          {KINDS.map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={k === kind} className={styles.catTab} onClick={() => go({ typ: k, kategori: null })}>{t(`kind_${k}`)}</button>
-          ))}
-        </div>
+        <SegmentedControl<ItemKind>
+          aria-label={t('kinds_label')}
+          value={kind}
+          onChange={(k) => go({ typ: k, kategori: null })}
+          options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))}
+        />
         <span className={styles.catDivider} aria-hidden />
         <SegmentedControl<'own' | 'discover'>
           aria-label={t('view_label')}
@@ -193,7 +195,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           {view === 'discover' && categories.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={t('category_label')}><SlidersHorizontal className="h-4 w-4" aria-hidden /></Button>
+                <Button variant="outline" size="icon-sm" aria-label={t('category_label')}><SlidersHorizontal className="h-4 w-4" aria-hidden /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>{t('category_label')}</DropdownMenuLabel>
@@ -206,7 +208,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className={styles.sqBtn} aria-label={t('sort_label')}><ArrowUpDown className="h-4 w-4" aria-hidden /></Button>
+              <Button variant="outline" size="icon-sm" aria-label={t('sort_label')}><ArrowUpDown className="h-4 w-4" aria-hidden /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>{t('sort_label')}</DropdownMenuLabel>
@@ -362,10 +364,12 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
   }
   return (
     <section className={styles.featured} style={{ background: `hsl(${hue} 32% 90%)` }}>
+      {/* A faint strata ground, the stage's in the item's colour, kept quiet behind the text. */}
+      <StrataField seed={seedOf(item.key)} ground={`hsl(${hue} 32% 90%)`} bar={`hsl(${hue} 35% 45%)`} strength={1.2} />
       {/* The whole banner opens the item; the start button and connection logos sit above this link. */}
       <Link href={item.href} className={styles.featuredLink} aria-label={item.title} />
       <div className={styles.featuredText}>
-        <span>{industry ? t('featured_industry') : item.source === 'community' && item.meta ? t('featured_community', { who: `@${item.meta.author}` }) : t('featured_accounted')}</span>
+        {(industry || item.source === 'community') && <span>{industry ? t('featured_industry') : t('featured_community', { who: `@${item.meta?.author ?? ''}` })}</span>}
         <h2>{item.title}</h2>
         <p>{item.lede ?? item.desc}</p>
         <div className={styles.featuredActions}>

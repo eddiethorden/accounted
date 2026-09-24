@@ -11,7 +11,7 @@ import { useState, type ReactNode } from 'react'
 import { CompanyProvider } from '@/contexts/CompanyContext'
 import DashboardNav from '@/components/dashboard/DashboardNav'
 import { AgentSheetProvider } from '@/components/agent/AgentSheetProvider'
-import { AGENTS } from '@/lib/agent-skills/agents'
+import { AGENTS, type Area } from '@/lib/agent-skills/agents'
 import { REGISTRY_SKILLS } from '@/lib/agent-skills/registry'
 import type { AgentsOverview, ConnectionStatus } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
@@ -83,6 +83,15 @@ function overview(): AgentsOverview {
   }
 }
 
+/** The konsult-it sections as tagged in .claude/skills/industry/konsult-it/references. */
+const KONSULT_IT_SECTIONS: Array<{ id: string; title: string; areas: Area[] }> = [
+  { id: 'vertical/konsult-it/invoice-templates', title: 'Invoice text library: IT consulting (Sweden)', areas: ['fakturering'] },
+  { id: 'vertical/konsult-it/electronic-services-classification', title: 'Electronic services classification (moms)', areas: ['moms'] },
+  { id: 'vertical/konsult-it/cross-border-payroll', title: 'Cross-border payroll for IT consultants', areas: ['lon'] },
+  { id: 'vertical/konsult-it/3-12-rules', title: '3:12-reglerna (IL 57 kap): full reference', areas: ['bokslut'] },
+  { id: 'vertical/konsult-it/software-capitalization', title: 'Software capitalization: K3, K2, IFRS', areas: ['bokslut'] },
+]
+
 const OVERVIEW: AgentsOverview = {
   facts: KNOWN_FACTS.size,
   agreements: 2,
@@ -103,6 +112,8 @@ const OVERVIEW: AgentsOverview = {
       { id: 'vertical/konsult-it', title: 'IT-konsult & systemutvecklare (SNI 62)', tier: 'vertical' as const },
       { id: 'modifier/single-shareholder-ab-fmb', title: 'Aktiebolag med en aktieägare (fåmansbolag)', tier: 'modifier' as const },
     ],
+    industry_sections: KONSULT_IT_SECTIONS.filter((s) => s.areas.some((a) => AGENTS[id].areas.includes(a)))
+      .map(({ id: sectionId, title }) => ({ id: sectionId, title, parent_id: 'vertical/konsult-it' })),
     connections: AGENTS[id].connections.map((kind) => kind in CONNECTIONS
       ? { kind, status: CONNECTIONS[kind], ...(CONNECTIONS[kind] === 'missing' ? { settings_href: SETTINGS[kind] } : {}) }
       : { kind, status: 'in_ai' as const }),
@@ -159,6 +170,8 @@ function installFixtures() {
         if (OWN_BODIES.has(slug)) return json({ body: OWN_BODIES.get(slug) })
         const real = PACK_TEXTS.get(slug)
         if (real) return json({ body: real })
+        const section = KONSULT_IT_SECTIONS.find((sec) => sec.id === slug)
+        if (section) return json({ body: `# ${section.title}\n\nI appen visas avsnittets egen text här, samma text som din AI läser.` })
         const pack = OPTIONS.find((o) => o.id === slug)
         if (pack) return json({ body: `# ${pack.title}\n\nI appen visas packets egen text här, samma text som din AI läser.` })
         const item = CATALOG.find((c) => c.slug === slug)
