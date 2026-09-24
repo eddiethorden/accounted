@@ -9,6 +9,8 @@
 
 import { useState, type ReactNode } from 'react'
 import { CompanyProvider } from '@/contexts/CompanyContext'
+import DashboardNav from '@/components/dashboard/DashboardNav'
+import { AgentSheetProvider } from '@/components/agent/AgentSheetProvider'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { REGISTRY_SKILLS } from '@/lib/agent-skills/registry'
 import type { AgentsOverview, ConnectionStatus } from '@/lib/agent-skills/agent-bundle'
@@ -160,14 +162,27 @@ const COMPANY = {
 let installed = false
 
 /** The demo company around a page, with the fixture API installed once. */
+// The dashboard panel's classes (app/(dashboard)/layout.tsx MAIN_PANEL_CLASS), copied: that layout is a server module.
+const MAIN_PANEL_CLASS =
+  'safe-area-main-padding md:!pb-0 relative bg-background min-h-dvh ' +
+  'md:min-h-0 md:ml-[var(--nav-w)] md:mt-[10px] md:mr-[var(--agent-dock-w)] md:h-[calc(100vh-20px)] ' +
+  'md:overflow-y-auto md:rounded-xl md:border md:border-border'
+
 export function SandboxShell({ children }: { children: ReactNode }) {
   useState(() => { if (typeof window !== 'undefined' && !installed) { installFixtures(); installed = true } })
   return (
     <CompanyProvider value={COMPANY as never}>
-      <div className="min-h-screen bg-background px-4 py-6 md:px-8">
-        <p className="mb-4 text-xs text-muted-foreground">Demo: Exempelbolaget AB, exempeldata. Inget sparas.</p>
-        {children}
-      </div>
+      <AgentSheetProvider>
+        {/* The dashboard's own frame (app/(dashboard)/layout.tsx): the real sidebar and the rounded panel, so the demo reads as the page will in the app. */}
+        <div className="min-h-dvh bg-frame md:flex md:flex-col">
+          <DashboardNav companyName="Exempelbolaget AB" entityType="aktiebolag" agentsEnabled userName="Demo, inget sparas" />
+          <main id="main-content" className={MAIN_PANEL_CLASS} role="main">
+            <div className="px-4 pb-8 pt-4 md:px-6">
+              {children}
+            </div>
+          </main>
+        </div>
+      </AgentSheetProvider>
     </CompanyProvider>
   )
 }
