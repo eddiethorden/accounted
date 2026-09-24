@@ -240,10 +240,16 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           )}
           {view === 'advanced' && (
             <SubView title={t('section_advanced')} onBack={() => setView('main')}>
+              <div className={styles.alist}>
               <CopyInstruction body={body.data} />
-              {canEdit && changed && <div><Button variant="outline" size="sm" onClick={() => void changeKnowledge('reset')}>{t('knowledge_reset')}</Button></div>}
+              {canEdit && changed && (
+                <ActionRow title={t('adv_reset_title')} desc={t('adv_reset_desc')}>
+                  <Button variant="outline" size="sm" onClick={() => void changeKnowledge('reset')}>{t('adv_reset')}</Button>
+                </ActionRow>
+              )}
               {own && !own.draft && <ShareBox status={own.shareStatus ?? 'private'} canWrite={canWrite} onShare={(share) => patchOwn(share === 'withdraw' ? { action: 'withdraw' } : { action: 'submit', confirmed_no_customer_data: true, author_handle: share.author_handle })} />}
-              {own && (own.shareStatus ?? 'private') === 'private' && <DeleteOwn canWrite={canWrite} onDelete={deleteOwn} />}
+              </div>
+              {own && (own.shareStatus ?? 'private') === 'private' && <div className={styles.alist}><DeleteOwn canWrite={canWrite} onDelete={deleteOwn} /></div>}
             </SubView>
           )}
           {view === 'knowledge' && (
@@ -289,7 +295,7 @@ function SubView({ title, onBack, children }: { title: string; onBack: () => voi
   return (
     <div className="flex flex-col gap-4">
       <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
-      <span className={styles.rowLabel}>{title}</span>
+      <h2 className={styles.subTitle}>{title}</h2>
       {children}
     </div>
   )
@@ -300,17 +306,33 @@ function Capped({ items }: { items: ReactNode[] }) {
   return <>{items.slice(0, 2)}{items.length > 2 && <span className={styles.chip}>+{items.length - 2}</span>}</>
 }
 
+/** One advanced setting: what it is on the left, a single action on the right, the same edges on every row. */
+function ActionRow({ title, desc, alert, children, below }: { title: string; desc: string; alert?: string; children?: ReactNode; below?: ReactNode }) {
+  return (
+    <div className={styles.arow}>
+      <div className={styles.arowMain}>
+        <div className={styles.arowText}>
+          <span className={styles.arowTitle}>{title}</span>
+          <span className={styles.arowDesc}>{desc}</span>
+          {alert && <span role="alert" className={styles.arowAlert}>{alert}</span>}
+        </div>
+        {children && <div className={styles.arowAction}>{children}</div>}
+      </div>
+      {below}
+    </div>
+  )
+}
+
 function CopyInstruction({ body }: { body: string | undefined }) {
   const t = useTranslations('skills_registry')
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   return (
-    <div className="flex items-center gap-2">
+    <ActionRow title={t('adv_copy_title')} desc={t('adv_copy_desc')} alert={state === 'failed' ? t('copy_failed') : undefined}>
       <Button variant="outline" size="sm" disabled={!body} onClick={() => {
         const copying = body && navigator.clipboard ? navigator.clipboard.writeText(body) : Promise.reject(new Error('Nothing to copy'))
         void copying.then(() => setState('copied'), () => setState('failed'))
-      }}>{t(state === 'copied' ? 'copied_full' : 'copy_full')}</Button>
-      {state === 'failed' && <span role="alert" className={styles.muted}>{t('body_failed')}</span>}
-    </div>
+      }}>{t(state === 'copied' ? 'copied_full' : 'copy')}</Button>
+    </ActionRow>
   )
 }
 
@@ -417,19 +439,18 @@ function ShareBox({ status, canWrite, onShare }: {
     setState('sending')
     setState((await onShare(share)) ? 'idle' : 'failed')
   }
+  const failed = state === 'failed' ? t('share_failed') : undefined
   if (status === 'submitted' || status === 'published') {
     return (
-      <div className={styles.share}>
-        <span className={styles.shareStatus}><span className={styles.chipDot} aria-hidden />{t(`share_status_${status}`)}</span>
-        <div><Button variant="outline" size="sm" disabled={!canWrite} loading={state === 'sending'} onClick={() => void send('withdraw')}>{t('share_withdraw')}</Button></div>
-        {state === 'failed' && <p role="alert">{t('share_failed')}</p>}
-      </div>
+      <ActionRow title={t('adv_share_title')} desc={t(`share_status_${status}`)} alert={failed}>
+        <Button variant="outline" size="sm" disabled={!canWrite} loading={state === 'sending'} onClick={() => void send('withdraw')}>{t('share_withdraw')}</Button>
+      </ActionRow>
     )
   }
-  if (status === 'withdrawn') return <p className={styles.muted}>{t('share_status_withdrawn')}</p>
-  if (!open) return <div><Button variant="outline" disabled={!canWrite} onClick={() => setOpen(true)}>{t('share_cta')}</Button></div>
+  if (status === 'withdrawn') return <ActionRow title={t('adv_share_title')} desc={t('share_status_withdrawn')} />
   return (
-    <form className={styles.share} onSubmit={(e) => { e.preventDefault(); if (HANDLE.test(handle) && confirmed) void send({ author_handle: handle }) }}>
+    <ActionRow title={t('adv_share_title')} desc={t('adv_share_desc')} below={open && (
+    <form className={`${styles.share} ${styles.fadeIn}`} onSubmit={(e) => { e.preventDefault(); if (HANDLE.test(handle) && confirmed) void send({ author_handle: handle }) }}>
       <p>{t('share_body')}</p>
       <label htmlFor="agent-share-handle">
         {t('share_handle')}
@@ -444,8 +465,11 @@ function ShareBox({ status, canWrite, onShare }: {
         <Button type="submit" size="sm" disabled={!canWrite || !confirmed || !HANDLE.test(handle)} loading={state === 'sending'}>{t('share_submit')}</Button>
         <Button variant="outline" size="sm" onClick={() => setOpen(false)}>{t('cancel')}</Button>
       </div>
-      {state === 'failed' && <p role="alert">{t('share_failed')}</p>}
+      {failed && <p role="alert">{failed}</p>}
     </form>
+    )}>
+      {!open && <Button variant="outline" size="sm" disabled={!canWrite} onClick={() => setOpen(true)}>{t('adv_share')}</Button>}
+    </ActionRow>
   )
 }
 
@@ -454,9 +478,8 @@ function DeleteOwn({ canWrite, onDelete }: { canWrite: boolean; onDelete: () => 
   const [confirm, setConfirm] = useState(false)
   const [failed, setFailed] = useState(false)
   return (
-    <div className="flex flex-col gap-2">
-      <div><Button variant="ghost" size="sm" disabled={!canWrite} onClick={() => setConfirm(true)}>{t('delete')}</Button></div>
-      {failed && <p role="alert" className={styles.muted}>{t('save_failed')}</p>}
+    <ActionRow title={t('adv_delete_title')} desc={t('adv_delete_desc')} alert={failed ? t('save_failed') : undefined}>
+      <Button variant="outline" size="sm" className={styles.dangerBtn} disabled={!canWrite} onClick={() => setConfirm(true)}>{t('delete')}</Button>
       <DestructiveConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -466,7 +489,7 @@ function DeleteOwn({ canWrite, onDelete }: { canWrite: boolean; onDelete: () => 
         cancelLabel={t('cancel')}
         onConfirm={async () => { setFailed(!(await onDelete())) }}
       />
-    </div>
+    </ActionRow>
   )
 }
 
