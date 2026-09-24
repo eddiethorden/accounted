@@ -15,7 +15,6 @@ import { SegmentedControl } from '@/components/ui/segmented-control'
 import { ToolbarSearch } from '@/components/ui/toolbar-search'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ItemSymbol } from './ItemSymbol'
-import { WriteYourself } from './WriteYourself'
 import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
@@ -83,7 +82,7 @@ interface Item {
  * categories (industries and company forms) with counts; a category or a
  * search shows the full list. Egna is what the company made or uses.
  */
-export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, client, aiReady, canWrite, onCreate, onSaved, gate }: {
+export function Catalog({ hrefBase, catalog, options, overview, usage, own, companyIndustry, client, aiReady, canWrite, onCreate, gate }: {
   hrefBase: string
   catalog: SkillSummary[]
   options: KnowledgeOption[]
@@ -97,8 +96,6 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   canWrite: boolean
   /** Create with the company's AI. */
   onCreate: () => void
-  /** After something was written by hand: reload the catalogue. */
-  onSaved: () => void
   /** Shown in the featured slot while no AI is connected. */
   gate: ReactNode
 }) {
@@ -116,7 +113,8 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const [sort, setSort] = useState<'popular' | 'name'>('popular')
   const [showAll, setShowAll] = useState(false)
   const [allCategories, setAllCategories] = useState(false)
-  const [writing, setWriting] = useState(false)
+  // "Skriv själv" opens the new item's own page, empty, on the kind in view.
+  const write = () => router.push(`${hrefBase}/ny?typ=${KIND_PARAM[kind]}`)
 
   function go(next: { typ?: ItemKind; vy?: 'discover' | 'own'; kategori?: string | null }) {
     const sp = new URLSearchParams(params.toString())
@@ -228,7 +226,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
                 <img src={AI_CLIENTS.find((c) => c.id === client)!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
                 {t('create_with', { client: clientName })}
               </DropdownMenuItem>
-              <DropdownMenuItem className="gap-2" onSelect={() => setWriting(true)}><PenLine className="h-4 w-4" aria-hidden />{t('create_manual')}</DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onSelect={write}><PenLine className="h-4 w-4" aria-hidden />{t('create_manual')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -238,7 +236,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
         <section className={styles.catSection}>
           <div className={styles.catHead}><h2>{t(`own_${kind}_title`)}</h2></div>
           {listed.length === 0
-            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`own_${kind}_empty`, { client: clientName })}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={() => setWriting(true)} /></div>
+            ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`own_${kind}_empty`, { client: clientName })}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} /></div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
       )}
@@ -258,7 +256,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           {listed.length === 0
             ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}>
                 <span>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
-                {category && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={() => setWriting(true)} />}
+                {category && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} />}
               </div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
@@ -305,13 +303,6 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           )}
         </>
       )}
-      <WriteYourself
-        key={`${writing}:${kind}`}
-        open={writing}
-        onOpenChange={setWriting}
-        initialKind={kind}
-        onSaved={(saved) => { setWriting(false); onSaved(); go({ typ: saved.kind, vy: 'own', kategori: null }) }}
-      />
     </div>
   )
 }

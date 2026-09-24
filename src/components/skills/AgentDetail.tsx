@@ -338,7 +338,7 @@ function CopyInstruction({ body }: { body: string | undefined }) {
   )
 }
 
-function KnowledgeChip({ knowledge, href, canEdit, onRemove }: { knowledge: KnowledgeMeta; href: string; canEdit: boolean; onRemove: () => Promise<boolean> }) {
+export function KnowledgeChip({ knowledge, href, canEdit, onRemove }: { knowledge: KnowledgeMeta; href: string; canEdit: boolean; onRemove: () => Promise<boolean> }) {
   const t = useTranslations('skills_registry')
   const name = useKnowledgeName()
   const describe = useKnowledgeDesc()
@@ -368,7 +368,7 @@ function ConnectionChip({ connection }: { connection: AgentConnectionState }) {
 const GROUPS = ['horizontal', 'vertical', 'modifier'] as const
 
 /** Kunskap, as in Oasis's skill picker: Accounted or community, a search, and cards to add or take away. */
-function KnowledgePanel({ held, options, onBack, onChange }: {
+export function KnowledgePanel({ held, options, onBack, onChange }: {
   held: KnowledgeMeta[]
   options: KnowledgeOption[]
   onBack: () => void

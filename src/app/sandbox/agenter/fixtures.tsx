@@ -78,7 +78,7 @@ function applyChoice(body: { action: 'add' | 'remove' | 'reset'; agent_id: strin
 function overview(): AgentsOverview {
   return {
     ...OVERVIEW,
-    own_knowledge: { 'own/00000000-0000-4000-8000-000000000001': knowledgeFor([], 'own/00000000-0000-4000-8000-000000000001') },
+    own_knowledge: Object.fromEntries(CATALOG.filter((c) => c.slug.startsWith('own/')).map((c) => [c.slug, knowledgeFor([], c.slug)])),
     agents: OVERVIEW.agents.map((a) => ({ ...a, knowledge: knowledgeFor(AGENTS[a.id].knowledge, a.id), references: a.references.filter((r) => knowledgeFor(AGENTS[a.id].knowledge, a.id).some((k) => k.id === r.id.split('/').slice(0, 2).join('/'))), removed: AGENTS[a.id].knowledge.filter((k) => choices.get(a.id)?.removed.has(k)) })),
   }
 }

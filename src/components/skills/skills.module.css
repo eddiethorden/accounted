@@ -818,3 +818,18 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .writeHint { font-size: 12px; color: hsl(var(--muted-foreground)); }
 .writeProblem { font-size: 13px; color: hsl(var(--destructive)); }
 .createPair { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+/* "Skriv själv" on the item page */
+.fieldInput { width: 100%; background: hsl(var(--background)); font: inherit; font-size: 15px; color: hsl(var(--foreground)); outline: none; transition: border-color 150ms var(--ease-out); }
+.fieldInput:focus { border-color: hsl(var(--ring)); }
+.fieldInput::placeholder, .instrEdit input::placeholder, .textEdit::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
+.instrEdit { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; border: 1px solid hsl(var(--border)); border-radius: 12px; }
+.instrEdit ol { margin: 0; padding-left: 18px; list-style: decimal; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.instrEdit li { padding-left: 4px; }
+.instrEdit li > * { vertical-align: middle; }
+.instrEdit input { width: calc(100% - 28px); height: 28px; border: 0; border-bottom: 1px dashed transparent; background: none; font: inherit; font-size: 13px; color: hsl(var(--foreground)); outline: none; }
+.instrEdit input:focus { border-bottom-color: hsl(var(--border)); }
+.addStep { display: inline-flex; align-items: center; gap: 6px; width: fit-content; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 12.5px; color: hsl(var(--muted-foreground)); cursor: pointer; }
+.addStep:hover { color: hsl(var(--foreground)); }
+.textEdit { width: 100%; min-height: 220px; padding: 14px 16px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--background)); font: inherit; font-size: 13.5px; line-height: 21px; color: hsl(var(--foreground)); resize: vertical; outline: none; transition: border-color 150ms var(--ease-out); }
+.textEdit:focus { border-color: hsl(var(--ring)); }
+.placeholderName { color: hsl(var(--muted-foreground)); font-weight: 400; }
