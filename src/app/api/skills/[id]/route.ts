@@ -4,6 +4,7 @@ import { withRouteContext } from '@/lib/api/with-route-context'
 import { validateBody } from '@/lib/api/validate'
 import { loadCompanySkillRows } from '@/lib/agent-skills/company-skills'
 import { UpdateCompanySkillSchema } from '@/lib/agent-skills/validation'
+import { COMMUNITY_OPEN } from '@/lib/agent-skills/agents'
 import { ensureInitialized } from '@/lib/init'
 
 ensureInitialized()
@@ -18,6 +19,8 @@ export const PATCH = withRouteContext<Params>('skills.update', async (request, {
   const row = (await loadCompanySkillRows(supabase, companyId)).find((item) => item.id === id)
   if (!row || row.atom_id) return failure(404, 'NOT_FOUND', 'Egen skill hittades inte.', 'Own skill not found.')
   const input = validation.data
+  // Sharing waits for the community launch (COMMUNITY_OPEN); withdrawing an earlier submission still works.
+  if (input.action === 'submit' && !COMMUNITY_OPEN) return failure(403, 'FORBIDDEN', 'Delning till community är inte öppen än.', 'Sharing with the community is not open yet.')
   if (input.action === 'add' && !row.draft) return failure(409, 'CONFLICT', 'Skillen är redan tillagd.', 'The skill is already added.')
   if (input.action !== 'withdraw' && input.action !== 'add' && row.share_status !== 'private') return failure(409, 'CONFLICT', 'Inskickad text är låst för granskning.', 'Submitted content is frozen for review.')
   if (input.action === 'withdraw' && !['submitted', 'published'].includes(row.share_status)) return failure(409, 'CONFLICT', 'Skillen är inte inskickad.', 'The skill is not submitted.')

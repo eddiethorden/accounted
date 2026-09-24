@@ -45,6 +45,16 @@ const VAT = 'horizontal/swedish-vat'
 const INVOICE = 'horizontal/swedish-invoice-compliance'
 const YEAR_END = 'horizontal/swedish-year-end-closing'
 
+/**
+ * Community sharing (share, upvote, community items and authors) is built but
+ * held back from this release: the page, the knowledge picker and the share
+ * route all read this one switch. Flip it when community launches.
+ */
+export const COMMUNITY_OPEN = false
+
+/** What a company's own agent carries until the company changes it: the accounting law every flow stands on. */
+export const OWN_AGENT_KNOWLEDGE: readonly string[] = [COMPLIANCE]
+
 export const AGENTS: Record<RegistrySkillId, AgentDefinition> = {
   bookkeep: {
     knowledge: [COMPLIANCE, VAT],

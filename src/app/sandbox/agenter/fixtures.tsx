@@ -11,7 +11,7 @@ import { useState, type ReactNode } from 'react'
 import { CompanyProvider } from '@/contexts/CompanyContext'
 import DashboardNav from '@/components/dashboard/DashboardNav'
 import { AgentSheetProvider } from '@/components/agent/AgentSheetProvider'
-import { AGENTS, type Area } from '@/lib/agent-skills/agents'
+import { AGENTS, OWN_AGENT_KNOWLEDGE, type Area } from '@/lib/agent-skills/agents'
 import { REGISTRY_SKILLS } from '@/lib/agent-skills/registry'
 import type { AgentsOverview, ConnectionStatus } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
@@ -66,7 +66,7 @@ function knowledgeFor(defaults: readonly string[], agentId: string) {
 }
 
 function applyChoice(body: { action: 'add' | 'remove' | 'reset'; agent_id: string; atom_id?: string }) {
-  const defaults = body.agent_id in AGENTS ? AGENTS[body.agent_id as keyof typeof AGENTS].knowledge : []
+  const defaults = body.agent_id in AGENTS ? AGENTS[body.agent_id as keyof typeof AGENTS].knowledge : OWN_AGENT_KNOWLEDGE
   const choice = choices.get(body.agent_id) ?? { added: [], removed: new Set<string>() }
   if (body.action === 'reset') { choices.delete(body.agent_id); return }
   const id = body.atom_id!
@@ -78,7 +78,8 @@ function applyChoice(body: { action: 'add' | 'remove' | 'reset'; agent_id: strin
 function overview(): AgentsOverview {
   return {
     ...OVERVIEW,
-    own_knowledge: Object.fromEntries(CATALOG.filter((c) => c.slug.startsWith('own/')).map((c) => [c.slug, knowledgeFor([], c.slug)])),
+    own_knowledge: Object.fromEntries(CATALOG.filter((c) => c.slug.startsWith('own/')).map((c) => [c.slug, knowledgeFor(OWN_AGENT_KNOWLEDGE, c.slug)])),
+    own_default: knowledgeFor(OWN_AGENT_KNOWLEDGE, 'own/'),
     agents: OVERVIEW.agents.map((a) => ({ ...a, knowledge: knowledgeFor(AGENTS[a.id].knowledge, a.id), references: a.references.filter((r) => knowledgeFor(AGENTS[a.id].knowledge, a.id).some((k) => k.id === r.id.split('/').slice(0, 2).join('/'))), removed: AGENTS[a.id].knowledge.filter((k) => choices.get(a.id)?.removed.has(k)) })),
   }
 }
@@ -98,6 +99,7 @@ const OVERVIEW: AgentsOverview = {
   remembered: 4,
   documents: 312,
   own_knowledge: { 'own/00000000-0000-4000-8000-000000000001': [{ id: 'horizontal/swedish-invoice-compliance', tier: 'horizontal', source: 'added', title: 'Swedish Invoice Compliance', summary: '', version: 9, reviewed_at: null }] },
+  own_default: [],
   agents: REGISTRY_SKILLS.map(({ id }) => ({
     id,
     workflow: { slug: id, version: WORKFLOW_VERSION },

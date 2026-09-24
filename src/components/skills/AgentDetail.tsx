@@ -9,7 +9,7 @@ import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, ChevronRight, Plus, Search
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
-import { AGENTS, isAgentId } from '@/lib/agent-skills/agents'
+import { AGENTS, COMMUNITY_OPEN, OWN_AGENT_KNOWLEDGE, isAgentId } from '@/lib/agent-skills/agents'
 import type { AgentConnectionState, AgentsOverview, KnowledgeMeta } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeAction, KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { registrySkillSlug, skillsToDoNow, type RegistrySkillId } from '@/lib/agent-skills/registry'
@@ -98,7 +98,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   const task = t('kind_one_workflow')
   const hue = itemHue('workflow', agentId, curated)
   const steps = curated ? (t.raw(`skills.${curated}.steps`) as string[]) : body.data ? ownSkillSteps(body.data) : []
-  const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data?.own_knowledge[agentId] ?? []
+  const knowledge: KnowledgeMeta[] = curated ? overview?.knowledge ?? [] : agents.data ? agents.data.own_knowledge[agentId] ?? agents.data.own_default : []
   const connections: AgentConnectionState[] = overview?.connections ?? []
   const changed = knowledge.some((k) => k.source === 'added') || (overview?.removed.length ?? 0) > 0
   const status = curated ? agentStatus({
@@ -118,7 +118,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
    */
   async function changeKnowledge(action: KnowledgeAction, atomId?: string): Promise<boolean> {
     const current = agents.data
-    const optimistic = current ? withKnowledgeChange(current, agentId, curated ? AGENTS[curated].knowledge : [], options.data ?? [], action, atomId) : undefined
+    const optimistic = current ? withKnowledgeChange(current, agentId, curated ? AGENTS[curated].knowledge : OWN_AGENT_KNOWLEDGE, options.data ?? [], action, atomId) : undefined
     try {
       await agents.mutate(async () => {
         const response = await fetch('/api/agents/knowledge', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(atomId ? { action, agent_id: agentId, atom_id: atomId } : { action, agent_id: agentId }) })
@@ -255,7 +255,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                   <Button variant="outline" size="sm" onClick={() => void changeKnowledge('reset')}>{t('adv_reset')}</Button>
                 </ActionRow>
               )}
-              {own && !own.draft && <ShareBox status={own.shareStatus ?? 'private'} canWrite={canWrite} onShare={(share) => patchOwn(share === 'withdraw' ? { action: 'withdraw' } : { action: 'submit', confirmed_no_customer_data: true, author_handle: share.author_handle })} />}
+              {COMMUNITY_OPEN && own && !own.draft && <ShareBox status={own.shareStatus ?? 'private'} canWrite={canWrite} onShare={(share) => patchOwn(share === 'withdraw' ? { action: 'withdraw' } : { action: 'submit', confirmed_no_customer_data: true, author_handle: share.author_handle })} />}
               </div>
               {own && (own.shareStatus ?? 'private') === 'private' && <div className={styles.alist}><DeleteOwn canWrite={canWrite} onDelete={deleteOwn} /></div>}
             </SubView>
@@ -401,7 +401,7 @@ export function KnowledgePanel({ held, options, onBack, onChange }: {
   return (
     <div className="flex flex-col gap-4">
       <button type="button" className={styles.back} onClick={onBack}><ChevronLeft className="h-4 w-4" aria-hidden />{t('knowledge_picker_done')}</button>
-      <SegmentedControl aria-label={t('sources_label')} className={styles.sourceSwitch} value={source} onChange={setSource} options={[{ value: 'accounted' as const, label: t('tab_accounted') }, { value: 'community' as const, label: t('tab_community') }]} />
+      {COMMUNITY_OPEN && <SegmentedControl aria-label={t('sources_label')} className={styles.sourceSwitch} value={source} onChange={setSource} options={[{ value: 'accounted' as const, label: t('tab_accounted') }, { value: 'community' as const, label: t('tab_community') }]} />}
       <label className={styles.search}>
         <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
         <input id="agent-knowledge-search" type="search" value={query} placeholder={t('knowledge_search')} onChange={(e) => setQuery(e.target.value)} />
@@ -522,6 +522,6 @@ function withKnowledgeChange(
     if (!o || list.some((k) => k.id === atomId)) return list
     return [...list, { id: o.id, tier: o.tier, source: defaults.includes(o.id) ? 'default' as const : 'added' as const, title: o.title, summary: o.summary, version: o.version, reviewed_at: o.reviewed_at }]
   }
-  if (agentId.startsWith('own/')) return { ...overview, own_knowledge: { ...overview.own_knowledge, [agentId]: apply(overview.own_knowledge[agentId] ?? []) } }
+  if (agentId.startsWith('own/')) return { ...overview, own_knowledge: { ...overview.own_knowledge, [agentId]: apply(overview.own_knowledge[agentId] ?? overview.own_default) } }
   return { ...overview, agents: overview.agents.map((a) => a.id === agentId ? { ...a, knowledge: apply(a.knowledge), removed: action === 'reset' ? [] : action === 'remove' && defaults.includes(atomId!) ? [...a.removed, atomId!] : a.removed.filter((r) => r !== atomId) } : a) }
 }

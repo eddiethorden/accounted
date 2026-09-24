@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { AGENTS } from './agents'
+import { AGENTS, OWN_AGENT_KNOWLEDGE } from './agents'
 import { isAgentId } from './agent-bundle'
 import { toSummary } from './atoms'
 import { loadCompanySkillRows, ownSkill } from './company-skills'
@@ -29,7 +29,7 @@ export async function agentDefaults(supabase: SupabaseClient, companyId: string,
   if (isAgentId(agentId)) return AGENTS[agentId].knowledge
   if (!agentId.startsWith('own/')) return null
   const row = (await loadCompanySkillRows(supabase, companyId)).find((r) => `own/${r.id}` === agentId)
-  return row && ownSkill(row) ? [] : null
+  return row && ownSkill(row) ? OWN_AGENT_KNOWLEDGE : null
 }
 
 export type KnowledgeAction = 'add' | 'remove' | 'reset'

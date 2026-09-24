@@ -10,6 +10,9 @@ vi.mock('@/lib/auth/require-write', () => ({ requireWritePermission: vi.fn() }))
 vi.mock('@/lib/company/context', () => ({ getActiveCompanyId: vi.fn().mockResolvedValue('company-a') }))
 vi.mock('@/lib/agent-skills/catalog', () => ({ loadSkillCatalog: vi.fn(), loadCatalogSkill: vi.fn() }))
 vi.mock('@/lib/agent-skills/company-skills', () => ({ loadCompanySkillRows: vi.fn() }))
+// Sharing is held back from release by COMMUNITY_OPEN; the submit tests below run with it open.
+const community = vi.hoisted(() => ({ open: true }))
+vi.mock('@/lib/agent-skills/agents', async (original) => ({ ...(await original<object>()), get COMMUNITY_OPEN() { return community.open } }))
 import { requireAuth } from '@/lib/auth/require-auth'
 import { requireWritePermission } from '@/lib/auth/require-write'
 import { loadSkillCatalog, loadCatalogSkill } from '@/lib/agent-skills/catalog'
@@ -31,6 +34,7 @@ beforeEach(() => {
   vi.mocked(loadSkillCatalog).mockResolvedValue([])
   vi.mocked(loadCatalogSkill).mockResolvedValue(null)
   vi.mocked(loadCompanySkillRows).mockResolvedValue([privateSkill])
+  community.open = true
 })
 
 describe('skills HTTP routes', () => {
@@ -86,6 +90,11 @@ describe('skills HTTP routes', () => {
     enqueue({ data: { team_id: 'firm' } }); enqueue({ data: { role: 'member' } })
     expect((await POST(request('POST', { kind: 'own', scope: 'team', name: 'N', description: 'D', body: 'B' }), staticParams)).status).toBe(403)
     expect(findCall('company_skills', 'insert')).toBeUndefined()
+  })
+  it('refuses to share while community is not open', async () => {
+    community.open = false
+    expect((await PATCH(request('PATCH', { action: 'submit', author_handle: 'author', confirmed_no_customer_data: true }), params)).status).toBe(403)
+    expect(findCall('company_skills', 'update')).toBeUndefined()
   })
   it('rejects missing sharing consent', async () => {
     expect((await PATCH(request('PATCH', { action: 'submit', author_handle: 'author' }), params)).status).toBe(400)

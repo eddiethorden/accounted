@@ -34,10 +34,10 @@ describe('GET /api/agents', () => {
   })
 
   it('returns the overview for the active company and client', async () => {
-    vi.mocked(loadAgentsOverview).mockResolvedValue({ agents: [], facts: 2, agreements: 0, remembered: 0, documents: 0, own_knowledge: {} })
+    vi.mocked(loadAgentsOverview).mockResolvedValue({ agents: [], facts: 2, agreements: 0, remembered: 0, documents: 0, own_knowledge: {}, own_default: [] })
     const response = await get('?client=chatgpt')
     expect(response.status).toBe(200)
-    expect((await response.json()).data).toEqual({ agents: [], facts: 2, agreements: 0, remembered: 0, documents: 0, own_knowledge: {} })
+    expect((await response.json()).data).toEqual({ agents: [], facts: 2, agreements: 0, remembered: 0, documents: 0, own_knowledge: {}, own_default: [] })
     expect(loadAgentsOverview).toHaveBeenCalledWith(supabase, 'company-a', 'chatgpt')
   })
 })

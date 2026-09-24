@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AiClient } from '@/lib/onboarding/ai-clients'
-import { AGENTS, AREAS, CONNECTION_SETTINGS, isCheckable, type AgentConnection, type Area, type CheckableConnection } from './agents'
+import { AGENTS, AREAS, OWN_AGENT_KNOWLEDGE, CONNECTION_SETTINGS, isCheckable, type AgentConnection, type Area, type CheckableConnection } from './agents'
 import { areasOf } from './areas'
 import { REGISTRY_SKILLS, registrySkillSlug, type RegistrySkillId } from './registry'
 import { toSummary } from './atoms'
@@ -57,6 +57,8 @@ export interface AgentsOverview {
   documents: number
   /** What the company chose for its own agents, keyed by own/<id>. */
   own_knowledge: Record<string, KnowledgeMeta[]>
+  /** What an own agent the company has not adjusted carries (OWN_AGENT_KNOWLEDGE). */
+  own_default: KnowledgeMeta[]
 }
 
 /** One section of an industry or company-form pack (a reference child atom). */
@@ -216,9 +218,10 @@ export async function loadAgentsOverview(supabase: SupabaseClient, companyId: st
   const known = new Set(facts.error ? [] : ((facts.data ?? []) as Array<{ predicate: string }>).map((f) => f.predicate))
   const metas = (list: Array<{ id: string; source: KnowledgeMeta['source'] }>) =>
     list.flatMap(({ id, source }) => { const row = atoms.get(id); return row && !row.parent_atom_id ? [meta(row, source)] : [] })
-  const own_knowledge = Object.fromEntries([...choices.entries()].filter(([agent]) => agent.startsWith('own/')).map(([agent, choice]) => [agent, metas(effectiveKnowledge([], choice))]))
+  const own_knowledge = Object.fromEntries([...choices.entries()].filter(([agent]) => agent.startsWith('own/')).map(([agent, choice]) => [agent, metas(effectiveKnowledge(OWN_AGENT_KNOWLEDGE, choice))]))
   return {
     own_knowledge,
+    own_default: metas(effectiveKnowledge(OWN_AGENT_KNOWLEDGE, undefined)),
     facts: known.size,
     agreements: agreements.error ? 0 : agreements.count ?? 0,
     remembered: remembered.error ? 0 : remembered.count ?? 0,
@@ -363,7 +366,7 @@ export async function loadAgentBundle(supabase: SupabaseClient, companyId: strin
   } else return null
 
   const [profileIds, choices] = await Promise.all([loadProfileAtoms(supabase, companyId), loadKnowledgeChoices(supabase, companyId)])
-  const list = effectiveKnowledge(curated?.knowledge ?? [], choices.get(id))
+  const list = effectiveKnowledge(curated?.knowledge ?? OWN_AGENT_KNOWLEDGE, choices.get(id))
   const [bodies, metaRows, states, companyKnowledge, sectionRows] = await Promise.all([
     loadAtoms(supabase, list.map((k) => k.id), true),
     loadAtoms(supabase, [...(curated?.references ?? []), ...profileIds], false),

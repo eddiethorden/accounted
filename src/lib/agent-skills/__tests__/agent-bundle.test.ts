@@ -154,20 +154,20 @@ describe('loadAgentBundle: the company chooses the knowledge', () => {
     expect(bundle.references[0]).toEqual({ id: 'horizontal/swedish-e-invoicing', title: 'swedish-e-invoicing' })
   })
 
-  it('runs an own agent with its own instruction and only the knowledge chosen for it', async () => {
+  it('runs an own agent with its own instruction, the accounting law by default and the knowledge chosen for it', async () => {
     vi.mocked(buildArkivMap).mockResolvedValue(null as never)
     const ownId = '00000000-0000-4000-8000-000000000001'
     enqueue({ data: { team_id: null } }) // companies
     enqueue({ data: [{ id: ownId, company_id: 'company-a', team_id: null, atom_id: null, name: 'Påminnelse', description: 'Mejlar listan', body: '# Steg', share_status: 'private', draft: false }] })
     enqueue({ data: null })
     enqueue({ data: [{ agent_id: `own/${ownId}`, atom_id: 'horizontal/swedish-vat', included: true }] })
-    enqueue({ data: [atom('horizontal/swedish-vat', { body: '# Moms' })] })
+    enqueue({ data: [atom('horizontal/swedish-accounting-compliance', { body: '# BFL' }), atom('horizontal/swedish-vat', { body: '# Moms' })] })
     enqueue({ data: [] })
     enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
     enqueue({ data: null }); enqueue({ data: [] })
     const bundle = (await loadAgentBundle(supabase as never, 'company-a', `own/${ownId}`))!
     expect(bundle.agent.name).toBe('Påminnelse')
-    expect(bundle.knowledge.map((k) => [k.id, k.source])).toEqual([['horizontal/swedish-vat', 'added']])
+    expect(bundle.knowledge.map((k) => [k.id, k.source])).toEqual([['horizontal/swedish-accounting-compliance', 'default'], ['horizontal/swedish-vat', 'added']])
     expect(bundle.connections).toEqual([])
   })
 
@@ -247,7 +247,8 @@ describe('industry sections by area', () => {
     enqueue({ data: { team_id: null } })
     enqueue({ data: [{ id: ownId, company_id: 'company-a', team_id: null, atom_id: null, name: 'Egen', description: 'x', body: '# Steg', share_status: 'private', draft: false }] })
     enqueue({ data: { vertical_atoms: ['vertical/konsult-it'], modifier_atoms: [] } })
-    enqueue({ data: [] }) // no knowledge chosen, so no body query
+    enqueue({ data: [] }) // no knowledge chosen: the own default only
+    enqueue({ data: [atom('horizontal/swedish-accounting-compliance', { body: '# BFL' })] })
     enqueue({ data: [pack] })
     enqueue({ count: 0 }); enqueue({ data: [] }); enqueue({ data: null })
     enqueue({ data: null }); enqueue({ data: [] })

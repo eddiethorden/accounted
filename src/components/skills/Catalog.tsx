@@ -21,7 +21,7 @@ import { CommunityFoot } from './KindViews'
 import { ConnectionMark, SourceMarks } from './ConnectionMark'
 import { copyPromptAndOpen } from './run'
 import type { Presence } from './hues'
-import { AGENTS, type AgentConnection } from '@/lib/agent-skills/agents'
+import { AGENTS, COMMUNITY_OPEN, type AgentConnection } from '@/lib/agent-skills/agents'
 import { itemHue, seedOf, type ItemKind } from './hues'
 import { StrataField } from './StrataField'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
@@ -131,7 +131,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
 
   // ── every item of every kind, one shape ──
   const usedByFlows = (atomId: string) => overview?.agents.filter((a) => a.knowledge.some((k) => k.id === atomId)).length ?? 0
-  const shared: Item[] = catalog.filter((s) => s.tier === 'community').map((s) => {
+  const shared: Item[] = catalog.filter((s) => COMMUNITY_OPEN && s.tier === 'community').map((s) => {
     const meta = communityMeta(s)
     return { key: s.slug, kind: kindOf(s), title: s.name, desc: s.summary, href: `${hrefBase}/${communitySegment(s.slug)}`, source: 'community', meta, categories: [], popularity: meta?.used_by ?? meta?.votes ?? 0 }
   })
@@ -157,9 +157,10 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const mine = ownItems.filter((i) => i.kind === kind)
   const carriedPacks = kind === 'rules' ? packs.filter((p) => carried.has(p.key)) : []
 
-  // Every industry and company form, empty ones too: an empty category asks for the first contribution.
+  // Every industry and company form. With community open, empty ones too (an empty category asks for the first contribution); until then only those with something in them.
   const categories = CATEGORY_IDS
     .map((id) => ({ id: id as string, name: t(`category_names.${id.split('/')[1]}`), count: ofKind.filter((i) => i.categories.includes(id)).length }))
+    .filter((c) => COMMUNITY_OPEN || c.count > 0)
     .sort((a, b) => Number(b.id === companyIndustry) - Number(a.id === companyIndustry) || b.count - a.count)
   const categoryName = categories.find((c) => c.id === category)?.name ?? (category ? knowledgeName(category, category) : null)
 
@@ -257,8 +258,8 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           </div>
           {listed.length === 0
             ? <div className={`${styles.placeEmpty} ${styles.shareInvite}`}>
-                <span>{category ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
-                {category && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} />}
+                <span>{category && COMMUNITY_OPEN ? t('place_share_first', { place: categoryName ?? '' }) : t('place_empty')}</span>
+                {category && COMMUNITY_OPEN && <CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} />}
               </div>
             : <ul className={styles.agrid}>{listed.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
         </section>
@@ -273,7 +274,9 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
               <h2>{t(`most_used_${kind}`)}</h2>
               {ofKind.length > TOP && <button type="button" className={styles.catLink} onClick={() => setShowAll(true)}>{t('show_all')}<ArrowRight className="h-4 w-4" aria-hidden /></button>}
             </div>
-            {top.length === 0 ? <div className={styles.placeEmpty}>{t(`community_empty_${kind}`)}</div> : <ul className={styles.agrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
+            {top.length === 0 ? (COMMUNITY_OPEN
+              ? <div className={styles.placeEmpty}>{t(`community_empty_${kind}`)}</div>
+              : <div className={`${styles.placeEmpty} ${styles.shareInvite}`}><span>{t(`accounted_empty_${kind}`)}</span><CreateButtons client={client} canWrite={canWrite} onCreate={onCreate} onWrite={write} /></div>) : <ul className={styles.agrid}>{top.map((i) => <CatalogCard key={i.key} item={i} />)}</ul>}
           </section>
 
           {categories.length > 0 && (
@@ -294,7 +297,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
                     <li key={c.id}>
                       <button type="button" className={styles.categoryCard} onClick={() => go({ kategori: c.id })}>
                         <span className={styles.categoryIcon}><Icon className="h-6 w-6" strokeWidth={1.5} aria-hidden /></span>
-                        <span className={styles.categoryName}>{c.name}{c.id === companyIndustry ? <small>{t('industry_yours')}</small> : c.count === 0 && <small>{t('category_be_first')}</small>}</span>
+                        <span className={styles.categoryName}>{c.name}{c.id === companyIndustry ? <small>{t('industry_yours')}</small> : COMMUNITY_OPEN && c.count === 0 && <small>{t('category_be_first')}</small>}</span>
                         <span className={styles.catCount}>{c.count}</span>
                       </button>
                     </li>
