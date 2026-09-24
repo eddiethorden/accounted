@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowRight, Check, Plus } from 'lucide-react'
+import { ArrowRight, Check, Loader2, Plus } from 'lucide-react'
 import useSWR from 'swr'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
@@ -203,7 +203,7 @@ function Registry({ companyId }: { companyId: string }) {
       return
     }
     const start = centerIn(page, from)
-    const spark = new Spark(page, { x: start.x, y: start.y + from.getBoundingClientRect().height / 2 }, `${styles.spark} ${styles.sparkInk}`)
+    const spark = new Spark(page, { x: start.x, y: start.y + from.getBoundingClientRect().height / 2 }, styles.spark)
     try {
       await wait(250)
       for (let i = 0; i < anchors.length; i++) {
@@ -346,7 +346,7 @@ function Registry({ companyId }: { companyId: string }) {
       return
     }
     if (key) dropKey(key)
-    const spark = new Spark(page, centerIn(page, button), `${styles.spark} ${styles.sparkInk}`)
+    const spark = new Spark(page, centerIn(page, button), styles.spark)
     void (async () => {
       try {
         await wait(450)
@@ -393,7 +393,6 @@ function Registry({ companyId }: { companyId: string }) {
               ref={(el) => { cardRefs.current[i] = el }}
               className={styles.card}
               style={{ '--i': i } as CSSProperties}
-              data-lit=""
               data-down={sheetKey === skill.id ? '' : undefined}
               data-now={doNow.has(skill.id) ? '' : undefined}
             >
@@ -402,7 +401,6 @@ function Registry({ companyId }: { companyId: string }) {
                   <SkillMarks id={skill.id} />
                   {doNow.has(skill.id) && <span className={styles.now}>{t('now_count', { count: doNow.get(skill.id)! })}</span>}
                   {allDone(skill.id) && <span className={styles.done}><Check className="h-3 w-3" aria-hidden />{t('all_done')}</span>}
-                  <span className={styles.led} aria-hidden />
                 </span>
                 <h3>{t(`skills.${skill.id}.name`)}</h3>
                 <p>{t(`skills.${skill.id}.short`)}</p>
@@ -414,7 +412,7 @@ function Registry({ companyId }: { companyId: string }) {
             </div>
           ))}
           {/* the invitation to make one's own, as big as the keys beside it */}
-          <div className={`${styles.card} ${styles.createCard}`}>
+          <div className={styles.card}>
             <button ref={createRef} type="button" className={styles.createFace} disabled={!canWrite} onClick={createSkill}>
               <span ref={createPlusRef} className={styles.createPlus} data-lit={createLit ? '' : undefined} aria-hidden><Plus className="h-4 w-4" /></span>
               <h3>{t('create_card_title')}</h3>
@@ -462,17 +460,18 @@ function Registry({ companyId }: { companyId: string }) {
                 <h2>{t('sign_title')}</h2>
                 <div className={styles.gateClients}>
                   {AI_CLIENTS.map((c, i) => (
-                    <button key={c.id} type="button" className={styles.gateClient} data-first={i === 0 ? '' : undefined} onClick={() => connect(c.id)}>
-                      <img src={c.logo} alt="" width={18} height={18} />
+                    <Button key={c.id} size="lg" variant={i === 0 ? 'default' : 'outline'} className="gap-2 pl-3.5" onClick={() => connect(c.id)}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={c.logo} alt="" width={18} height={18} className={styles.clientLogo} />
                       {i === 0 ? t('connect_client', { client: c.name }) : c.name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
             )}
             {state === 'waiting' && pending && (
               <div className={styles.pin}>
-                <span className={styles.waitled} aria-hidden />
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
                 <h2>{pending === 'claude' ? t('wait_claude_title') : t('wait_title', { client: pendingName })}</h2>
                 {pending === 'claude' ? <p>{t('wait_claude_body')}</p> : (
                   <>

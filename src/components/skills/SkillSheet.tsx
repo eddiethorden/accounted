@@ -6,6 +6,7 @@ import useSWR from 'swr'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { ArrowUpRight, Plus, X } from 'lucide-react'
 import { SlideOver, SlideOverContent } from '@/components/ui/slide-over'
+import { Button } from '@/components/ui/button'
 import { DestructiveConfirmDialog } from '@/components/ui/destructive-confirm-dialog'
 import { AI_CLIENTS, aiChatLink, aiPrefilledChatLink, openAiConnector, type AiClient } from '@/lib/onboarding/ai-clients'
 import { registrySkillSlug, type RegistrySkillId } from '@/lib/agent-skills/registry'
@@ -123,7 +124,7 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
         <div className={styles.dtTop}>
           {id && <SkillMarks id={id} />}
           <DialogPrimitive.Title asChild><h2 data-ph-mask={own ? '' : undefined}>{title}</h2></DialogPrimitive.Title>
-          <DialogPrimitive.Close className={styles.x} aria-label={t('close')}><X className="h-4 w-4" aria-hidden /></DialogPrimitive.Close>
+          <DialogPrimitive.Close asChild><Button variant="outline" size="icon" className="shrink-0 self-start" aria-label={t('close')}><X className="h-4 w-4" aria-hidden /></Button></DialogPrimitive.Close>
         </div>
         <p className={styles.dtD}>{own ? t(own.draft ? 'draft_desc' : 'own_desc') : t(`skills.${id}.desc`)}</p>
         {id && t.has(`skills.${id}.note`) && <p className={styles.dtNote}>{t(`skills.${id}.note`)}</p>}
@@ -134,14 +135,12 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
         <div className={styles.sheetFoot}>
           {own?.draft ? (
             <div className="flex flex-col gap-2">
-              <span className={styles.goWrap}>
-                <button type="button" className={styles.go} disabled={!canWrite || addState === 'adding'} onClick={() => { setAddState('adding'); void onAdd(own).then((ok) => setAddState(ok ? 'idle' : 'failed')) }}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t('add_draft')}
-                </button>
-              </span>
+              <Button size="lg" className="w-full gap-2" disabled={!canWrite} loading={addState === 'adding'} onClick={() => { setAddState('adding'); void onAdd(own).then((ok) => setAddState(ok ? 'idle' : 'failed')) }}>
+                {addState !== 'adding' && <Plus className="h-4 w-4" aria-hidden />}
+                {t('add_draft')}
+              </Button>
               <div className={styles.nightBtns}>
-                <button type="button" className={`${styles.pill} ${styles.pillGhost}`} disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</button>
+                <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</Button>
               </div>
               {addState === 'failed' && <p role="alert" className={styles.nightNote}>{t('save_failed')}</p>}
               {deleteFailed && <p role="alert" className={styles.nightNote}>{t('save_failed')}</p>}
@@ -151,27 +150,24 @@ function SheetBody({ target, companyId, client, canWrite, todo, usage, onConnect
               <p className={styles.lockedline}>{t('locked_line')}</p>
               <div className={styles.nightBtns}>
                 {AI_CLIENTS.map((c, i) => (
-                  <button key={c.id} type="button" className={i === 0 ? styles.pill : `${styles.pill} ${styles.pillGhost}`} onClick={() => onConnect(c.id)}>
+                  <Button key={c.id} size="lg" variant={i === 0 ? 'default' : 'outline'} className="w-full" onClick={() => onConnect(c.id)}>
                     {i === 0 ? t('connect_client', { client: c.name }) : c.name}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
           ) : (
             <div className="flex flex-col gap-2">
               {todo ? <p className={styles.todoLine}><b>{todo}</b>{t('sheet_todo', { count: todo })}</p> : null}
-              <span className={styles.goWrap}>
-                <button type="button" className={styles.go} onClick={copyAndOpen}>
-                  <span className={styles.goDot} aria-hidden />
-                  {t('run_client', { client: clientName })}
-                  <ArrowUpRight className="h-4 w-4" aria-hidden />
-                </button>
-              </span>
+              <Button size="lg" className="w-full gap-2" onClick={copyAndOpen}>
+                {t('run_client', { client: clientName })}
+                <ArrowUpRight className="h-4 w-4" aria-hidden />
+              </Button>
               <p className={styles.goHint}>{t(own ? 'run_hint' : 'run_hint_prefilled', { client: clientName })}</p>
               <div className={styles.nightBtns}>
-                <button type="button" className={`${styles.pill} ${styles.pillGhost}`} onClick={copyFull}>{t(fullCopy === 'copied' ? 'copied_full' : 'copy_full')}</button>
-                {own && onEdit && <button type="button" className={`${styles.pill} ${styles.pillGhost}`} disabled={!canWrite} onClick={() => onEdit(own)}>{t('edit_answers')}</button>}
-                {own && <button type="button" className={`${styles.pill} ${styles.pillGhost}`} disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</button>}
+                <Button variant="outline" size="lg" className="w-full" onClick={copyFull}>{t(fullCopy === 'copied' ? 'copied_full' : 'copy_full')}</Button>
+                {own && onEdit && <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => onEdit(own)}>{t('edit_answers')}</Button>}
+                {own && <Button variant="outline" size="lg" className="w-full" disabled={!canWrite} onClick={() => setConfirmDelete(true)}>{t('delete')}</Button>}
               </div>
               {copyState !== 'idle' && <p role="status" className={styles.nightNote}>{copyState === 'copied' ? t(own ? 'copied_open' : 'prefilled_open', { client: clientName }) : t('copy_failed')}</p>}
               {copyState === 'failed' && <pre className={styles.fullText} data-ph-mask>{prompt}</pre>}

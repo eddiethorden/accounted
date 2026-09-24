@@ -61,7 +61,7 @@ function Gate({ onClose, onConnect }: { onClose: () => void; onConnect: (client:
       <p className={styles.cbody}>{t('creator.gate_body')}</p>
       <div className={styles.kgrid} style={{ maxWidth: 640 }}>
         {AI_CLIENTS.map((c) => (
-          <button key={c.id} type="button" className={styles.kbtn} onClick={() => onConnect(c.id)}>{t('connect_client', { client: c.name })}</button>
+          <Button key={c.id} variant="outline" size="lg" onClick={() => onConnect(c.id)}>{t('connect_client', { client: c.name })}</Button>
         ))}
       </div>
       <div className={styles.cfoot}><Button variant="outline" onClick={onClose}>{t('cancel')}</Button></div>
@@ -211,10 +211,10 @@ function Journey({ mode, client, pageRef, onClose, onSave, onSaved }: {
 
   return (
     <div className={styles.journey} data-building={phase === 'build' ? '' : undefined} style={{ '--skpan': station / 4 } as CSSProperties}>
-      <div className={styles.jbg} aria-hidden><div className={styles.jpan} /><div className={styles.jshade} /><div className={styles.jgrid} /></div>
+      <div className={styles.jbg} aria-hidden><div className={styles.jpan} /><div className={styles.jgrid} /></div>
       <DialogPrimitive.Title className="sr-only">{t('creator.title')}</DialogPrimitive.Title>
       <Doors pageRef={pageRef} />
-      <button type="button" className={styles.jx} onClick={onClose} aria-label={t('creator.close')}><X className="h-4 w-4" aria-hidden /></button>
+      <Button variant="outline" size="icon" className={styles.jx} onClick={onClose} aria-label={t('creator.close')}><X className="h-4 w-4" aria-hidden /></Button>
       <ol className={styles.jline} aria-label={t('creator.stations')}>
         <i className={styles.jrun} aria-hidden /><i className={styles.jtrain} aria-hidden />
         {names.map((name, i) => <li key={i} data-on={i <= station ? '' : undefined} aria-current={i === station ? 'step' : undefined}>{name}</li>)}
@@ -225,10 +225,16 @@ function Journey({ mode, client, pageRef, onClose, onSave, onSaved }: {
         {failed === 'draft' ? (
           <div className={styles.jmid}>
             <p className={styles.jq} role="alert">{t('creator.draft_failed')}</p>
-            <button type="button" className={styles.jpill} onClick={() => retry.current?.()}>{t('retry')}</button>
+            <Button size="lg" onClick={() => retry.current?.()}>{t('retry')}</Button>
           </div>
         ) : busy ? (
-          <div className={styles.jmid}><span className={styles.jthink} role="status" aria-label={t('creator.thinking')}><i /><i /><i /></span></div>
+          <div className={styles.jmid}>
+            <span className={styles.jthink} role="status" aria-label={t('creator.thinking')}>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-typing-dot [animation-delay:0ms]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-typing-dot [animation-delay:150ms]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-typing-dot [animation-delay:300ms]" />
+            </span>
+          </div>
         ) : phase === 'summary' && summary && !adding ? (
           <Summary summary={summary} extra={extra} client={clientName} onBuild={() => void build()} onAdd={() => { setAdding(true); setText('') }} />
         ) : phase !== 'build' ? (
@@ -245,7 +251,7 @@ function Journey({ mode, client, pageRef, onClose, onSave, onSaved }: {
                 onChange={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(140, e.target.scrollHeight)}px` }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
               />
-              <button type="submit" className={styles.jsend} disabled={!text.trim()} aria-label={t('creator.send')}><ArrowUp className="h-4 w-4" aria-hidden /></button>
+              <Button type="submit" size="icon" className="shrink-0" disabled={!text.trim()} aria-label={t('creator.send')}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
             </form>
             {phase === 'question' && question && question.suggestions.length > 0 && (
               <div className={styles.jchips}>
@@ -262,8 +268,8 @@ function Journey({ mode, client, pageRef, onClose, onSave, onSaved }: {
         <div className={styles.jdone} role="alert">
           <p>{t('save_failed')}</p>
           <div className={styles.jacts}>
-            <button type="button" className={styles.jpill} onClick={() => retry.current?.()}>{t('retry')}</button>
-            <button type="button" className={`${styles.jpill} ${styles.jghost}`} onClick={() => { setFailed(null); setPhase('summary') }}>{t('creator.back')}</button>
+            <Button size="lg" onClick={() => retry.current?.()}>{t('retry')}</Button>
+            <Button variant="outline" size="lg" onClick={() => { setFailed(null); setPhase('summary') }}>{t('creator.back')}</Button>
           </div>
         </div>
       )}
@@ -281,8 +287,8 @@ function Summary({ summary, extra, client, onBuild, onAdd }: { summary: CreatorS
       {extra.length > 0 && <p className={styles.jextra} data-ph-mask><b>{t('creator.added')}</b> {extra.join(' · ')}</p>}
       {summary.facts.length > 0 && <div className={styles.jfacts}>{summary.facts.map((f) => <span key={f}>{f}</span>)}</div>}
       <div className={styles.jacts}>
-        <button type="button" className={styles.jpill} onClick={onBuild}>{t('creator.build', { client })}</button>
-        <button type="button" className={`${styles.jpill} ${styles.jghost}`} onClick={onAdd}>{t('creator.add')}</button>
+        <Button size="lg" onClick={onBuild}>{t('creator.build', { client })}</Button>
+        <Button variant="outline" size="lg" onClick={onAdd}>{t('creator.add')}</Button>
       </div>
     </div>
   )
