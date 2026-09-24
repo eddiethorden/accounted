@@ -83,6 +83,7 @@ export async function readPdfTextLayer(bytes: Buffer): Promise<PdfReadResult> {
         continue
       }
       if (chars < IMAGE_PAGE_MAX_CHARS) {
+        // Needs Node 21+ (production runs 24): on older runtimes pdf.js skips the walk and the page keeps its text, as before.
         const ops = await page.getOperatorList()
         if (ops.fnArray.some((fn: number) => imageOps.has(fn))) pagesWithImages.push(pageNo)
       }
