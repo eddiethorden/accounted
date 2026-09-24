@@ -21,6 +21,7 @@ import { SourceMarks } from './ConnectionMark'
 import { AGENTS } from '@/lib/agent-skills/agents'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot, KindView } from './KindViews'
+import { KindsIntro } from './KindsIntro'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { itemHue, KINDS, kindFromParam, kindHref, type ItemKind } from './hues'
 import { SlidingTabs } from './SlidingTabs'
@@ -157,7 +158,6 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
       symbolKey={id}
       hue={itemHue('workflow', id, id)}
       status={statusFor(id)}
-      carries={agents.data?.agents.find((a) => a.id === id)?.knowledge.map((k) => knowledgeName(k.id, k.title))}
       marks={<SourceMarks connections={AGENTS[id].connections} />}
     />
   )
@@ -177,6 +177,8 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         help={<HelpPopover><p>{t('help')}</p></HelpPopover>}
         action={<SegmentedControl aria-label={t('kinds_label')} value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: t(`kind_${k}`) }))} />}
       />
+
+      <KindsIntro companyId={companyId} />
 
       {kind !== 'workflow' ? (
         <KindView
