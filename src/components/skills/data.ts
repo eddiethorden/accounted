@@ -3,6 +3,7 @@ import type { WorklistCategory } from '@/lib/worklist/types'
 import type { SkillUsage } from '@/lib/agent-skills/usage'
 import type { AgentsOverview } from '@/lib/agent-skills/agent-bundle'
 import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
+import type { CommunityMeta } from '@/lib/agent-skills/community'
 import { isCheckable } from '@/lib/agent-skills/agents'
 import type { RegistrySkillId } from '@/lib/agent-skills/registry'
 import { AI_CLIENTS, type AiClient } from '@/lib/onboarding/ai-clients'
@@ -107,31 +108,11 @@ export function agentIdFromSegment(segment: string): string {
 }
 
 /**
- * What the community says about a shared item: who shared it, votes and
- * "fungerar / fungerar inte". Sent only once the catalog carries it; until
- * then community cards and pages show no rating controls at all.
+ * What the community says about a shared item: its kind, who shared it,
+ * votes and "fungerar / fungerar inte". The catalog sends it on every
+ * community item (src/lib/agent-skills/community.ts).
  */
-export interface CommunityMeta {
-  kind: ItemKind
-  author: string
-  /** How many items the author has shared that passed review. */
-  author_shared: number
-  votes: number
-  voted: boolean
-  works: number
-  not_works: number
-  feedback: 'works' | 'not_works' | null
-  reviewed_at: string | null
-  /** An accounting firm (team kind byrå) rather than a company. */
-  author_verified: boolean
-  area: 'lopande' | 'moms' | 'lon' | 'fakturering' | 'bokslut' | 'analys' | null
-  /** Vertical pack ids it is made for; empty fits every industry. */
-  industries: string[]
-  /** What it works with: bank, skatteverket, mail and so on, or an app such as shopify. */
-  uses: string[]
-  /** Companies that ran it; null when not counted. */
-  used_by: number | null
-}
+export type { CommunityMeta }
 export function communityMeta(skill: SkillSummary): CommunityMeta | null {
   return (skill as SkillSummary & { community?: CommunityMeta }).community ?? null
 }
