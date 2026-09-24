@@ -572,7 +572,7 @@ function Registry({ companyId }: { companyId: string }) {
 
       <SkillSheet
         target={sheet?.kind === 'registry' ? { ...sheet, locked: sheetLocked } : sheet}
-        context={{ agent: sheet?.kind === 'registry' ? agentFor(sheet.id) : undefined, company: agents.data?.agents[0]?.company ?? [], facts: agents.data?.facts ?? 0 }}
+        context={{ agent: sheet?.kind === 'registry' ? agentFor(sheet.id) : undefined, company: agents.data?.agents[0]?.company ?? [], counts: { agreements: agents.data?.agreements ?? 0, remembered: agents.data?.remembered ?? 0, documents: agents.data?.documents ?? 0 } }}
         onShare={shareOwn}
         companyId={companyId}
         client={client}

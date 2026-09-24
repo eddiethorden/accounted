@@ -15,7 +15,7 @@ import type { AgentOverview } from '@/lib/agent-skills/agent-bundle'
 import type { CompanySkillRow } from '@/lib/agent-skills/company-skills'
 import { formatDateLong } from '@/lib/utils'
 import { SkillMarks } from './SkillMarks'
-import { AgentParts } from './AgentParts'
+import { AgentParts, type CompanyCounts } from './AgentParts'
 import styles from './skills.module.css'
 
 type ShareStatus = CompanySkillRow['share_status']
@@ -28,7 +28,7 @@ export type SheetTarget =
 export interface SheetAgentContext {
   agent?: AgentOverview
   company: AgentOverview['company']
-  facts: number
+  counts: CompanyCounts
 }
 
 /**
@@ -149,7 +149,7 @@ function SheetBody({ target, context, onShare, companyId, client, canWrite, todo
         {usage && <p className={styles.usesLine}>{t('uses_line', { count: usage.count, date: formatDateLong(usage.last_at, locale) })}</p>}
       </div>
       <div className={styles.sheetMain}>
-        <AgentParts steps={steps} agent={context.agent} company={context.company} facts={context.facts} own={!!own} />
+        <AgentParts steps={steps} agent={context.agent} company={context.company} counts={context.counts} own={!!own} />
         {own && !own.draft && <ShareBox target={own} canWrite={canWrite} onShare={onShare} />}
         <div className={styles.sheetFoot}>
           {own?.draft ? (

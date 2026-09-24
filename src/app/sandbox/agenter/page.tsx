@@ -32,11 +32,18 @@ const WORKFLOW_VERSION = 4
 const CONNECTIONS: Record<string, ConnectionStatus> = { bank: 'connected', skatteverket: 'connected', peppol: 'missing' }
 const SETTINGS: Record<string, string> = { bank: '/settings/banking', skatteverket: '/settings/tax', peppol: '/settings/invoicing' }
 
+// Company facts the demo company holds (predicates from lib/arkiv/facts/predicates.ts).
+const KNOWN_FACTS = new Set(['legal_name', 'org_number', 'fiscal_year', 'vat_registered', 'vat_period', 'vat_method', 'accounting_method', 'f_skatt', 'sni_codes', 'board', 'share_capital', 'bank_connection', 'monthly_cost_baseline', 'top_counterparty'])
+
 const OVERVIEW: AgentsOverview = {
-  facts: 3,
+  facts: KNOWN_FACTS.size,
+  agreements: 2,
+  remembered: 4,
+  documents: 312,
   agents: REGISTRY_SKILLS.map(({ id }) => ({
     id,
     workflow: { slug: id, version: WORKFLOW_VERSION },
+    facts_known: AGENTS[id].facts.filter((f) => KNOWN_FACTS.has(f)).length,
     knowledge: AGENTS[id].knowledge.map((k) => ({ id: k, title: PACKS[k]?.title ?? k, summary: '', version: PACKS[k]?.version ?? 1, reviewed_at: null })),
     references: AGENTS[id].references.map((r) => ({ id: r, title: r.split('/').pop()!.replace(/-/g, ' ') })),
     company: [

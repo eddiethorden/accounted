@@ -30,6 +30,7 @@ describe('get_task', () => {
       workflow: { slug: 'quarterly-vat-review', version: 4, body: '# Moms' },
       knowledge: [{ id: 'horizontal/swedish-vat', title: 'Swedish VAT', summary: '', version: 7, reviewed_at: null, body: '# VAT' }],
       references: [], company: [], connections: [{ kind: 'skatteverket', status: 'connected' }],
+      company_knowledge: { name: 'Arcim', org_number: null, onboarding_summary: null, facts: [], remembered: [], documents: { total: 0, look_up: [] } },
     })
     const task = await getAccountingTask({ kind: 'agent:quarterly-vat-review', client: 'grok' }, 'company-a', {} as never)
     expect(loadAgentBundle).toHaveBeenCalledWith({}, 'company-a', 'quarterly-vat-review', 'grok')
