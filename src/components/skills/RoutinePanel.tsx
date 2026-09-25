@@ -37,7 +37,6 @@ export function RoutinePanel({ run, item, kind, onBack, initial }: { run: string
 
   return (
     <SubView title={t('routine_title')} onBack={onBack}>
-      <p className={styles.muted}>{t('routine_lede')}</p>
       <RoutineFields value={choice} onChange={(next) => { if (next) setChoice(next) }} />
       <Field label={t('routine_preview')}>
         <div className={`${styles.instrBox} ${styles.routinePreview}`}>{prompt}</div>
@@ -48,8 +47,7 @@ export function RoutinePanel({ run, item, kind, onBack, initial }: { run: string
           <img src={claude.logo} alt="" width={16} height={16} className={styles.btnLogo} />
           {t('routine_go')}
         </Button>
-        <small className={styles.muted}>{t('routine_note')}</small>
-        <a className={styles.catLink} href={CLAUDE_DOWNLOAD} target="_blank" rel="noreferrer">{t('routine_download')}</a>
+        <small className={styles.muted}>{t('routine_note')} · <a className="underline underline-offset-4" href={CLAUDE_DOWNLOAD} target="_blank" rel="noreferrer">{t('routine_download')}</a></small>
       </div>
     </SubView>
   )
@@ -68,7 +66,7 @@ export function RoutineFields({ value, onChange, none = false }: { value: Routin
       <Field label={t('routine_how_often')}>
         <SegmentedControl<RoutineCadence | 'none'>
           aria-label={t('routine_how_often')}
-          className={styles.sourceSwitch}
+          className={styles.routineSwitch}
           value={value?.cadence ?? 'none'}
           onChange={(c) => onChange(c === 'none' ? null : { ...current, cadence: c })}
           options={options}
