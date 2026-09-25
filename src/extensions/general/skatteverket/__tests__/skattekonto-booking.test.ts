@@ -31,7 +31,7 @@ const SEED_RULES = [
   {
     id: 'sys-3', priority: 20, pattern: 'debiterad preliminärskatt,preliminärskatt,f-skatt,fskatt',
     amount_min: null, amount_max: null, company_type: 'all',
-    counter_account: '2510', counter_account_ef: '2013',
+    counter_account: '2518', counter_account_ef: '2013',
     label: 'Preliminär skatt', active: true, requires_employer: false,
   },
   {
@@ -150,12 +150,16 @@ describe('guessCounterAccount', () => {
     ).toBe('1930')
   })
 
-  it('uses 2510 for AB preliminär skatt and 2013 for EF (regression: 2012 is not standard BAS)', async () => {
+  // 2518 Betald F-skatt carries the debit balance during the year and is
+  // netted against 2512/2510 at bokslut; 2510 is the group's summary account
+  // and booking straight to it mixes tax paid with tax owed. EF books no
+  // liability at all: the owner's F-skatt is an eget uttag (2013).
+  it('uses 2518 for AB preliminär skatt and 2013 for EF', async () => {
     const { supabase, enqueue } = makeSupabase()
     enqueue({ data: SEED_RULES })
     expect(
       (await guessCounterAccount(supabase as unknown as SupabaseClient, 'company-1', 'Debiterad preliminärskatt', 'aktiebolag'))?.account,
-    ).toBe('2510')
+    ).toBe('2518')
 
     enqueue({ data: SEED_RULES })
     expect(
