@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
 import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, ChevronRight, Plus, Repeat, Search, X } from 'lucide-react'
@@ -26,9 +26,11 @@ import { StrataField } from './StrataField'
 import { ConnectionMark } from './ConnectionMark'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
-import { copyPromptAndOpen } from './run'
+import { copyPromptAndOpen, openInClaude, type ClaudeTarget } from './run'
+import { ClaudeStart } from './ClaudeStart'
 import { trackInstructions } from './track'
 import { RoutinePanel } from './RoutinePanel'
+import { parseRoutineQuery } from '@/lib/agent-skills/routine'
 import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, rulesSegment, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -83,7 +85,9 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
   const overview = curated ? agents.data?.agents.find((a) => a.id === curated) : undefined
   const bodySlug = curated ? registrySkillSlug(curated, client) : agentId
   const body = useSWR(curated || own ? ['/api/skills', companyId, bodySlug] : null, ([url, , s]) => readBody(`${url}?slug=${encodeURIComponent(s)}`))
-  const [view, setView] = useState<View>('main')
+  // A routine chosen in Skriv själv arrives as ?rutin=… and opens its panel filled in.
+  const handedRoutine = parseRoutineQuery(new URLSearchParams(useSearchParams().toString()))
+  const [view, setView] = useState<View>(handedRoutine ? 'routine' : 'main')
   const [runState, setRunState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   // Gone only once a fresh catalog says so: a cached list can predate the item.
@@ -158,15 +162,16 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
     }
   }
 
-  function run() {
+  function run(target: ClaudeTarget = 'web') {
     if (connected !== null && connected.length === 0) {
       trackInstructions('instructions_connect_clicked', { client: 'claude', surface: 'flow' })
       openAiConnector(aiConnectAction('claude', { origin: window.location.origin, appName }).open)
       return
     }
-    trackInstructions('instructions_start_clicked', { item: curated ?? 'own', kind: 'workflow', client, surface: 'flow' })
+    trackInstructions('instructions_start_clicked', { item: curated ?? 'own', kind: 'workflow', client, surface: 'flow', target: client === 'claude' ? target : 'web' })
     // Curated agents open with the prompt typed in; an own agent's prompt carries the name the user wrote, so it is copied.
-    void copyPromptAndOpen(t('prompt', { say, agent: agentId, client }), client, !!curated).then((ok) => setRunState(ok ? 'copied' : 'failed'))
+    const prompt = t('prompt', { say, agent: agentId, client })
+    void (client === 'claude' ? openInClaude(target, prompt, !!curated) : copyPromptAndOpen(prompt, client, !!curated)).then((ok) => setRunState(ok ? 'copied' : 'failed'))
   }
   const say = curated ? t(`skills.${curated}.say`) : t('own_say', { name })
   const disconnected = connected !== null && connected.length === 0
@@ -185,8 +190,8 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
           </div>
           <div className={styles.stageFoot}>
             {/* A draft saved by an AI is not loadable until it is added, so it cannot be started yet. */}
-            {own?.draft ? <span className={styles.stageStatus}>{t('draft_run_hint')}</span> : (
-              <Button size="lg" className="gap-2 pl-4" onClick={run}>
+            {own?.draft ? <span className={styles.stageStatus}>{t('draft_run_hint')}</span> : !disconnected && client === 'claude' ? <ClaudeStart onStart={run} /> : (
+              <Button size="lg" className="gap-2 pl-4" onClick={() => run()}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={AI_CLIENTS.find((c) => c.id === (disconnected ? 'claude' : client))!.logo} alt="" width={16} height={16} className={styles.btnLogo} />
                 {disconnected ? t('connect_client', { client: 'Claude' }) : t('run_agent', { client: clientName })}
@@ -260,7 +265,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
             </SubView>
           )}
           {view === 'routine' && (
-            <RoutinePanel run={t('prompt', { say, agent: agentId, client: 'claude' })} item={curated ?? 'own'} kind="workflow" onBack={() => setView('main')} />
+            <RoutinePanel run={t('prompt', { say, agent: agentId, client: 'claude' })} item={curated ?? 'own'} kind="workflow" initial={handedRoutine} onBack={() => setView('main')} />
           )}
           {view === 'advanced' && (
             <SubView title={t('section_advanced')} onBack={() => setView('main')}>

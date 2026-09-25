@@ -892,3 +892,7 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 /* Gör till rutin (RoutinePanel.tsx): day and time side by side, the request shown as sent */
 .routineRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .routinePreview { max-height: none; padding: 12px 14px; font-size: 13px; line-height: 19px; color: hsl(var(--foreground) / 0.8); white-space: pre-wrap; }
+
+/* Starta i Claude with a choice of where (ClaudeStart.tsx) */
+.splitStart { display: inline-flex; align-items: center; gap: 4px; }
+.routineCreate { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid hsl(var(--border)); }

@@ -19,7 +19,8 @@ import { CATEGORY_IDS, SHOWN_FLOWS } from './catalog-setup'
 import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
 import { ConnectionMark, SourceMarks } from './ConnectionMark'
-import { copyPromptAndOpen } from './run'
+import { copyPromptAndOpen, openInClaude, type ClaudeTarget } from './run'
+import { ClaudeStart } from './ClaudeStart'
 import { trackInstructions } from './track'
 import type { Presence } from './hues'
 import { AGENTS, COMMUNITY_OPEN, type AgentConnection } from '@/lib/agent-skills/agents'
@@ -363,10 +364,11 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
   const ai = AI_CLIENTS.find((c) => c.id === client)!
   const runnable = item.kind === 'workflow' && item.source === 'accounted' && aiReady
   const states = overview?.agents.find((a) => a.id === item.key)?.connections ?? []
-  function run() {
+  function run(target: ClaudeTarget = 'web') {
     const id = item.key as RegistrySkillId
-    trackInstructions('instructions_start_clicked', { item: id, kind: 'workflow', client, surface: 'banner' })
-    void copyPromptAndOpen(t('prompt', { say: t(`skills.${id}.say`), agent: id, client }), client, true).then(() => setRan(true))
+    trackInstructions('instructions_start_clicked', { item: id, kind: 'workflow', client, surface: 'banner', target: client === 'claude' ? target : 'web' })
+    const prompt = t('prompt', { say: t(`skills.${id}.say`), agent: id, client })
+    void (client === 'claude' ? openInClaude(target, prompt, true) : copyPromptAndOpen(prompt, client, true)).then(() => setRan(true))
   }
   return (
     <section className={styles.featured} style={{ background: `hsl(${hue} 32% 90%)` }}>
@@ -379,13 +381,13 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
         <h2>{item.title}</h2>
         <p>{item.lede ?? item.desc}</p>
         <div className={styles.featuredActions}>
-          {runnable && (
-            <Button size="sm" className="gap-2 pl-3" onClick={run}>
+          {runnable && (client === 'claude' ? <ClaudeStart size="sm" onStart={run} /> : (
+            <Button size="sm" className="gap-2 pl-3" onClick={() => run()}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={ai.logo} alt="" width={14} height={14} className={styles.btnLogo} />
               {t('run_agent', { client: ai.name })}
             </Button>
-          )}
+          ))}
           {item.connections && item.connections.length > 0 && (
             <span className={styles.featuredUses}>
               {item.connections.map((c) => <ConnectionBadge key={c} kind={c} state={states.find((s) => s.kind === c)} clientName={ai.name} />)}

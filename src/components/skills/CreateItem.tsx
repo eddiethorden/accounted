@@ -18,7 +18,10 @@ import { Field, KnowledgeChip, KnowledgePanel, Row } from './AgentDetail'
 import { ItemSymbol } from './ItemSymbol'
 import { StrataField } from './StrataField'
 import { catalogHref, itemHue, seedOf, type ItemKind } from './hues'
-import { readOptions, rulesSegment } from './data'
+import { fetchConnections, readOptions, rulesSegment, simulatedClient } from './data'
+import { RoutineFields } from './RoutinePanel'
+import { pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
+import { routineQuery, type RoutineChoice } from '@/lib/agent-skills/routine'
 import styles from './skills.module.css'
 
 const KIND_PARAM: Record<string, ItemKind> = { arbetsfloden: 'workflow', kunskap: 'rules', analyser: 'analysis' }
@@ -58,6 +61,16 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
   const [view, setView] = useState<'main' | 'knowledge'>('main')
   const [state, setState] = useState<'idle' | 'saving'>('idle')
   const [problem, setProblem] = useState<string | null>(null)
+  // A routine is scheduled in Claude Desktop, so it is offered to Claude users only, for flows and analyses.
+  const [routine, setRoutine] = useState<RoutineChoice | null>(null)
+  const [connected, setConnected] = useState<AiClient[] | null>(null)
+  useEffect(() => {
+    const simulated = simulatedClient()
+    const controller = new AbortController()
+    void (simulated ? Promise.resolve([simulated]) : fetchConnections(controller.signal)).then((list) => { if (list) setConnected(list) })
+    return () => controller.abort()
+  }, [])
+  const routineOffered = kind !== 'rules' && pickConnectedAiClient(connected ?? []) === 'claude'
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
 
   // Coloured by its name, as the saved item will be.
@@ -126,7 +139,9 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
       // Drop the cached catalog rather than revalidate it: nothing on this page reads it, so a
       // revalidation would not run, and the new item's page would open on the old list.
       await mutate((key) => Array.isArray(key) && typeof key[0] === 'string' && (key[0] === '/api/skills' || key[0] === '/api/agents'), undefined, { revalidate: false })
-      router.push(kind === 'workflow' ? `${backHref}/own-${data.id}` : `${backHref}/egen.${data.id}`)
+      // A routine chosen here opens filled in on the new item's page: Claude Desktop needs the user's own click.
+      const handOver = routine && routineOffered ? `?${routineQuery(routine)}` : ''
+      router.push(`${kind === 'workflow' ? `${backHref}/own-${data.id}` : `${backHref}/egen.${data.id}`}${handOver}`)
     } catch {
       setProblem(t('write_failed'))
       setState('idle')
@@ -207,6 +222,13 @@ function Create({ companyId, backHref }: { companyId: string; backHref: string }
                         <KnowledgeChip key={k.id} knowledge={k} href={`${backHref}/${rulesSegment(k.id)}`} canEdit onRemove={() => changeKnowledge('remove', k.id)} />
                       ))}
                     </Row>
+                  </div>
+                )}
+                {routineOffered && (
+                  <div className={styles.routineCreate}>
+                    <span className={styles.rowLabel}>{t('routine_create_label')}</span>
+                    <RoutineFields value={routine} onChange={setRoutine} none />
+                    {routine && <small className={styles.muted}>{t('routine_create_hint')}</small>}
                   </div>
                 )}
                 </div>
