@@ -179,7 +179,7 @@ describe('classifyDocument', () => {
   it('tells the model that a bill from an authority is a supplier invoice and a credit note is never other', () => {
     const system = buildClassifySystem(company)
     // Prod 2026-09-25: congestion-tax bills were typed as Skatteverket decisions and Cursor credit notes as other.
-    expect(system).toMatch(/trängselskatt.*supplier_invoice|supplier_invoice.*trängselskatt/s)
+    expect(system).toMatch(/trängselskatt[\s\S]*supplier_invoice|supplier_invoice[\s\S]*trängselskatt/)
     expect(system).toMatch(/credit note is credit_note, never other/)
     expect(system).toMatch(/decision\.skatteverket: .*nothing to pay/)
   })
