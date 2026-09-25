@@ -12,9 +12,18 @@ export const VOUCHER_TYPES = new Set(['receipt', 'supplier_invoice', 'credit_not
 
 export type RouteOutcome = 'queued' | 'requeued' | 'already_queued' | 'booked' | 'routed_to_arkiv' | 'left' | 'not_found'
 
+/**
+ * Only a document classified within a day of arriving is put in the queue as new work. The Arkiv backfill
+ * types documents uploaded long before, and queueing those handed 30 companies 152 to-dos nobody asked for
+ * overnight (prod 2026-09-25, 85 of them one company's upload from eight days earlier). An old document
+ * a person wants booked is booked from Arkiv, not pushed into their queue by a background job.
+ */
+export const QUEUE_NEW_WITHIN_MS = 24 * 60 * 60 * 1000
+
 interface DocumentRow {
   id: string
   user_id: string | null
+  created_at?: string | null
   journal_entry_id: string | null
   extracted_data: Record<string, unknown> | null
 }
@@ -35,7 +44,7 @@ export async function routeClassifiedDocument(
 ): Promise<RouteOutcome> {
   const { data: doc, error: docError } = await supabase
     .from('document_attachments')
-    .select('id, user_id, journal_entry_id, extracted_data')
+    .select('id, user_id, journal_entry_id, extracted_data, created_at')
     .eq('id', input.documentId)
     .eq('company_id', input.companyId)
     .maybeSingle()
@@ -60,6 +69,7 @@ export async function routeClassifiedDocument(
       return 'requeued'
     }
     if (open) return 'already_queued'
+    if (d.created_at && Date.now() - new Date(d.created_at).getTime() > QUEUE_NEW_WITHIN_MS) return 'left'
     const { error } = await supabase.from('invoice_inbox_items').insert({
       company_id: input.companyId,
       user_id: input.userId || d.user_id,
