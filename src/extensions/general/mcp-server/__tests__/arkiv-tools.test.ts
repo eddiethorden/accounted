@@ -64,7 +64,8 @@ describe('Arkiv tools', () => {
 
   it('refuses the brain tools outside the brain rollout and says the shelf tools still work', async () => {
     process.env.ARKIV_BRAIN_COMPANY_IDS = 'someone-else'
-    for (const name of ['gnubok_get_neighbourhood', 'gnubok_get_fact_history', 'gnubok_propose_fact', 'gnubok_resolve_missing', 'gnubok_get_record_links', 'gnubok_ask_document']) {
+    // ask_document is not among them: it answers from the raw page text, so it works wherever the shelf does.
+    for (const name of ['gnubok_get_neighbourhood', 'gnubok_get_fact_history', 'gnubok_propose_fact', 'gnubok_resolve_missing', 'gnubok_get_record_links']) {
       await expect(tool(name).execute({ ref: `company:${CO}`, record_ref: `document:${DOC}`, question: 'x', predicate: 'org_number', subject_kind: 'company', value: 'x', note: 'x', finding_id: DOC }, CO, 'user-1', supabase), name).rejects.toThrow(/not switched on .* gnubok_search_records/)
     }
   })
@@ -83,6 +84,15 @@ describe('Arkiv tools', () => {
     enqueue({ data: null })
     const missing = await caught(tool('gnubok_get_source').execute({ record_ref: `document:${DOC}` }, CO, 'user-1', supabase))
     expect(missing).toMatchObject({ code: 'NOT_FOUND', message_en: 'Document not found' })
+  })
+
+  it('search_records says how many documents are not read yet and how to reach them, so an empty answer is not taken for no document', async () => {
+    process.env.ARKIV_BRAIN_COMPANY_IDS = 'someone-else'
+    enqueue({ data: [] }) // page hits
+    enqueue({ count: 10 }) // unread documents
+    const out = (await tool('gnubok_search_records').execute({ query: 'faktura' }, CO, 'user-1', supabase)) as { count: number; unread: number; hint: string | null }
+    expect(out).toMatchObject({ count: 0, unread: 10 })
+    expect(out.hint).toMatch(/10 documents are not read yet.*gnubok_list_records.*gnubok_read_document/)
   })
 
   it('search_records combines page hits, agreements and facts into record refs', async () => {
