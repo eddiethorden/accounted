@@ -23,3 +23,19 @@ describe('routine', () => {
     expect(routineTime('25:00')).toBe('07:00')
   })
 })
+
+describe('routine hand-over from Skriv själv', () => {
+  it('round-trips a chosen routine through the item page URL', async () => {
+    const { routineQuery, parseRoutineQuery } = await import('../routine')
+    const q = routineQuery({ cadence: 'weekly', day: 'fri', time: '16:30' })
+    expect(q).toBe('rutin=weekly&dag=fri&tid=16%3A30')
+    expect(parseRoutineQuery(new URLSearchParams(q))).toEqual({ cadence: 'weekly', day: 'fri', time: '16:30' })
+  })
+
+  it('ignores a missing or unknown routine and repairs day and time', async () => {
+    const { parseRoutineQuery } = await import('../routine')
+    expect(parseRoutineQuery(new URLSearchParams(''))).toBeNull()
+    expect(parseRoutineQuery(new URLSearchParams('rutin=biweekly'))).toBeNull()
+    expect(parseRoutineQuery(new URLSearchParams('rutin=daily&dag=xyz&tid=99:99'))).toEqual({ cadence: 'daily', day: 'mon', time: '07:00' })
+  })
+})

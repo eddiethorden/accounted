@@ -35,3 +35,23 @@ export function coworkLink(prompt: string): string {
 export function routineTime(value: string, fallback = '07:00'): string {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : fallback
 }
+
+export interface RoutineChoice { cadence: RoutineCadence; day: RoutineDay; time: string }
+const CADENCES: readonly RoutineCadence[] = ['daily', 'weekdays', 'weekly']
+
+/**
+ * A routine chosen while writing an item, handed to the item's page in the
+ * URL (?rutin=weekly&dag=mon&tid=07:00) so its "Gör till rutin" panel opens
+ * filled in. Opening Claude Desktop needs the user's own click, which is why
+ * saving hands over instead of opening the app itself.
+ */
+export function routineQuery(choice: RoutineChoice): string {
+  return new URLSearchParams({ rutin: choice.cadence, dag: choice.day, tid: routineTime(choice.time) }).toString()
+}
+
+export function parseRoutineQuery(params: URLSearchParams): RoutineChoice | null {
+  const cadence = params.get('rutin') as RoutineCadence | null
+  if (!cadence || !CADENCES.includes(cadence)) return null
+  const day = params.get('dag') as RoutineDay | null
+  return { cadence, day: day && ROUTINE_DAYS.includes(day) ? day : 'mon', time: routineTime(params.get('tid') ?? '') }
+}

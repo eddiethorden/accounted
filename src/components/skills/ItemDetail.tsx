@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, ArrowUpRight, Check, ChevronUp, Plus, Repeat } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
@@ -16,9 +16,11 @@ import type { KnowledgeOption } from '@/lib/agent-skills/knowledge-choices'
 import { formatDateLong } from '@/lib/utils'
 import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
 import { AI_CLIENTS, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
-import { copyPromptAndOpen } from './run'
+import { copyPromptAndOpen, openInClaude, type ClaudeTarget } from './run'
+import { ClaudeStart } from './ClaudeStart'
 import { trackInstructions } from './track'
 import { RoutinePanel } from './RoutinePanel'
+import { parseRoutineQuery } from '@/lib/agent-skills/routine'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DeleteOwn, Field, Row, SubView } from './AgentDetail'
@@ -78,7 +80,9 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
   const catalog = useSWR(isRules ? null : ['/api/skills', companyId], ([url]) => readCatalog(url))
   const agents = useSWR(['/api/agents', companyId, 'claude'], ([url, , c]) => readAgents(`${url}?client=${c}`))
-  const [view, setView] = useState<'main' | 'give' | 'routine'>('main')
+  // A routine chosen in Skriv själv arrives as ?rutin=… and opens its panel filled in.
+  const handedRoutine = parseRoutineQuery(new URLSearchParams(useSearchParams().toString()))
+  const [view, setView] = useState<'main' | 'give' | 'routine'>(handedRoutine ? 'routine' : 'main')
   const [connected, setConnected] = useState<AiClient[] | null>(null)
   const [ran, setRan] = useState(false)
   useEffect(() => {
@@ -151,10 +155,11 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   // An AI-saved draft is not loadable until it is added, so it cannot run yet.
   const runnable = (isFlow || item.kind === 'analysis') && !mine?.draft
   const steps = isFlow && body.data ? ownSkillSteps(body.data) : []
-  function runShared() {
-    trackInstructions('instructions_start_clicked', { item: item!.own ? 'own' : 'community', kind: item!.kind, client, surface: 'item' })
+  function runShared(target: ClaudeTarget = 'web') {
+    trackInstructions('instructions_start_clicked', { item: item!.own ? 'own' : 'community', kind: item!.kind, client, surface: 'item', target: client === 'claude' ? target : 'web' })
     // A shared item's text carries what its author wrote, so the prompt is copied rather than typed into the chat.
-    void copyPromptAndOpen(t('skill_prompt', { name: item!.name, slug: item!.key, client }), client, false).then(() => setRan(true))
+    const prompt = t('skill_prompt', { name: item!.name, slug: item!.key, client })
+    void (client === 'claude' ? openInClaude(target, prompt, false) : copyPromptAndOpen(prompt, client, false)).then(() => setRan(true))
   }
   const flowsWith = (atomId: string) => SHOWN_FLOWS.map((id) => ({ id })).filter((s) => agents.data?.agents.find((a) => a.id === s.id)?.knowledge.some((k) => k.id === atomId))
   const holders = item.atomId ? flowsWith(item.atomId) : []
@@ -179,8 +184,8 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
             <small>{t(`kind_one_${item.kind}`)}{item.community ? ` · @${item.community.author}` : ''}</small>
           </div>
           <div className={styles.stageFoot}>
-            {runnable ? (
-              <Button size="lg" className="gap-2 pl-4" onClick={runShared}>
+            {runnable && client === 'claude' ? <ClaudeStart onStart={runShared} /> : runnable ? (
+              <Button size="lg" className="gap-2 pl-4" onClick={() => runShared()}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={ai.logo} alt="" width={16} height={16} className={styles.btnLogo} />
                 {t('run_agent', { client: ai.name })}
@@ -241,7 +246,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
               </>
             )}
             {view === 'routine' && (
-              <RoutinePanel run={t('skill_prompt', { name: item.name, slug: item.key, client: 'claude' })} item={item.own ? 'own' : 'community'} kind={item.kind} onBack={() => setView('main')} />
+              <RoutinePanel run={t('skill_prompt', { name: item.name, slug: item.key, client: 'claude' })} item={item.own ? 'own' : 'community'} kind={item.kind} initial={handedRoutine} onBack={() => setView('main')} />
             )}
             {view === 'give' && item.atomId && (
               <SubView title={t('give_to_flow')} onBack={() => setView('main')}>

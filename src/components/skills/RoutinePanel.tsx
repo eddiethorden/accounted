@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { AI_CLIENTS } from '@/lib/onboarding/ai-clients'
-import { coworkLink, routinePrompt, routineTime, ROUTINE_DAYS, type RoutineCadence, type RoutineDay } from '@/lib/agent-skills/routine'
+import { coworkLink, routinePrompt, routineTime, ROUTINE_DAYS, type RoutineCadence, type RoutineChoice, type RoutineDay } from '@/lib/agent-skills/routine'
 import type { ItemKind } from './hues'
 import { Field, SubView } from './AgentDetail'
 import { trackInstructions } from './track'
@@ -19,11 +19,10 @@ const CLAUDE_DOWNLOAD = 'https://claude.com/download'
  * so a scheduled run is the same job a click starts, told that nobody is
  * there to answer questions while it runs.
  */
-export function RoutinePanel({ run, item, kind, onBack }: { run: string; item: string; kind: ItemKind; onBack: () => void }) {
+export function RoutinePanel({ run, item, kind, onBack, initial }: { run: string; item: string; kind: ItemKind; onBack: () => void; initial?: RoutineChoice | null }) {
   const t = useTranslations('skills_registry')
-  const [cadence, setCadence] = useState<RoutineCadence>('weekly')
-  const [day, setDay] = useState<RoutineDay>('mon')
-  const [time, setTime] = useState('07:00')
+  const [choice, setChoice] = useState<RoutineChoice>(initial ?? { cadence: 'weekly', day: 'mon', time: '07:00' })
+  const { cadence, day, time } = choice
   const at = routineTime(time)
   const when = cadence === 'weekly'
     ? t('routine_when_weekly', { day: t(`routine_days.${day}`), time: at })
@@ -39,27 +38,7 @@ export function RoutinePanel({ run, item, kind, onBack }: { run: string; item: s
   return (
     <SubView title={t('routine_title')} onBack={onBack}>
       <p className={styles.muted}>{t('routine_lede')}</p>
-      <Field label={t('routine_how_often')}>
-        <SegmentedControl<RoutineCadence>
-          aria-label={t('routine_how_often')}
-          className={styles.sourceSwitch}
-          value={cadence}
-          onChange={setCadence}
-          options={(['daily', 'weekdays', 'weekly'] as const).map((c) => ({ value: c, label: t(`routine_${c}`) }))}
-        />
-      </Field>
-      <div className={styles.routineRow}>
-        {cadence === 'weekly' && (
-          <Field label={t('routine_day')}>
-            <select className={`${styles.fieldBox} ${styles.fieldInput}`} value={day} onChange={(e) => setDay(e.target.value as RoutineDay)} aria-label={t('routine_day')}>
-              {ROUTINE_DAYS.map((d) => <option key={d} value={d}>{t(`routine_days.${d}`)}</option>)}
-            </select>
-          </Field>
-        )}
-        <Field label={t('routine_time')}>
-          <input type="time" className={`${styles.fieldBox} ${styles.fieldInput}`} value={time} onChange={(e) => setTime(e.target.value)} aria-label={t('routine_time')} />
-        </Field>
-      </div>
+      <RoutineFields value={choice} onChange={(next) => { if (next) setChoice(next) }} />
       <Field label={t('routine_preview')}>
         <div className={`${styles.instrBox} ${styles.routinePreview}`}>{prompt}</div>
       </Field>
@@ -73,5 +52,42 @@ export function RoutinePanel({ run, item, kind, onBack }: { run: string; item: s
         <a className={styles.catLink} href={CLAUDE_DOWNLOAD} target="_blank" rel="noreferrer">{t('routine_download')}</a>
       </div>
     </SubView>
+  )
+}
+
+/** How often, which day and when: the controls "Gör till rutin" and Skriv själv share. `none` offers "Ingen" first. */
+export function RoutineFields({ value, onChange, none = false }: { value: RoutineChoice | null; onChange: (next: RoutineChoice | null) => void; none?: boolean }) {
+  const t = useTranslations('skills_registry')
+  const current = value ?? { cadence: 'weekly' as const, day: 'mon' as const, time: '07:00' }
+  const options = [
+    ...(none ? [{ value: 'none' as const, label: t('routine_none') }] : []),
+    ...(['daily', 'weekdays', 'weekly'] as const).map((c) => ({ value: c, label: t(`routine_${c}`) })),
+  ]
+  return (
+    <>
+      <Field label={t('routine_how_often')}>
+        <SegmentedControl<RoutineCadence | 'none'>
+          aria-label={t('routine_how_often')}
+          className={styles.sourceSwitch}
+          value={value?.cadence ?? 'none'}
+          onChange={(c) => onChange(c === 'none' ? null : { ...current, cadence: c })}
+          options={options}
+        />
+      </Field>
+      {value && (
+        <div className={styles.routineRow}>
+          {value.cadence === 'weekly' && (
+            <Field label={t('routine_day')}>
+              <select className={`${styles.fieldBox} ${styles.fieldInput}`} value={value.day} onChange={(e) => onChange({ ...value, day: e.target.value as RoutineDay })} aria-label={t('routine_day')}>
+                {ROUTINE_DAYS.map((d) => <option key={d} value={d}>{t(`routine_days.${d}`)}</option>)}
+              </select>
+            </Field>
+          )}
+          <Field label={t('routine_time')}>
+            <input type="time" className={`${styles.fieldBox} ${styles.fieldInput}`} value={value.time} onChange={(e) => onChange({ ...value, time: e.target.value })} aria-label={t('routine_time')} />
+          </Field>
+        </div>
+      )}
+    </>
   )
 }
