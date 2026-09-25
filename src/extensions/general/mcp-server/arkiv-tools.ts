@@ -14,6 +14,7 @@ import { getCompanyGraph } from '@/lib/arkiv/graph/snapshot'
 import { neighbourhoodOf } from '@/lib/arkiv/graph/neighbourhood'
 import { ensureDocumentRead } from '@/lib/documents/read/on-demand'
 import { listRecords, LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, typesFor } from '@/lib/arkiv/list-records'
+import { NOT_STRUCTURED_MIME_FILTER } from '@/lib/documents/read/types'
 
 /**
  * Arkiv phase 5: the six tools an agent reads the record with, and the one
@@ -58,7 +59,19 @@ function assertEnabled(companyId: string): void {
 }
 /** The brain (facts, agreements, findings, the graph) rolls out per company; the shelf tools (search, get_record, get_source) work for everyone. */
 function assertBrain(companyId: string): void {
-  if (!isArkivBrainEnabled(companyId)) throw coded('ARKIV_NOT_ENABLED', 'The company brain is not switched on for this company yet. The archive tools work as usual: gnubok_list_records and gnubok_search_records find documents, gnubok_read_document and gnubok_get_source read their pages.')
+  if (!isArkivBrainEnabled(companyId)) throw coded('ARKIV_NOT_ENABLED', 'The company brain is not switched on for this company yet. The archive tools work as usual: gnubok_list_records and gnubok_search_records find documents, gnubok_read_document and gnubok_get_source read their pages, and gnubok_ask_document answers one question with page and quote.')
+}
+
+async function countUnreadDocuments(supabase: SupabaseClient, companyId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('document_attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .in('admission_state', ['admitted', 'held'])
+    .is('pages_read_at', null)
+    .or(NOT_STRUCTURED_MIME_FILTER)
+  if (error) throw dbError(error)
+  return count ?? 0
 }
 
 interface Deps {
@@ -350,7 +363,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'dokument', 'avtal', 'fakta', 'sök dokument', 'hyresavtal', 'lån', 'registreringsbevis'],
       title: 'Search Records',
       description:
-        'Search the company archive: document text, agreements and facts. Returns record_refs to pass to gnubok_get_record. Use for any question about a contract, registration, decision or what a document says.',
+        'Search the company archive: document text, agreements and facts. Returns record_refs for gnubok_get_record. Unread documents are not searched; hint says how to reach them.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -381,8 +394,10 @@ export function createArkivTools(deps: Deps): McpTool[] {
             },
           },
           count: { type: 'integer' },
+          unread: { type: 'integer' },
+          hint: { type: ['string', 'null'] },
         },
-        required: ['items', 'count'],
+        required: ['items', 'count', 'unread', 'hint'],
       },
       annotations: deps.readOnly,
       async execute(args, companyId, _userId, supabase) {
@@ -392,7 +407,13 @@ export function createArkivTools(deps: Deps): McpTool[] {
         // Agreements and facts are the brain's interpretations: outside it the documents are the archive.
         const kinds = isArkivBrainEnabled(companyId) ? asked : (['document'] as const).slice()
         const items = await searchRecords(supabase, companyId, String(args.query ?? ''), { kinds, limit: Number(args.limit ?? SEARCH_LIMIT_DEFAULT) })
-        return { items, count: items.length }
+        // An empty answer from an archive nobody has read yet is not "no such document" (prod 2026-09-25: a
+        // company with 10 unread invoices searched "faktura" and got nothing, with nothing saying why).
+        const unread = await countUnreadDocuments(supabase, companyId)
+        const hint = unread > 0
+          ? `${unread} document${unread === 1 ? ' is' : 's are'} not read yet and not in this search. Page through gnubok_list_records (read: false) and open one with gnubok_read_document: it is read on the spot.`
+          : null
+        return { items, count: items.length, unread, hint }
       },
     },
     {
@@ -552,7 +573,7 @@ export function createArkivTools(deps: Deps): McpTool[] {
       keywords: ['arkiv', 'fråga dokument', 'vad står det', 'villkor', 'avtal', 'läs'],
       title: 'Ask Document',
       description:
-        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Use it for any clause or detail the record does not carry. Answer and quote come from the file, fenced as untrusted data.',
+        'Ask one document one question and get the answer from its own text, with the page and the exact quote, or an honest not_found. Use it for any clause or detail the record does not carry.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -596,7 +617,9 @@ export function createArkivTools(deps: Deps): McpTool[] {
       },
       annotations: deps.readOnly,
       async execute(args, companyId, _userId, supabase) {
-        assertBrain(companyId)
+        // It answers from the raw page text with a verified quote and reads nothing the brain derived, so it works
+        // wherever the shelf does (2026-09-25: every call from a company outside the brain was refused).
+        assertEnabled(companyId)
         const ref = parseRecordRef(String(args.record_ref ?? ''))
         if (!ref || ref.kind !== 'document') throw invalid('record_ref must be document:<uuid>')
         const question = String(args.question ?? '').trim()
@@ -914,7 +937,9 @@ export function createArkivTools(deps: Deps): McpTool[] {
           if (read.status !== 'read') {
             // Said plainly, so an agent never takes an empty answer for an empty document.
             const { data: stamp } = await supabase.from('document_attachments').select('read_error').eq('id', documentId).maybeSingle()
-            unreadable = (stamp as { read_error: string | null } | null)?.read_error ?? (read.status === 'skipped' ? read.reason : read.status)
+            // Read, with nothing printed on it (a photo of an object, a logo, a QR code): say so, not "already_read".
+            const reason = (stamp as { read_error: string | null } | null)?.read_error ?? (read.status === 'skipped' ? read.reason : read.status)
+            unreadable = reason === 'already_read' ? 'no_text' : reason
           }
           if (read.status === 'read') {
             ;({ data: pages, error: pagesError } = await readPages())

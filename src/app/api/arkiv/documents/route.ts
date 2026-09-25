@@ -31,7 +31,7 @@ export interface ArkivDocumentRow {
   currency: string | null
   /** An agreement's amount recurs: monthly, quarterly, yearly; null for a one-off or a non-agreement. */
   period: string | null
-  linked: { journal_entry_id: string | null; voucher: string | null; agreement_id: string | null; expected: number; held: boolean; unclassified: boolean }
+  linked: { journal_entry_id: string | null; voucher: string | null; agreement_id: string | null; expected: number; held: boolean; unclassified: boolean; reading: boolean }
   href: string
 }
 
@@ -200,7 +200,10 @@ export const GET = withRouteContext('arkiv.documents', async (request, ctx) => {
         agreement_id: agreement?.id ?? null,
         expected: agreement ? (expectedCount.get(agreement.id) ?? 0) : 0,
         held: d.admission_state === 'held',
-        unclassified: d.admission_state === 'admitted' && (d.doc_type == null || d.doc_type === 'other'),
+        // A person is asked only about what the model read and could not name. A document with no type yet is
+        // still being read and typed (prod 2026-09-25: most archives were untyped history, and every row asked).
+        unclassified: d.admission_state === 'admitted' && d.doc_type === 'other',
+        reading: d.admission_state === 'admitted' && d.doc_type == null,
       },
       href: agreement ? `/arkiv/avtal/${agreement.id}` : `/arkiv/dokument/${d.id}`,
     }

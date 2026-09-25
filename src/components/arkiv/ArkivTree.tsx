@@ -87,6 +87,7 @@ export function ArkivTree({ refreshKey = 0 }: { refreshKey?: number }) {
   const linked = (row: ArkivDocumentRow) => {
     if (row.linked.held) return <Badge variant="warning">{t('graph_waiting_held')}</Badge>
     if (row.linked.unclassified) return <Badge variant="warning">{t('linked_say_what')}</Badge>
+    if (row.linked.reading && !row.linked.voucher && !row.linked.journal_entry_id) return <span className="text-muted-foreground">{t('linked_reading')}</span>
     return row.linked.voucher ? t('record_verifikat', { voucher: row.linked.voucher }) : row.linked.journal_entry_id ? t('linked_verifikat') : ''
   }
 

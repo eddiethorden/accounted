@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { reviewSince } from '@/lib/worklist/categories'
 import { documentTitle } from '@/lib/arkiv/documents/title'
 import type { FieldReviewDocument, ReviewDocument } from '@/lib/arkiv/questions'
 import type { Payload } from '@/lib/documents/extract/fields'
@@ -53,6 +54,7 @@ export const GET = withRouteContext('arkiv.review', async (_request, ctx) => {
       .eq('company_id', ctx.companyId)
       .eq('admission_state', 'admitted')
       .in('id', unsureIds)
+      .gte('created_at', reviewSince())
       .order('created_at', { ascending: false })
     if (docsError) return NextResponse.json({ error: getErrorMessage(docsError) }, { status: 500 })
     unclassifiedRows = ((docs ?? []) as Array<Record<string, unknown>>).map((d) => toReview(d, byDoc.get(d.id as string))).filter((r) => r.relevance === 'relevant')

@@ -90,6 +90,7 @@ export function ArkivDocuments({ fixedType, refreshKey = 0, searchable = true }:
   const typeCell = (row: ArkivDocumentRow) => {
     if (row.linked.held) return <Badge variant="warning">{t('graph_waiting_held')}</Badge>
     if (row.linked.unclassified) return <Badge variant="warning">{t('linked_say_what')}</Badge>
+    if (row.linked.reading && !row.linked.voucher && !row.linked.journal_entry_id) return <span className="text-muted-foreground">{t('linked_reading')}</span>
     return typeLabel(row.doc_type)
   }
   // Kopplat till is the verifikat and nothing else.

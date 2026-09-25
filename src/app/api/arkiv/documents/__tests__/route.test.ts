@@ -75,6 +75,20 @@ describe('GET /api/arkiv/documents', () => {
     expect(findCalls('agreements', 'in')).toEqual([])
   })
 
+  it('asks a person only about what the model read and could not name; a document with no type yet is being read', async () => {
+    delete process.env.ARKIV_BRAIN_COMPANY_IDS
+    enqueue({
+      data: [
+        { id: 'doc-new', created_at: '2026-09-15T10:00:00Z', file_name: 'scan.pdf', doc_type: null, admission_state: 'admitted', journal_entry_id: null },
+        { id: 'doc-other', created_at: '2026-09-14T10:00:00Z', file_name: 'okänd.pdf', doc_type: 'other', admission_state: 'admitted', journal_entry_id: null },
+      ],
+    })
+    const { body } = await parseJsonResponse(await call())
+    const rows = (body as { data: Array<{ document_id: string; linked: Record<string, unknown> }> }).data
+    expect(rows.find((r) => r.document_id === 'doc-new')?.linked).toMatchObject({ unclassified: false, reading: true })
+    expect(rows.find((r) => r.document_id === 'doc-other')?.linked).toMatchObject({ unclassified: true, reading: false })
+  })
+
   it('searches page text and file names and answers empty when nothing matches', async () => {
     enqueue({ data: [] }) // search_document_pages
     enqueue({ data: [] }) // file names
