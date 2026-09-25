@@ -73,5 +73,6 @@ export function groupByFolder<T extends { doc_type: string | null }>(rows: reado
 
 /** Open on arrival: the untyped folder always (it asks something), the others when they are small. */
 export function openByDefault(key: FolderKey, count: number): boolean {
-  return key === 'untyped' || count <= OPEN_BY_DEFAULT_MAX
+  // Small folders open; a large untyped one is history still being read, not a pile to sort.
+  return count <= OPEN_BY_DEFAULT_MAX
 }

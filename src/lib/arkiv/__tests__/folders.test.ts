@@ -45,8 +45,9 @@ describe('groupByFolder', () => {
 })
 
 describe('openByDefault', () => {
-  it('opens the untyped folder always and the others only while small', () => {
-    expect(openByDefault('untyped', 200)).toBe(true)
+  it('opens every folder only while small: a large untyped one is history still being read', () => {
+    expect(openByDefault('untyped', 200)).toBe(false)
+    expect(openByDefault('untyped', 3)).toBe(true)
     expect(openByDefault('agreements', 7)).toBe(true)
     expect(openByDefault('receipts', 174)).toBe(false)
   })
