@@ -22,6 +22,20 @@ const classified = (docType: string, admission: 'admitted' | 'held' = 'admitted'
 beforeEach(() => reset())
 
 describe('routeClassifiedDocument', () => {
+  it('never queues a document that arrived more than a day before it was classified: the backfill types old uploads', async () => {
+    enqueue({ data: { ...doc, created_at: new Date(Date.now() - 8 * 86_400_000).toISOString() } })
+    enqueue({ data: [] })
+    expect(await classified('supplier_invoice')).toBe('left')
+    expect(findCall('invoice_inbox_items', 'insert')).toBeUndefined()
+  })
+
+  it('queues one classified within the day it arrived', async () => {
+    enqueue({ data: { ...doc, created_at: new Date(Date.now() - 3_600_000).toISOString() } })
+    enqueue({ data: [] })
+    enqueue({})
+    expect(await classified('supplier_invoice')).toBe('queued')
+  })
+
   it("queues a receipt that arrived any other way, with the Underlag reader's read when it ran", async () => {
     enqueue({ data: doc })
     enqueue({ data: [] })
