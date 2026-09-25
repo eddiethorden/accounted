@@ -176,6 +176,14 @@ describe('classifyDocument', () => {
     expect(system).toContain('- decision.skatteverket:')
   })
 
+  it('tells the model that a bill from an authority is a supplier invoice and a credit note is never other', () => {
+    const system = buildClassifySystem(company)
+    // Prod 2026-09-25: congestion-tax bills were typed as Skatteverket decisions and Cursor credit notes as other.
+    expect(system).toMatch(/trängselskatt.*supplier_invoice|supplier_invoice.*trängselskatt/s)
+    expect(system).toMatch(/credit note is credit_note, never other/)
+    expect(system).toMatch(/decision\.skatteverket: .*nothing to pay/)
+  })
+
   it('tells the model that a bill for an agreement is not the agreement', () => {
     // Prod 2026-09-21: a Bitwarden subscription invoice was typed agreement.subscription and became an agreement with obligations and a deadline.
     const system = buildClassifySystem({ name: 'Arcim Technology AB', orgNumber: '559538-6219' })
