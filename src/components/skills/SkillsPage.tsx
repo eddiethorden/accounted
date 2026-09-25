@@ -16,6 +16,8 @@ import { SkillCreator, type CreatorMode } from './SkillCreator'
 import { Catalog } from './Catalog'
 import { KindsIntro } from './KindsIntro'
 import type { ItemKind } from './hues'
+import { trackInstructions } from './track'
+import { ConnectHero } from './ConnectHero'
 import { fetchConnections, readAgents, readCatalog, readOptions, readUsage, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
@@ -82,6 +84,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
   const [creator, setCreator] = useState<CreatorMode | null>(null)
   const connectAction = (target: AiClient) => aiConnectAction(target, { origin: window.location.origin, appName })
   function connect(target: AiClient) {
+    trackInstructions('instructions_connect_clicked', { client: target, surface: 'page' })
     setCreator(null)
     setPending(target)
     setAddressCopy('idle')
@@ -103,6 +106,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
     }
   }
   function createAgent(kind: ItemKind) {
+    trackInstructions('instructions_create_clicked', { mode: 'ai', kind, connected: isConnected })
     if (!isConnected) setCreator({ kind: 'gate' })
     else openAiConnector(aiPrefilledChatLink(client, t(`create_prompt_${kind}`)))
   }
@@ -127,21 +131,7 @@ function Registry({ companyId, hrefBase }: { companyId: string; hrefBase: string
         aiReady={isConnected}
         canWrite={canWrite}
         onCreate={createAgent}
-        gate={rowsLocked ? <section className={styles.gateBanner}>
-                    {state === 'locked' && (
-                      <div className={styles.gate}>
-                        <h2>{t('sign_title')}</h2>
-                        <div className={styles.gateClients}>
-                          {AI_CLIENTS.map((c, i) => (
-                            <Button key={c.id} size="lg" variant={i === 0 ? 'default' : 'outline'} className="gap-2 pl-3.5" onClick={() => connect(c.id)}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={c.logo} alt="" width={18} height={18} className={styles.clientLogo} />
-                              {i === 0 ? t('connect_client', { client: c.name }) : c.name}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+        gate={state === 'locked' ? <ConnectHero onConnect={connect} /> : rowsLocked ? <section className={styles.gateBanner}>
                     {state === 'waiting' && waitingFor && (
                       <div className={styles.pin}>
                         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
