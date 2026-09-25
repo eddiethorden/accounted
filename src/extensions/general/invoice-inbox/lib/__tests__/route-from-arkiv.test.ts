@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createQueuedMockSupabase } from '@/tests/helpers'
-import { routeClassifiedDocument } from '../route-from-arkiv'
+import { inboxSawABill, routeClassifiedDocument, routeStaleQueueItems } from '../route-from-arkiv'
 
 const mock = createQueuedMockSupabase()
 const { enqueue, reset, findCall, findCalls } = mock
@@ -93,3 +93,43 @@ describe('routeClassifiedDocument', () => {
     expect(await classified('receipt')).toBe('not_found')
   })
 })
+
+describe('inboxSawABill: where the readers disagree, the item stays in Underlag', () => {
+  it('keeps what the inbox read as a receipt or supplier invoice, whatever Arkiv typed it', () => {
+    expect(inboxSawABill({ documentKind: 'supplier_invoice' }, 'customer_invoice')).toBe(true)
+    expect(inboxSawABill({ documentKind: 'receipt' }, 'other')).toBe(true)
+  })
+
+  it('keeps an amount on a government letter (a congestion-tax bill) or on a document Arkiv could only call other (a credit note)', () => {
+    expect(inboxSawABill({ documentKind: 'government_letter', totals: { total: 86 } }, 'decision.skatteverket')).toBe(true)
+    expect(inboxSawABill({ documentKind: 'other', totals: { total: 16.4 } }, 'other')).toBe(true)
+  })
+
+  it('lets go of a letter with nothing to pay, an agreement with an amount in it, and anything the inbox never read', () => {
+    expect(inboxSawABill({ documentKind: 'government_letter', totals: { total: null } }, 'registration.bolagsverket')).toBe(false)
+    expect(inboxSawABill({ documentKind: 'other', totals: { total: 5000 } }, 'minutes.board')).toBe(false)
+    expect(inboxSawABill(null, 'other')).toBe(false)
+  })
+})
+
+describe('routing a bill the inbox saw', () => {
+  it('leaves it in the queue when Arkiv types it as something else', async () => {
+    enqueue({ data: doc })
+    enqueue({ data: [item({ extracted_data: { documentKind: 'government_letter', totals: { total: 86 } } })] })
+    expect(await classified('decision.skatteverket')).toBe('left')
+    expect(findCall('invoice_inbox_items', 'update')).toBeUndefined()
+  })
+
+  it('is left in the queue by the nightly catch-up too', async () => {
+    enqueue({
+      data: [
+        { id: 'bill', document_id: 'd1', extracted_data: { documentKind: 'receipt' }, document_attachments: { doc_type: 'other', admission_state: 'admitted' } },
+        { id: 'deal', document_id: 'd2', extracted_data: { documentKind: 'other' }, document_attachments: { doc_type: 'agreement.loan', admission_state: 'admitted' } },
+      ],
+    })
+    enqueue({})
+    expect(await routeStaleQueueItems(supabase)).toBe(1)
+    expect(findCall('invoice_inbox_items', 'in')).toEqual(['id', ['deal']])
+  })
+})
+
