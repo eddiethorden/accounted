@@ -10395,7 +10395,7 @@
     "cancel": "Cancel",
     "close": "Close",
     "prompt": "{say} Start the agent \"{agent}\" in Accounted: call get_task with kind \"agent:{agent}\" and client \"{client}\", and follow what it returns.",
-    "own_say": "Run my agent {name} in Accounted.",
+    "own_say": "Run my workflow {name} in Accounted.",
     "open_hint": "Open",
     "run_client": "Do it with {client}",
     "copied_open": "Copied. Paste it into {client}.",

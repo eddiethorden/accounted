@@ -10395,7 +10395,7 @@
     "cancel": "Avbryt",
     "close": "Stäng",
     "prompt": "{say} Starta agenten \"{agent}\" i Accounted: anropa get_task med kind \"agent:{agent}\" och client \"{client}\", och följ det du får tillbaka.",
-    "own_say": "Kör min agent {name} i Accounted.",
+    "own_say": "Kör mitt arbetsflöde {name} i Accounted.",
     "open_hint": "Öppna",
     "run_client": "Gör det med {client}",
     "copied_open": "Kopierat. Klistra in i {client}.",
