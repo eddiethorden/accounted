@@ -896,3 +896,4 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 /* Starta i Claude with a choice of where (ClaudeStart.tsx) */
 .splitStart { display: inline-flex; align-items: center; gap: 4px; }
 .routineCreate { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid hsl(var(--border)); }
+.routineSwitch { align-self: center; }
