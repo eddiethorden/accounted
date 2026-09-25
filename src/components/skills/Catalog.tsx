@@ -20,6 +20,7 @@ import { AgentCard } from './AgentCard'
 import { CommunityFoot } from './KindViews'
 import { ConnectionMark, SourceMarks } from './ConnectionMark'
 import { copyPromptAndOpen } from './run'
+import { trackInstructions } from './track'
 import type { Presence } from './hues'
 import { AGENTS, COMMUNITY_OPEN, type AgentConnection } from '@/lib/agent-skills/agents'
 import { itemHue, seedOf, type ItemKind } from './hues'
@@ -116,7 +117,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
   const [showAll, setShowAll] = useState(false)
   const [allCategories, setAllCategories] = useState(false)
   // "Skriv själv" opens the new item's own page, empty, on the kind in view.
-  const write = () => router.push(`${hrefBase}/ny?typ=${KIND_PARAM[kind]}`)
+  const write = () => { trackInstructions('instructions_create_clicked', { mode: 'manual', kind }); router.push(`${hrefBase}/ny?typ=${KIND_PARAM[kind]}`) }
 
   function go(next: { typ?: ItemKind; vy?: 'discover' | 'own'; kategori?: string | null }) {
     const sp = new URLSearchParams(params.toString())
@@ -364,6 +365,7 @@ function Featured({ item, industry, client, aiReady, overview }: { item: Item; i
   const states = overview?.agents.find((a) => a.id === item.key)?.connections ?? []
   function run() {
     const id = item.key as RegistrySkillId
+    trackInstructions('instructions_start_clicked', { item: id, kind: 'workflow', client, surface: 'banner' })
     void copyPromptAndOpen(t('prompt', { say: t(`skills.${id}.say`), agent: id, client }), client, true).then(() => setRan(true))
   }
   return (

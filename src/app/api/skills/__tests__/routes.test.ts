@@ -164,6 +164,18 @@ describe('skills HTTP routes', () => {
     expect((await DELETE(request('DELETE'), params)).status).toBe(200)
     expect(findCalls('company_skills', 'eq')).toEqual(expect.arrayContaining([['id', id], ['company_id', 'company-a'], ['share_status', 'private']]))
   })
+  it('takes the knowledge chosen for the deleted flow with it', async () => {
+    enqueue({ data: { id } })
+    enqueue({ data: null })
+    expect((await DELETE(request('DELETE'), params)).status).toBe(200)
+    expect(findCall('company_agent_knowledge', 'delete')).toBeDefined()
+    expect(findCalls('company_agent_knowledge', 'eq')).toEqual(expect.arrayContaining([['agent_id', `own/${id}`], ['company_id', 'company-a']]))
+  })
+  it('still answers 200 when the knowledge clean-up fails, since the flow is gone', async () => {
+    enqueue({ data: { id } })
+    enqueue({ data: null, error: { message: 'boom' } })
+    expect((await DELETE(request('DELETE'), params)).status).toBe(200)
+  })
   it('blocks viewer writes', async () => {
     vi.mocked(requireWritePermission).mockResolvedValue({ ok: false, response: NextResponse.json({}, { status: 403 }) })
     expect((await POST(request('POST', {}), staticParams)).status).toBe(403)

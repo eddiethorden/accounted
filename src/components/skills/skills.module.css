@@ -758,6 +758,21 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 .featuredArt { display: grid; place-items: center; width: 160px; height: 140px; }
 @media (max-width: 720px) { .featured { grid-template-columns: 1fr; } .featuredArt { display: none; } }
 .gateBanner { display: flex; justify-content: center; padding: 28px; border: 1px solid hsl(var(--border)); border-radius: 18px; background: hsl(var(--secondary) / 0.4); }
+/* ── no AI yet: the page's first job is connecting one (ConnectHero.tsx) ── */
+.connectHero { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 40px; align-items: center; padding: 36px 40px; border: 1px solid hsl(var(--border)); border-radius: 18px; background: hsl(var(--frame)); }
+.connectHeroText { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+.connectHeroText h2 { max-width: 20ch; font-family: var(--font-display); font-size: 32px; line-height: 38px; font-weight: 400; text-wrap: balance; }
+.connectHeroText p { max-width: 56ch; font-size: 15px; line-height: 22px; color: hsl(var(--foreground) / 0.75); }
+.connectHeroText .gateClients { justify-content: flex-start; margin-top: 6px; }
+.connectHeroText small { font-size: 12.5px; color: hsl(var(--muted-foreground)); }
+.connectKicker { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.connectExamples { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border-radius: 14px; background: hsl(var(--background)); box-shadow: 0 0 0 1px hsl(var(--border)); }
+.connectExamples ul { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.connectExamples li { display: flex; align-items: center; gap: 14px; }
+.connectExamples li div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.connectExamples b { font-size: 14px; font-weight: 500; }
+.connectExamples li span { font-size: 13px; line-height: 18px; color: hsl(var(--muted-foreground)); }
+@media (max-width: 860px) { .connectHero { grid-template-columns: 1fr; gap: 24px; padding: 24px 20px; } .connectHeroText h2 { font-size: 26px; line-height: 32px; } }
 .categoryGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
 .categoryCard { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 14px; width: 100%; padding: 14px 18px 14px 14px; border: 1px solid hsl(var(--border)); border-radius: 14px; background: hsl(var(--background)); font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color 150ms var(--ease-out); }
 .categoryCard:hover { border-color: hsl(var(--foreground) / 0.25); }
@@ -873,3 +888,7 @@ a.apptile:hover { background: hsl(var(--secondary) / 0.6); }
 :is(.acard, .stage, .featured, .kindsIntro):hover .anaLine circle { animation: ana-dot 1100ms var(--ease-out) both; }
 @media (prefers-reduced-motion: reduce) { .anaTilt { transition: none; } .anaBar, .anaLine path, .anaLine circle { animation: none !important; } .anaLine path { stroke-dashoffset: 0; } .anaLine circle { opacity: 1; } }
 .featured { overflow: hidden; }
+
+/* Gör till rutin (RoutinePanel.tsx): day and time side by side, the request shown as sent */
+.routineRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.routinePreview { max-height: none; padding: 12px 14px; font-size: 13px; line-height: 19px; color: hsl(var(--foreground) / 0.8); white-space: pre-wrap; }

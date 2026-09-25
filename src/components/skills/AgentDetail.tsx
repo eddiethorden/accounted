@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
-import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronLeft, ChevronRight, Plus, Repeat, Search, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { useBranding } from '@/lib/branding/brand-context'
@@ -27,11 +27,13 @@ import { ConnectionMark } from './ConnectionMark'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { useKnowledgeDesc, useKnowledgeName } from './knowledge-labels'
 import { copyPromptAndOpen } from './run'
+import { trackInstructions } from './track'
+import { RoutinePanel } from './RoutinePanel'
 import { agentIdFromSegment, agentStatus, fetchConnections, readAgents, readCatalog, readOptions, readUsage, readWorklist, rulesSegment, simulatedClient, type SkillSummary } from './data'
 import styles from './skills.module.css'
 
 
-type View = 'main' | 'knowledge' | 'company' | 'advanced'
+type View = 'main' | 'knowledge' | 'company' | 'advanced' | 'routine'
 type Own = SkillSummary & { installations: [{ installation_id: string }] }
 
 async function readBody(url: string): Promise<string> {
@@ -158,13 +160,15 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
 
   function run() {
     if (connected !== null && connected.length === 0) {
+      trackInstructions('instructions_connect_clicked', { client: 'claude', surface: 'flow' })
       openAiConnector(aiConnectAction('claude', { origin: window.location.origin, appName }).open)
       return
     }
-    const say = curated ? t(`skills.${curated}.say`) : t('own_say', { name })
+    trackInstructions('instructions_start_clicked', { item: curated ?? 'own', kind: 'workflow', client, surface: 'flow' })
     // Curated agents open with the prompt typed in; an own agent's prompt carries the name the user wrote, so it is copied.
     void copyPromptAndOpen(t('prompt', { say, agent: agentId, client }), client, !!curated).then((ok) => setRunState(ok ? 'copied' : 'failed'))
   }
+  const say = curated ? t(`skills.${curated}.say`) : t('own_say', { name })
   const disconnected = connected !== null && connected.length === 0
 
   return (
@@ -189,6 +193,10 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
                 <ArrowUpRight className="h-4 w-4" aria-hidden />
               </Button>
             )}
+            {/* A routine is scheduled in Claude Desktop, so only for Claude, and never for a draft. */}
+            {!own?.draft && !disconnected && client === 'claude' && (
+              <Button size="lg" variant="outline" className="gap-2" onClick={() => setView('routine')}><Repeat className="h-4 w-4" aria-hidden />{t('routine_open')}</Button>
+            )}
             {runState !== 'idle' && <span className={styles.stageStatus} role="status">{runState === 'copied' ? t(curated ? 'prefilled_open' : 'copied_open', { client: clientName }) : t('copy_failed')}</span>}
             {/* only a status worth reading: work waiting, a missing connection, no AI yet */}
             {status && status.presence !== 'ready' && <span className={styles.stageStatus}><span className={styles.chipDot} data-presence={status.presence} aria-hidden />{status.text}</span>}
@@ -210,7 +218,7 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
               </Field>
 
               {own?.draft && (
-                <div><Button disabled={!canWrite} onClick={() => void patchOwn({ action: 'add' })}><Plus className="h-4 w-4" aria-hidden />{t('add_draft_workflow')}</Button></div>
+                <div><Button disabled={!canWrite} onClick={() => { trackInstructions('instructions_draft_added', { kind: 'workflow' }); void patchOwn({ action: 'add' }) }}><Plus className="h-4 w-4" aria-hidden />{t('add_draft_workflow')}</Button></div>
               )}
 
               <div className={styles.rows}>
@@ -250,6 +258,9 @@ function Detail({ companyId, agentId, backHref }: { companyId: string; agentId: 
               </div>
               <p className={styles.muted}>{t('company_given')}</p>
             </SubView>
+          )}
+          {view === 'routine' && (
+            <RoutinePanel run={t('prompt', { say, agent: agentId, client: 'claude' })} item={curated ?? 'own'} kind="workflow" onBack={() => setView('main')} />
           )}
           {view === 'advanced' && (
             <SubView title={t('section_advanced')} onBack={() => setView('main')}>

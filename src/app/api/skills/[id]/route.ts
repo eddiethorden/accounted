@@ -6,8 +6,10 @@ import { loadCompanySkillRows } from '@/lib/agent-skills/company-skills'
 import { UpdateCompanySkillSchema } from '@/lib/agent-skills/validation'
 import { COMMUNITY_OPEN } from '@/lib/agent-skills/agents'
 import { ensureInitialized } from '@/lib/init'
+import { createLogger } from '@/lib/logger'
 
 ensureInitialized()
+const log = createLogger('api/skills')
 type Params = { params: Promise<{ id: string }> }
 const failure = (status: number, code: string, message: string, message_en: string) => NextResponse.json({ error: { code, message, message_en } }, { status })
 
@@ -53,5 +55,10 @@ export const DELETE = withRouteContext<Params>('skills.delete', async (_request,
   const { data, error } = await scoped.select('id').maybeSingle()
   if (error) throw error
   if (!data) return failure(403, 'FORBIDDEN', 'Behörighet saknas.', 'Permission denied.')
+  // The knowledge chosen for this flow goes with it. The instruction is gone
+  // whatever happens here, so a failed clean-up is logged, not surfaced.
+  const choices = supabase.from('company_agent_knowledge').delete().eq('agent_id', `own/${id}`)
+  const { error: choicesError } = await (row.team_id ? choices : choices.eq('company_id', companyId))
+  if (choicesError) log.warn('Knowledge choices of a deleted own flow were left behind', { skillId: id, error: choicesError.message })
   return NextResponse.json({ data })
 }, { requireWrite: true })

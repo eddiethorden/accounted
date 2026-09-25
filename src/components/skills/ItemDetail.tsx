@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowUpRight, Check, ChevronUp, Plus } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, ChevronUp, Plus, Repeat } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useCanWrite } from '@/lib/hooks/use-can-write'
 import { AGENTS } from '@/lib/agent-skills/agents'
@@ -17,6 +17,8 @@ import { formatDateLong } from '@/lib/utils'
 import { ownSkillSteps } from '@/lib/agent-skills/own-skill-body'
 import { AI_CLIENTS, pickConnectedAiClient, type AiClient } from '@/lib/onboarding/ai-clients'
 import { copyPromptAndOpen } from './run'
+import { trackInstructions } from './track'
+import { RoutinePanel } from './RoutinePanel'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { DeleteOwn, Field, Row, SubView } from './AgentDetail'
@@ -76,7 +78,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const options = useSWR(['/api/agents/knowledge', companyId], ([url]) => readOptions(url))
   const catalog = useSWR(isRules ? null : ['/api/skills', companyId], ([url]) => readCatalog(url))
   const agents = useSWR(['/api/agents', companyId, 'claude'], ([url, , c]) => readAgents(`${url}?client=${c}`))
-  const [view, setView] = useState<'main' | 'give'>('main')
+  const [view, setView] = useState<'main' | 'give' | 'routine'>('main')
   const [connected, setConnected] = useState<AiClient[] | null>(null)
   const [ran, setRan] = useState(false)
   useEffect(() => {
@@ -110,6 +112,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   async function addMine(): Promise<void> {
     const installation = mine?.installations[0]
     if (!installation) return
+    trackInstructions('instructions_draft_added', { kind: mine?.itemKind ?? 'rules' })
     const response = await fetch(`/api/skills/${installation.installation_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add' }) })
     if (response.ok) await catalog.mutate()
   }
@@ -149,6 +152,7 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
   const runnable = (isFlow || item.kind === 'analysis') && !mine?.draft
   const steps = isFlow && body.data ? ownSkillSteps(body.data) : []
   function runShared() {
+    trackInstructions('instructions_start_clicked', { item: item!.own ? 'own' : 'community', kind: item!.kind, client, surface: 'item' })
     // A shared item's text carries what its author wrote, so the prompt is copied rather than typed into the chat.
     void copyPromptAndOpen(t('skill_prompt', { name: item!.name, slug: item!.key, client }), client, false).then(() => setRan(true))
   }
@@ -185,6 +189,10 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
             ) : item.atomId
               ? <Button size="lg" className="gap-2" disabled={!canWrite} onClick={() => setView('give')}><Plus className="h-4 w-4" aria-hidden />{t('give_to_flow')}</Button>
               : <span />}
+            {/* A routine is scheduled in Claude Desktop, so only for Claude. */}
+            {runnable && client === 'claude' && (
+              <Button size="lg" variant="outline" className="gap-2" onClick={() => setView('routine')}><Repeat className="h-4 w-4" aria-hidden />{t('routine_open')}</Button>
+            )}
             {ran && <span className={styles.stageStatus} role="status">{t('copied_open', { client: ai.name })}</span>}
             {item.community && <Vote meta={item.community} slug={item.key} />}
           </div>
@@ -231,6 +239,9 @@ function Detail({ companyId, segment, backHref }: { companyId: string; segment: 
                   <div className={styles.alist}><DeleteOwn kind={item.kind} canWrite={canWrite} onDelete={deleteMine} /></div>
                 )}
               </>
+            )}
+            {view === 'routine' && (
+              <RoutinePanel run={t('skill_prompt', { name: item.name, slug: item.key, client: 'claude' })} item={item.own ? 'own' : 'community'} kind={item.kind} onBack={() => setView('main')} />
             )}
             {view === 'give' && item.atomId && (
               <SubView title={t('give_to_flow')} onBack={() => setView('main')}>
