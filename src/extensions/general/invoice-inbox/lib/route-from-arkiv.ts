@@ -10,6 +10,23 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  */
 export const VOUCHER_TYPES = new Set(['receipt', 'supplier_invoice', 'credit_note'])
 
+/**
+ * A queue item stays in Underlag, whatever Arkiv typed its document, when the inbox reader saw a bill in it:
+ * a receipt or supplier invoice, or an amount on a government letter or on a document Arkiv could only call
+ * "other". Where the two readers disagree, a person decides, and a person only sees Underlag. Prod 2026-09-25:
+ * congestion-tax bills typed as Skatteverket decisions, credit notes typed "other" and supplier invoices typed
+ * as customer invoices left the queue for a section their companies could not open.
+ */
+export function inboxSawABill(extracted: Record<string, unknown> | null | undefined, arkivType: string): boolean {
+  if (!extracted) return false
+  const kind = typeof extracted.documentKind === 'string' ? extracted.documentKind : null
+  if (kind === 'receipt' || kind === 'supplier_invoice') return true
+  const totals = extracted.totals as { total?: unknown } | null | undefined
+  const total = typeof totals?.total === 'number' ? totals.total : Number(totals?.total ?? 0)
+  if (!(Number.isFinite(total) && total > 0)) return false
+  return kind === 'government_letter' || arkivType === 'other'
+}
+
 export type RouteOutcome = 'queued' | 'requeued' | 'already_queued' | 'booked' | 'routed_to_arkiv' | 'left' | 'not_found'
 
 /**
@@ -30,6 +47,7 @@ interface DocumentRow {
 
 interface ItemRow {
   id: string
+  extracted_data?: Record<string, unknown> | null
   routed_to_arkiv_at: string | null
   created_supplier_invoice_id: string | null
   created_journal_entry_id: string | null
@@ -53,7 +71,7 @@ export async function routeClassifiedDocument(
   const d = doc as DocumentRow
   const { data: rows, error: itemsError } = await supabase
     .from('invoice_inbox_items')
-    .select('id, routed_to_arkiv_at, created_supplier_invoice_id, created_journal_entry_id, matched_transaction_id')
+    .select('id, extracted_data, routed_to_arkiv_at, created_supplier_invoice_id, created_journal_entry_id, matched_transaction_id')
     .eq('company_id', input.companyId)
     .eq('document_id', input.documentId)
   if (itemsError) throw new Error(`inbox items fetch failed: ${itemsError.message}`)
@@ -84,7 +102,7 @@ export async function routeClassifiedDocument(
     return 'queued'
   }
 
-  const waiting = items.filter((i) => !consumed(i) && !i.routed_to_arkiv_at)
+  const waiting = items.filter((i) => !consumed(i) && !i.routed_to_arkiv_at && !inboxSawABill(i.extracted_data ?? d.extracted_data, input.docType))
   if (waiting.length === 0) return 'left'
   const { error } = await supabase
     .from('invoice_inbox_items')
@@ -105,7 +123,7 @@ export async function routeClassifiedDocument(
 export async function routeStaleQueueItems(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from('invoice_inbox_items')
-    .select('id, document_id, document_attachments!inner(doc_type, admission_state)')
+    .select('id, document_id, extracted_data, document_attachments!inner(doc_type, admission_state)')
     .is('routed_to_arkiv_at', null)
     .is('created_supplier_invoice_id', null)
     .is('created_journal_entry_id', null)
@@ -115,12 +133,14 @@ export async function routeStaleQueueItems(supabase: SupabaseClient): Promise<nu
   if (error) throw new Error(`stale queue select failed: ${error.message}`)
   const rows = (data ?? []) as unknown as Array<{
     id: string
+    extracted_data?: Record<string, unknown> | null
     document_attachments: { doc_type: string | null; admission_state: string } | Array<{ doc_type: string | null; admission_state: string }>
   }>
   const byType = new Map<string, string[]>()
   for (const r of rows) {
     const doc = Array.isArray(r.document_attachments) ? r.document_attachments[0] : r.document_attachments
     if (!doc?.doc_type || doc.admission_state !== 'admitted' || VOUCHER_TYPES.has(doc.doc_type)) continue
+    if (inboxSawABill(r.extracted_data, doc.doc_type)) continue
     byType.set(doc.doc_type, [...(byType.get(doc.doc_type) ?? []), r.id])
   }
   let routed = 0
