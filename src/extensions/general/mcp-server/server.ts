@@ -189,6 +189,7 @@ import { findSkill, loadAllSkills, toSummary, SKILL_MIME_TYPE, SKILL_URI_PREFIX,
 import { loadSkillProvenance, skillBodyHash, oauthActorLabel } from '@/lib/agent-skills/provenance'
 import { loadCompanySkillRows, ownSkill } from '@/lib/agent-skills/company-skills'
 import { buildOwnSkill, buildOwnText, OWN_SKILL_COPY } from '@/lib/agent-skills/own-skill-body'
+import { loadDocumentClaims, sharedDocumentWarning } from '@/lib/receipt-hunt/document-claims'
 import { SkillBodySchema } from '@/lib/agent-skills/validation'
 import { recordCommunityFeedback } from '@/lib/agent-skills/community'
 import type { SkillTier } from './skills'
@@ -15091,9 +15092,13 @@ export const tools: McpTool[] = [
       if (txError) throw dbError(txError)
       const matchedDocIds = new Set((txMatches || []).map((t) => t.document_id))
 
-      const unmatched = inboxRows
+      const unmatchedRows = inboxRows
         .filter((r) => r.document_id && !matchedDocIds.has(r.document_id))
         .slice(0, limit)
+      // A link waiting for approval already holds some of these: say so, so
+      // an agent does not propose the same underlag for a second purchase.
+      const claims = await loadDocumentClaims(supabase, companyId, unmatchedRows.map((r) => r.document_id as string))
+      const unmatched = unmatchedRows
         .map((item) => {
           const extracted = item.extracted_data as Record<string, unknown> | null
           let vendorName: string | null = null
@@ -15157,6 +15162,10 @@ export const tools: McpTool[] = [
             invoice_date: invoiceDate,
             payment_reference: paymentReference,
             pages,
+            pending_link: (() => {
+              const claim = claims.get(item.document_id as string)?.find((c) => c.operation_id)
+              return claim ? { operation_id: claim.operation_id, transaction_id: claim.transaction_id, journal_entry_id: claim.journal_entry_id } : null
+            })(),
           }
         })
 
@@ -15332,6 +15341,10 @@ export const tools: McpTool[] = [
         docInvoiceDate = (invoice?.invoiceDate as string) || null
       }
 
+      const sharedNote = sharedDocumentWarning(
+        (await loadDocumentClaims(supabase, companyId, [documentId])).get(documentId) ?? [],
+        { transaction_id: transactionId },
+      )
       return stagePendingOperation(
         supabase, companyId, userId, 'attach_document_to_transaction',
         `Koppla bilaga: ${doc.file_name} → ${tx.merchant_name || tx.description || transactionId}`,
@@ -15367,6 +15380,7 @@ export const tools: McpTool[] = [
           // becomes part of the verifikation underlag once categorize
           // propagates it (BFL 5 kap 6 § rättelse-räkenskapsinformation).
           dateForPeriodCheck: typeof tx.date === 'string' ? tx.date : undefined,
+          ...(sharedNote ? { complianceNote: sharedNote } : {}),
         }
       )
     },
@@ -15430,6 +15444,10 @@ export const tools: McpTool[] = [
 
       const currentlyLinkedToSameJe = doc.journal_entry_id === journalEntryId
       const currentlyLinkedToOther = !!doc.journal_entry_id && !currentlyLinkedToSameJe
+      const sharedNote = sharedDocumentWarning(
+        (await loadDocumentClaims(supabase, companyId, [documentId])).get(documentId) ?? [],
+        { journal_entry_id: journalEntryId },
+      )
 
       return stagePendingOperation(
         supabase, companyId, userId, 'link_document_to_voucher',
@@ -15453,6 +15471,7 @@ export const tools: McpTool[] = [
           idempotencyKey: typeof args.idempotency_key === 'string' ? args.idempotency_key : undefined,
           dryRun: args.dry_run === true,
           dateForPeriodCheck: je.entry_date,
+          ...(sharedNote ? { complianceNote: sharedNote } : {}),
         }
       )
     },
