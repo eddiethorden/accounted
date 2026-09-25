@@ -193,7 +193,7 @@ export function Catalog({ hrefBase, catalog, options, overview, usage, own, comp
           options={[{ value: 'own', label: t('view_own') }, { value: 'discover', label: t('view_discover') }]}
         />
         <div className={styles.catTools}>
-          <ToolbarSearch aria-label={t('search_label')} placeholder={t(`search_${kind}`)} value={q} onChange={(e) => setQ(e.target.value)} />
+          <ToolbarSearch containerClassName={styles.catSearch} aria-label={t('search_label')} placeholder={t(`search_${kind}`)} value={q} onChange={(e) => setQ(e.target.value)} />
           {view === 'discover' && categories.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
